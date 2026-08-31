@@ -340,6 +340,24 @@
     }
   }
 
+  // Mouse back (button 3) / forward (button 4) navigate the screen stack like a
+  // browser: back == Escape for the current mode, forward == Tab (go deeper).
+  function onWindowMouse(e: MouseEvent) {
+    if (e.button !== 3 && e.button !== 4) return;
+    e.preventDefault();
+    const back = e.button === 3;
+    if (mode === "settings") {
+      if (back) backToList();
+    } else if (mode === "action-menu") {
+      if (back) menuBack();
+      else if (menuItems[actionSel]?.kind === "submenu")
+        activateMenuItem(actionSel);
+    } else {
+      if (back) hideOverlay();
+      else if (results[selected]) openActions(results[selected]);
+    }
+  }
+
   onMount(() => {
     const unlisteners: Array<Promise<() => void>> = [];
     unlisteners.push(
@@ -363,7 +381,13 @@
   });
 </script>
 
-<svelte:window onkeydown={onWindowKeydown} />
+<svelte:window
+  onkeydown={onWindowKeydown}
+  onmousedown={onWindowMouse}
+  onmouseup={(e) => {
+    if (e.button === 3 || e.button === 4) e.preventDefault();
+  }}
+/>
 
 <main
   class="relative mx-auto flex h-[480px] w-[720px] flex-col overflow-hidden rounded

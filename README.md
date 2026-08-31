@@ -146,6 +146,9 @@ the release workflow (see [`docs/releasing.md`](docs/releasing.md)).
 | `Tab`   | drill into the selected sub-project                  |
 | `Esc`   | step back one level (sub-project → menu → repo list) |
 
+The mouse **back / forward** buttons work throughout: back == `Esc` for the
+current screen, forward == `Tab` (open actions / drill into a sub-project).
+
 ## Releasing
 
 Manual GitHub Actions workflow computes a CalVer version, builds, and publishes a
