@@ -8,6 +8,8 @@ mod inspect;
 mod launch;
 mod scan;
 
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager, WebviewWindow, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 
@@ -15,19 +17,23 @@ use commands::AppState;
 
 const OVERLAY_LABEL: &str = "overlay";
 
-/// Show the overlay centered and focused, or hide it if it is already visible.
+/// Bring the overlay up: centered, focused, on top. `set_always_on_top` may have
+/// been dropped by "open config.yaml", so re-assert it here.
+fn show_overlay(window: &WebviewWindow) {
+    let _ = window.center();
+    let _ = window.set_always_on_top(true);
+    let _ = window.show();
+    let _ = window.set_focus();
+    let _ = window.emit("overlay:shown", ());
+}
+
+/// Show the overlay, or hide it if it is already visible.
 fn toggle_overlay(window: &WebviewWindow) {
     match window.is_visible() {
         Ok(true) => {
             let _ = window.hide();
         }
-        _ => {
-            let _ = window.center();
-            let _ = window.set_always_on_top(true); // may have been dropped by "open config.yaml"
-            let _ = window.show();
-            let _ = window.set_focus();
-            let _ = window.emit("overlay:shown", ());
-        }
+        _ => show_overlay(window),
     }
 }
 
@@ -118,6 +124,61 @@ pub fn run() {
             if let Err(e) = app.global_shortcut().register(hotkey.as_str()) {
                 eprintln!("failed to register hotkey `{hotkey}`: {e}");
             }
+
+            // System-tray entry point — the window is otherwise invisible with
+            // no taskbar item, so the tray is the only way to reach settings or
+            // quit the app.
+            let show_i =
+                MenuItem::with_id(app, "tray-show", "Show dev-prompt", true, None::<&str>)?;
+            let settings_i =
+                MenuItem::with_id(app, "tray-settings", "Settings…", true, None::<&str>)?;
+            let quit_i =
+                MenuItem::with_id(app, "tray-quit", "Quit dev-prompt", true, None::<&str>)?;
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &show_i,
+                    &settings_i,
+                    &PredefinedMenuItem::separator(app)?,
+                    &quit_i,
+                ],
+            )?;
+
+            TrayIconBuilder::with_id("main")
+                .icon(app.default_window_icon().expect("bundled window icon").clone())
+                .tooltip("dev-prompt")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "tray-show" => {
+                        if let Some(w) = app.get_webview_window(OVERLAY_LABEL) {
+                            show_overlay(&w);
+                        }
+                    }
+                    "tray-settings" => {
+                        if let Some(w) = app.get_webview_window(OVERLAY_LABEL) {
+                            show_overlay(&w);
+                            let _ = w.emit("overlay:goto-settings", ());
+                        }
+                    }
+                    "tray-quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        if let Some(w) =
+                            tray.app_handle().get_webview_window(OVERLAY_LABEL)
+                        {
+                            toggle_overlay(&w);
+                        }
+                    }
+                })
+                .build(app)?;
 
             Ok(())
         })

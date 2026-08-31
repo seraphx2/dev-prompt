@@ -67,3 +67,8 @@ export function onOverlayShown(cb: () => void): Promise<UnlistenFn> {
 export function onReposUpdated(cb: () => void): Promise<UnlistenFn> {
   return listen("repos:updated", () => cb());
 }
+
+/** Fired by the backend when the tray "Settings…" item is chosen. */
+export function onGotoSettings(cb: () => void): Promise<UnlistenFn> {
+  return listen("overlay:goto-settings", () => cb());
+}

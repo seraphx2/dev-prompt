@@ -9,6 +9,7 @@
     copyPath,
     hideOverlay,
     listRepos,
+    onGotoSettings,
     onOverlayShown,
     onReposUpdated,
     rescanRepos,
@@ -269,6 +270,7 @@
       }),
     );
     unlisteners.push(onReposUpdated(() => void refresh()));
+    unlisteners.push(onGotoSettings(() => (mode = "settings")));
 
     search?.focus();
     void loadInitial();
