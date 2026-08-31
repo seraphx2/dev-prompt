@@ -8,6 +8,12 @@
     saveConfig,
   } from "../ipc";
   import type { ConfigSummary } from "../types";
+  import {
+    checkForUpdate,
+    currentVersion,
+    installUpdate,
+    type UpdateInfo,
+  } from "../updater";
 
   let { onback, onsaved }: { onback: () => void; onsaved: () => void } = $props();
 
@@ -48,7 +54,47 @@
     applyConfig(await getConfig());
     loaded = true;
     void loadSummary();
+    void initUpdates();
   });
+
+  // --- software update ---
+  let appVersion = $state("");
+  let update = $state<UpdateInfo | null>(null);
+  let updateState = $state<"idle" | "checking" | "installing">("idle");
+  let updateNote = $state("");
+
+  async function initUpdates() {
+    try {
+      appVersion = await currentVersion();
+    } catch {
+      appVersion = "";
+    }
+    void runUpdateCheck(true);
+  }
+
+  async function runUpdateCheck(silent = false) {
+    updateState = "checking";
+    if (!silent) updateNote = "";
+    try {
+      update = await checkForUpdate();
+      if (!silent) updateNote = update ? "" : "You're on the latest version.";
+    } catch (e) {
+      if (!silent) updateNote = `${e}`;
+    } finally {
+      updateState = "idle";
+    }
+  }
+
+  async function applyUpdate() {
+    updateState = "installing";
+    updateNote = "";
+    try {
+      await installUpdate(); // relaunches on success
+    } catch (e) {
+      updateNote = `${e}`;
+      updateState = "idle";
+    }
+  }
 
   // --- hotkey recorder ---
   let capturing = $state(false);
@@ -338,6 +384,49 @@
           title={summary.configPath}
         >
           {summary.configPath}
+        </div>
+      {/if}
+    </div>
+
+    <div class="space-y-2 border-t border-hair pt-4">
+      <span class="text-orange-400"
+        >Software update
+        {#if appVersion}<span class="font-mono text-white/25">— v{appVersion}</span
+          >{/if}</span
+      >
+      {#if update}
+        <div class="rounded border border-sky-400/30 bg-sky-500/[0.06] px-3 py-2">
+          <div class="text-[12px] text-white/80">
+            Version <span class="font-mono text-sky-300">{update.version}</span> is
+            available.
+          </div>
+          {#if update.notes}
+            <div class="mt-1 whitespace-pre-line text-[11px] text-white/45">
+              {update.notes}
+            </div>
+          {/if}
+          <button
+            type="button"
+            onclick={applyUpdate}
+            disabled={updateState !== "idle"}
+            class="mt-2 rounded bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+          >
+            {updateState === "installing" ? "Installing…" : "Install & restart"}
+          </button>
+        </div>
+      {:else}
+        <div class="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onclick={() => runUpdateCheck(false)}
+            disabled={updateState !== "idle"}
+            class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
+          >
+            {updateState === "checking" ? "Checking…" : "Check for updates"}
+          </button>
+          {#if updateNote}
+            <span class="text-[11px] text-white/40">{updateNote}</span>
+          {/if}
         </div>
       {/if}
     </div>

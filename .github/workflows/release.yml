@@ -1,0 +1,91 @@
+name: Release
+
+# Manual trigger — go to Actions ▸ Release ▸ "Run workflow".
+# The job computes a CalVer version from today's date + existing tags, builds
+# the Windows NSIS installer and updater artifacts, and publishes a GitHub
+# Release with everything attached. Defaults to a live release; flip the inputs
+# for a run you want to review first or keep off the auto-updater.
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "Create as a draft (review, then publish by hand)"
+        type: boolean
+        default: false
+      prerelease:
+        description: "Mark as pre-release (auto-updater ignores it)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Guard — full releases only from main
+        shell: bash
+        run: |
+          if [ "${{ github.ref_name }}" != "main" ] \
+            && [ "${{ inputs.draft }}" != "true" ] \
+            && [ "${{ inputs.prerelease }}" != "true" ]; then
+            echo "::error::Refusing a full release from '${{ github.ref_name }}'. Re-run with 'draft' or 'prerelease' checked, or run from main."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need all tags so the CalVer build segment is correct
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compute version
+        id: version
+        shell: bash
+        run: echo "value=$(node scripts/version.mjs)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish release
+        id: tauri
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v${{ steps.version.outputs.value }}
+          releaseName: dev-prompt v${{ steps.version.outputs.value }}
+          releaseDraft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          includeUpdaterJson: true
+
+      - name: Package portable zip
+        shell: bash
+        run: |
+          cd src-tauri/target/release
+          7z a "dev-prompt_${{ steps.version.outputs.value }}_x64-portable.zip" dev-prompt.exe
+
+      - name: Attach portable zip to release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "v${{ steps.version.outputs.value }}" \
+            "src-tauri/target/release/dev-prompt_${{ steps.version.outputs.value }}_x64-portable.zip" \
+            --clobber
