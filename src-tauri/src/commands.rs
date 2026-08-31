@@ -117,6 +117,7 @@ fn repo_for_path(state: &AppState, path: &str) -> Repo {
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.to_string()),
             path: path.to_string(),
+            vcs: None,
             sentinels: Vec::new(),
             last_seen: 0,
         })
@@ -240,6 +241,21 @@ pub fn save_config(
 #[tauri::command]
 pub fn set_dismiss_on_blur(state: State<'_, AppState>, enabled: bool) {
     *state.dismiss_on_blur.lock().unwrap() = enabled;
+}
+
+/// Whether the app is registered to start at login (OS is the source of truth).
+#[tauri::command]
+pub fn get_autostart(app: AppHandle) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+pub fn set_autostart(app: AppHandle, enabled: bool) -> AppResult<()> {
+    use tauri_plugin_autostart::ManagerExt;
+    let al = app.autolaunch();
+    let r = if enabled { al.enable() } else { al.disable() };
+    r.map_err(|e| AppError::msg(format!("autostart: {e}")))
 }
 
 /// Reflect update availability in the tray tooltip. `version` = `None` resets it.

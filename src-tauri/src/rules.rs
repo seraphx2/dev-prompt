@@ -800,6 +800,7 @@ mod tests {
         Repo {
             name: "demo".into(),
             path: if cfg!(windows) { "C:\\demo".into() } else { "/demo".into() },
+            vcs: None,
             sentinels: vec![],
             last_seen: 0,
         }

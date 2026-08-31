@@ -29,7 +29,7 @@ cache_ttl_secs: 900
 # VCS dirs + workspace files with no distinct actions. Build manifests
 # (pom.xml, Gemfile, …) ride in via their rule's `match` instead.
 markers:
-  - .git
+  - { name: .git, kind: vcs, label: Git }
   - { name: .hg, kind: vcs, label: Mercurial }
   - { name: .jj, kind: vcs, label: Jujutsu }
   - { name: .svn, kind: vcs, label: Subversion }

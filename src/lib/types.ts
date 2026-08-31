@@ -3,6 +3,8 @@
 export interface Repo {
   name: string;
   path: string;
+  /** VCS label ("Git", "Mercurial", …) when a `kind: vcs` marker matched. */
+  vcs?: string | null;
   sentinels: string[];
   /** Unix seconds when this repo was last observed on disk. */
   lastSeen: number;

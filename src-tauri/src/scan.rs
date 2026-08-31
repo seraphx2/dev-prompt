@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -13,7 +13,10 @@ use crate::config::{self, Config};
 pub struct Repo {
     pub name: String,
     pub path: String,
-    /// Discovery markers found in this directory (e.g. `.git`, `sln`, `package.json`).
+    /// VCS label ("Git", "Mercurial", …) when a `kind: vcs` marker matched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vcs: Option<String>,
+    /// Non-VCS discovery markers found here (e.g. `sln`, `package.json`).
     pub sentinels: Vec<String>,
     /// Unix seconds when this repo was last observed on disk.
     pub last_seen: u64,
@@ -84,6 +87,7 @@ fn dir_hits(dir: &Path, set: &GlobSet, globs: &[String]) -> Vec<String> {
 /// name. Nested repos are collapsed to their outermost match.
 pub fn scan(roots: &[PathBuf], cfg: &Config) -> Vec<Repo> {
     let (set, globs) = build_globset(&config::discovery_globs(cfg));
+    let vcs: HashMap<String, String> = config::vcs_markers(cfg).into_iter().collect();
     let mut found: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
     let now = now_secs();
 
@@ -128,10 +132,23 @@ pub fn scan(roots: &[PathBuf], cfg: &Config) -> Vec<Repo> {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.to_string_lossy().into_owned());
+
+        // Split the hits: the first VCS marker becomes the badge, the rest are
+        // plain sentinel chips.
+        let mut repo_vcs = None;
+        let mut sentinels = Vec::new();
+        for hit in found.get(path).cloned().unwrap_or_default() {
+            match vcs.get(&hit) {
+                Some(label) if repo_vcs.is_none() => repo_vcs = Some(label.clone()),
+                _ => sentinels.push(hit),
+            }
+        }
+
         repos.push(Repo {
             name,
             path: path.to_string_lossy().into_owned(),
-            sentinels: found.get(path).cloned().unwrap_or_default(),
+            vcs: repo_vcs,
+            sentinels,
             last_seen: now,
         });
     }
@@ -190,6 +207,13 @@ mod tests {
         let repos = scan(std::slice::from_ref(&tmp), &cfg);
         let names: Vec<&str> = repos.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(names, vec!["alpha", "beta"]);
+
+        // `.git` becomes the VCS badge, not a plain sentinel.
+        let alpha = &repos[0];
+        assert_eq!(alpha.vcs.as_deref(), Some("Git"));
+        assert!(!alpha.sentinels.iter().any(|s| s == ".git"));
+        assert!(alpha.sentinels.iter().any(|s| s == "Cargo.toml"));
+        assert_eq!(repos[1].vcs, None); // beta has only package.json
 
         let _ = fs::remove_dir_all(&tmp);
     }
