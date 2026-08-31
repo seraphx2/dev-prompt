@@ -90,9 +90,27 @@ fn round_window_corners(window: &WebviewWindow) {
     }
 }
 
+/// Arg the autostart entry is registered with — its presence means "launched at
+/// login", so the overlay stays hidden until the hotkey. A normal user launch
+/// (Start menu, double-click) omits it and we pop the overlay so people can see
+/// the app is running.
+const AUTOSTART_ARG: &str = "--autostart";
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // Single-instance must be registered first: a second launch focuses the
+    // running overlay instead of starting a duplicate (no second tray icon, no
+    // failed hotkey re-registration).
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        if let Some(w) = app.get_webview_window(OVERLAY_LABEL) {
+            show_overlay(&w);
+        }
+    }));
+
+    let mut builder = builder
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
@@ -105,7 +123,7 @@ pub fn run() {
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-                None,
+                Some(vec![AUTOSTART_ARG]),
             ));
     }
 
@@ -194,6 +212,23 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // First run: opt into start-at-login (the user can turn it off in
+            // Settings; we never re-enable).
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                let first_run = app.state::<AppState>().first_run;
+                if first_run {
+                    let _ = app.autolaunch().enable();
+                }
+            }
+
+            // Show the overlay on a normal launch so the app is visibly there;
+            // stay hidden when started at login.
+            if !std::env::args().any(|a| a == AUTOSTART_ARG) {
+                show_overlay(&window);
+            }
 
             Ok(())
         })

@@ -21,10 +21,13 @@ pub struct AppState {
     /// Whether losing focus dismisses the overlay. Off while the settings
     /// screen is open so clicking away to copy a path doesn't nuke edits.
     pub dismiss_on_blur: Mutex<bool>,
+    /// True when `config.yaml` did not exist before this launch (first run).
+    pub first_run: bool,
 }
 
 impl AppState {
     pub fn load() -> Self {
+        let first_run = config::config_path().map(|p| !p.exists()).unwrap_or(false);
         let config = config::load().unwrap_or_default();
         let loaded = cache::load().unwrap_or(cache::LoadedCache {
             repos: Vec::new(),
@@ -35,6 +38,7 @@ impl AppState {
             repos: Mutex::new(loaded.repos),
             age_secs: Mutex::new(loaded.age_secs),
             dismiss_on_blur: Mutex::new(true),
+            first_run,
         }
     }
 }
