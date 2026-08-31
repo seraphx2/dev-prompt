@@ -13,14 +13,17 @@ npm install
 npm run tauri dev      # Vite on :1420 + the overlay (hidden until the hotkey)
 ```
 
-Two checks gate every change and should stay green:
+CI runs on every PR (`.github/workflows/ci.yml`) and must be green before merge.
+Run the same checks locally first:
 
 ```sh
+npm run build                                    # svelte-check + vite build
+cd src-tauri && cargo clippy --all-targets -- -D warnings
 cd src-tauri && cargo test
-npm run check          # svelte-check (types)
 ```
 
-Also run `cargo fmt` and `cargo clippy` before opening a PR.
+(The Rust code is hand-formatted, not `rustfmt`-shaped — match the surrounding
+style rather than running `cargo fmt`.)
 
 ## The easy, high-value path: teach it a new tool
 

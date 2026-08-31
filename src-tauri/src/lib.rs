@@ -207,11 +207,9 @@ pub fn run() {
                 }
             }
             // Closing just hides — the app keeps running for the next hotkey press.
-            WindowEvent::CloseRequested { api, .. } => {
-                if window.label() == OVERLAY_LABEL {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
+            WindowEvent::CloseRequested { api, .. } if window.label() == OVERLAY_LABEL => {
+                api.prevent_close();
+                let _ = window.hide();
             }
             _ => {}
         })

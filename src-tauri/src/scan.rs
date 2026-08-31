@@ -136,7 +136,7 @@ pub fn scan(roots: &[PathBuf], cfg: &Config) -> Vec<Repo> {
         });
     }
 
-    repos.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    repos.sort_by_key(|r| r.name.to_lowercase());
     repos
 }
 
@@ -187,7 +187,7 @@ mod tests {
         touch(&tmp.join("alpha/vendor/inner/.git/HEAD"));
 
         let cfg = config::bundled_defaults();
-        let repos = scan(&[tmp.clone()], &cfg);
+        let repos = scan(std::slice::from_ref(&tmp), &cfg);
         let names: Vec<&str> = repos.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(names, vec!["alpha", "beta"]);
 
