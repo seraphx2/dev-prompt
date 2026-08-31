@@ -271,6 +271,23 @@ fn terminalize(argv: &[String], cwd: &str, resolver: &Resolver) -> (String, Vec<
             .resolve("terminal")
             .unwrap_or_else(|| "wt.exe".to_string());
         let mut args = vec!["-d".to_string(), cwd.to_string()];
+        if !argv.is_empty() {
+            // Run the command *inside* a shell so it keeps a real console — ANSI
+            // colour, a live TTY, and the tab stays open after it exits (WT
+            // otherwise closes a bare `wt <cmd>` tab on exit, and the command's
+            // stdout isn't a tty so tools like Claude Code render monochrome).
+            let shell = if which("pwsh").is_some() {
+                "pwsh"
+            } else {
+                "powershell"
+            };
+            args.extend([
+                shell.to_string(),
+                "-NoLogo".to_string(),
+                "-NoExit".to_string(),
+                "-Command".to_string(),
+            ]);
+        }
         args.extend(argv.iter().cloned());
         (term, args, None)
     }
