@@ -652,6 +652,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dirs",
+ "glob",
+ "globset",
  "ignore",
  "nucleo-matcher",
  "raw-window-handle",

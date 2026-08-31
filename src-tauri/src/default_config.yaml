@@ -1,0 +1,104 @@
+# dev-prompt bundled defaults.
+#
+# This file is embedded in the binary. The user's config.yaml is layered on top:
+#   - hotkey / roots / scan / cache_ttl_secs : replace
+#   - markers   : appended (set markers_replace: true to start fresh)
+#   - programs  : merged by key
+#   - rules     : user rules are prepended; rules_disable: [id] drops built-ins
+#   - universal : universal.disable / universal.add / universal.default
+#
+# Template variables usable in rule/universal actions:
+#   {{path}}  project dir      {{repo}} repo root       {{rel}} sub-project path
+#   {{name}}  project/repo name {{file}} matched file    {{file.name}} {{file.stem}}
+#   {{env:VAR}}                 {{<program-key>}} a resolved program
+
+hotkey: CmdOrCtrl+Shift+Space
+roots: []
+scan:
+  max_depth: 4
+cache_ttl_secs: 900
+
+# --- discovery markers -------------------------------------------------------
+markers:
+  - .git
+  - { name: .hg, kind: vcs, label: Mercurial }
+  - { name: .jj, kind: vcs, label: Jujutsu }
+  - { name: .svn, kind: vcs, label: Subversion }
+  - "*.sln"
+  - package.json
+  - Cargo.toml
+  - go.mod
+  - pyproject.toml
+  - requirements.txt
+
+# --- program resolution ----------------------------------------------------
+programs:
+  vs:
+    windows:
+      - vswhere: "-latest -prerelease -products * -property productPath"
+      - "%ProgramFiles%/Microsoft Visual Studio/*/*/Common7/IDE/devenv.exe"
+      - "%ProgramFiles(x86)%/Microsoft Visual Studio/*/*/Common7/IDE/devenv.exe"
+  rider:
+    any: [rider]
+    windows:
+      - "%LOCALAPPDATA%/Programs/*Rider*/bin/rider64.exe"
+      - "%LOCALAPPDATA%/JetBrains/Toolbox/scripts/rider.cmd"
+  code:
+    any: [code]
+    windows: [code.cmd]
+  terminal:
+    windows: [wt.exe]
+    linux:
+      [alacritty, kitty, wezterm, foot, gnome-terminal, konsole, xfce4-terminal, x-terminal-emulator, xterm]
+    macos: [open]
+  filemanager:
+    windows: [explorer.exe]
+    linux: [xdg-open]
+    macos: [open]
+
+# --- rules ---------------------------------------------------------------
+rules:
+  - id: sln-editors
+    match: "*.sln"
+    when: windows
+    per_file: true
+    actions:
+      - name: "Open {{file.stem}} in Visual Studio"
+        program: "{{vs}}"
+        args: ["{{file}}"]
+        needs: [vs]
+      - name: "Open {{file.stem}} in Rider"
+        program: "{{rider}}"
+        args: ["{{file}}"]
+        needs: [rider]
+
+  - id: node
+    match: package.json
+    provider: npm-scripts
+
+  - id: cargo
+    match: Cargo.toml
+    provider: cargo
+
+  - id: go
+    match: go.mod
+    provider: go
+
+  - id: python
+    match: [pyproject.toml, requirements.txt]
+    provider: python
+
+  - id: compose
+    match: [docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml]
+    scope: repo
+    provider: compose
+
+# --- universal actions -------------------------------------------------
+universal:
+  default: terminal
+  actions:
+    - { id: terminal, name: "Open in terminal", terminal: true }
+    - { id: claude-code, name: "Launch Claude Code", terminal: true, run: "claude" }
+    - { id: vscode, name: "Open in VS Code", program: "{{code}}", args: ["{{path}}"], needs: [code] }
+    - { id: filemanager, name: "Reveal in file manager", program: "{{filemanager}}", args: ["{{path}}"] }
+    - { id: copy-path, name: "Copy path", client: true }

@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use crate::actions::Action;
+use crate::rules::Action;
 use crate::error::{AppError, AppResult};
 use crate::scan::Repo;
 

@@ -59,6 +59,9 @@ pub struct Project {
     pub rel: String,
     /// Absolute path to this project's directory.
     pub dir: PathBuf,
+    /// Top-level entry names in this directory (for rule glob matching).
+    #[serde(skip)]
+    pub files: Vec<String>,
     pub solutions: Vec<PathBuf>,
     pub node: Option<NodeInfo>,
     pub has_cargo: bool,
@@ -94,21 +97,8 @@ pub enum PkgManager {
 }
 
 impl PkgManager {
-    /// The executable + leading args to run a named script.
-    /// `npm`/`pnpm`/`bun` use `run <name>`; `yarn` takes the script directly.
-    pub fn run_argv(self, script: &str) -> Vec<String> {
-        let (prog, run): (&str, &[&str]) = match self {
-            PkgManager::Npm => ("npm", &["run"]),
-            PkgManager::Pnpm => ("pnpm", &["run"]),
-            PkgManager::Yarn => ("yarn", &[]),
-            PkgManager::Bun => ("bun", &["run"]),
-        };
-        let mut v = vec![prog.to_string()];
-        v.extend(run.iter().map(|s| s.to_string()));
-        v.push(script.to_string());
-        v
-    }
-
+    /// `"npm"` / `"pnpm"` / `"yarn"` / `"bun"` — the `npm-scripts` provider uses
+    /// this both as the run command and the action label.
     pub fn label(self) -> &'static str {
         match self {
             PkgManager::Npm => "npm",
@@ -160,6 +150,8 @@ fn inspect_dir(dir: &Path, rel: &str) -> Project {
         }
     }
     p.solutions.sort();
+    names.sort();
+    p.files = names.clone();
     let has = |n: &str| names.iter().any(|x| x == n);
 
     if has("package.json") {

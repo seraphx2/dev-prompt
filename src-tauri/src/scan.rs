@@ -2,17 +2,18 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
 
-use crate::config::Config;
+use crate::config::{self, Config};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Repo {
     pub name: String,
     pub path: String,
-    /// Sentinel names/extensions found in this directory (e.g. `.git`, `.sln`).
+    /// Discovery markers found in this directory (e.g. `.git`, `sln`, `package.json`).
     pub sentinels: Vec<String>,
     /// Unix seconds when this repo was last observed on disk.
     pub last_seen: u64,
@@ -42,26 +43,25 @@ const HARD_SKIP: &[&str] = &[
     ".svelte-kit",
 ];
 
-/// Does `entry_name` satisfy `sentinel`?
-///
-/// - exact match on the file/dir name (`.git`, `package.json`, `Cargo.toml`)
-/// - or, when the sentinel looks like a bare extension (`.sln`), an extension match
-fn sentinel_matches(sentinel: &str, entry_name: &str) -> bool {
-    if sentinel.eq_ignore_ascii_case(entry_name) {
-        return true;
-    }
-    let looks_like_ext = sentinel.starts_with('.')
-        && sentinel.len() > 1
-        && sentinel[1..].chars().all(|c| c.is_ascii_alphanumeric());
-    if looks_like_ext {
-        if let Some(ext) = Path::new(entry_name).extension().and_then(|e| e.to_str()) {
-            return sentinel[1..].eq_ignore_ascii_case(ext);
+/// Compile the discovery globs, keeping the successfully-added patterns in
+/// add-order so `GlobSet::matches` indices line up.
+fn build_globset(globs: &[String]) -> (GlobSet, Vec<String>) {
+    let mut builder = GlobSetBuilder::new();
+    let mut valid = Vec::new();
+    for g in globs {
+        if let Ok(glob) = Glob::new(&g.to_lowercase()) {
+            builder.add(glob);
+            valid.push(g.clone());
         }
     }
-    false
+    (
+        builder.build().unwrap_or_else(|_| GlobSet::empty()),
+        valid,
+    )
 }
 
-fn dir_sentinels(dir: &Path, sentinels: &[String]) -> Vec<String> {
+/// Which markers are present directly in `dir` (deduped, display-cleaned).
+fn dir_hits(dir: &Path, set: &GlobSet, globs: &[String]) -> Vec<String> {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -69,9 +69,10 @@ fn dir_sentinels(dir: &Path, sentinels: &[String]) -> Vec<String> {
     for ent in rd.flatten() {
         let name = ent.file_name();
         let Some(name) = name.to_str() else { continue };
-        for s in sentinels {
-            if sentinel_matches(s, name) && !hits.contains(s) {
-                hits.push(s.clone());
+        for idx in set.matches(name.to_lowercase()) {
+            let label = globs[idx].trim_start_matches("*.").to_string();
+            if !hits.contains(&label) {
+                hits.push(label);
             }
         }
     }
@@ -82,6 +83,7 @@ fn dir_sentinels(dir: &Path, sentinels: &[String]) -> Vec<String> {
 /// Walk every configured root and return the discovered repositories, sorted by
 /// name. Nested repos are collapsed to their outermost match.
 pub fn scan(roots: &[PathBuf], cfg: &Config) -> Vec<Repo> {
+    let (set, globs) = build_globset(&config::discovery_globs(cfg));
     let mut found: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
     let now = now_secs();
 
@@ -105,7 +107,7 @@ pub fn scan(roots: &[PathBuf], cfg: &Config) -> Vec<Repo> {
                 continue;
             }
             let dir = dent.path();
-            let hits = dir_sentinels(dir, &cfg.scan.sentinels);
+            let hits = dir_hits(dir, &set, &globs);
             if !hits.is_empty() {
                 found.entry(dir.to_path_buf()).or_insert(hits);
             }
@@ -149,12 +151,29 @@ mod tests {
     }
 
     #[test]
-    fn sentinel_exact_and_extension() {
-        assert!(sentinel_matches(".git", ".git"));
-        assert!(sentinel_matches("Cargo.toml", "Cargo.toml"));
-        assert!(sentinel_matches(".sln", "MyApp.sln"));
-        assert!(!sentinel_matches(".sln", "MyApp.csproj"));
-        assert!(!sentinel_matches("package.json", "package-lock.json"));
+    fn globset_matches_names_and_extensions() {
+        let (set, globs) = build_globset(&[
+            ".git".into(),
+            "package.json".into(),
+            "*.sln".into(),
+        ]);
+        assert_eq!(dir_hits_from(&set, &globs, &[".git"]), vec![".git"]);
+        assert_eq!(dir_hits_from(&set, &globs, &["MyApp.sln"]), vec!["sln"]);
+        assert!(dir_hits_from(&set, &globs, &["package-lock.json"]).is_empty());
+    }
+
+    fn dir_hits_from(set: &GlobSet, globs: &[String], names: &[&str]) -> Vec<String> {
+        let mut hits: Vec<String> = Vec::new();
+        for name in names {
+            for idx in set.matches(name.to_lowercase()) {
+                let label = globs[idx].trim_start_matches("*.").to_string();
+                if !hits.contains(&label) {
+                    hits.push(label);
+                }
+            }
+        }
+        hits.sort();
+        hits
     }
 
     #[test]
@@ -167,7 +186,7 @@ mod tests {
         // nested repo inside alpha — should be collapsed away
         touch(&tmp.join("alpha/vendor/inner/.git/HEAD"));
 
-        let cfg = Config::default();
+        let cfg = config::bundled_defaults();
         let repos = scan(&[tmp.clone()], &cfg);
         let names: Vec<&str> = repos.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(names, vec!["alpha", "beta"]);

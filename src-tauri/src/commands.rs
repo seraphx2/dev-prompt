@@ -3,13 +3,13 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::actions::{build_actions as build_actions_impl, find_action, Action};
 use crate::cache;
 use crate::config::{self, resolved_roots, Config};
 use crate::error::{AppError, AppResult};
 use crate::index::{self, ScoredRepo};
 use crate::inspect;
 use crate::launch;
+use crate::rules::{build_actions as build_actions_impl, find_action, Action};
 use crate::scan::{self, Repo};
 
 /// In-memory app state shared across commands.
@@ -124,7 +124,8 @@ fn repo_for_path(state: &AppState, path: &str) -> Repo {
 pub fn build_actions(state: State<'_, AppState>, path: String) -> Vec<Action> {
     let repo = repo_for_path(&state, &path);
     let ctx = inspect::inspect(std::path::Path::new(&repo.path));
-    build_actions_impl(&repo, &ctx)
+    let cfg = state.config.lock().unwrap();
+    build_actions_impl(&repo, &ctx, &cfg)
 }
 
 #[tauri::command]
@@ -135,8 +136,11 @@ pub fn run_action(
 ) -> AppResult<()> {
     let repo = repo_for_path(&state, &path);
     let ctx = inspect::inspect(std::path::Path::new(&repo.path));
-    let action = find_action(&repo, &ctx, &action_id)
-        .ok_or_else(|| AppError::msg(format!("unknown action: {action_id}")))?;
+    let action = {
+        let cfg = state.config.lock().unwrap();
+        find_action(&repo, &ctx, &cfg, &action_id)
+    }
+    .ok_or_else(|| AppError::msg(format!("unknown action: {action_id}")))?;
     launch::launch(&action, &repo)
 }
 
@@ -173,33 +177,35 @@ pub fn save_config(
 ) -> AppResult<Config> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-    let mut cfg = state.config.lock().unwrap().clone();
-    let old_hotkey = cfg.hotkey.clone();
+    let old_hotkey = state.config.lock().unwrap().hotkey.clone();
+    let mut user = config::load_user()?;
 
     if let Some(h) = patch.hotkey {
-        cfg.hotkey = h.trim().to_string();
+        user.hotkey = Some(h.trim().to_string());
     }
     if let Some(roots) = patch.roots {
-        cfg.roots = roots
+        user.roots = roots
             .into_iter()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
     }
     if let Some(ttl) = patch.cache_ttl_secs {
-        cfg.cache_ttl_secs = ttl;
+        user.cache_ttl_secs = Some(ttl);
     }
 
-    if cfg.hotkey != old_hotkey {
+    let new_hotkey = user.hotkey.clone().unwrap_or_else(|| old_hotkey.clone());
+    if new_hotkey != old_hotkey {
         let gs = app.global_shortcut();
-        gs.register(cfg.hotkey.as_str())
-            .map_err(|e| AppError::msg(format!("invalid hotkey `{}`: {e}", cfg.hotkey)))?;
+        gs.register(new_hotkey.as_str())
+            .map_err(|e| AppError::msg(format!("invalid hotkey `{new_hotkey}`: {e}")))?;
         let _ = gs.unregister(old_hotkey.as_str());
     }
 
-    config::save(&cfg)?;
-    *state.config.lock().unwrap() = cfg.clone();
-    Ok(cfg)
+    config::save_user(&user)?;
+    let merged = config::load()?;
+    *state.config.lock().unwrap() = merged.clone();
+    Ok(merged)
 }
 
 /// Toggle whether focus loss dismisses the overlay (frontend turns this off for
@@ -216,7 +222,7 @@ pub fn set_dismiss_on_blur(state: State<'_, AppState>, enabled: bool) {
 pub fn open_config_file(window: tauri::WebviewWindow) -> AppResult<()> {
     let path = config::config_path()?;
     if !path.exists() {
-        config::save(&config::load()?)?;
+        let _ = config::load()?; // writes the starter file
     }
 
     #[cfg(windows)]

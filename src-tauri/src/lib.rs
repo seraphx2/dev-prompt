@@ -1,4 +1,3 @@
-mod actions;
 mod cache;
 mod commands;
 mod config;
@@ -6,6 +5,7 @@ mod error;
 mod index;
 mod inspect;
 mod launch;
+mod rules;
 mod scan;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
