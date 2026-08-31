@@ -136,7 +136,7 @@
     <div class="text-white/30">Loading…</div>
   {:else}
     <label class="block space-y-1.5">
-      <span class="text-white/50">Global hotkey</span>
+      <span class="text-orange-400">Global hotkey</span>
       <input
         bind:value={hotkey}
         spellcheck="false"
@@ -148,7 +148,7 @@
     </label>
 
     <div class="space-y-1.5">
-      <span class="text-white/50"
+      <span class="text-orange-400"
         >Root directories
         <span class="text-white/25">— scanned recursively for projects</span></span
       >
@@ -198,7 +198,7 @@
     </div>
 
     <label class="block space-y-1.5">
-      <span class="text-white/50">Cache lifetime (minutes)</span>
+      <span class="text-orange-400">Cache lifetime (minutes)</span>
       <input
         type="number"
         min="1"
@@ -219,7 +219,7 @@
     </div>
 
     <div class="space-y-2 border-t border-hair pt-4">
-      <span class="text-white/50">Configuration</span>
+      <span class="text-orange-400">Configuration</span>
       <div class="flex flex-wrap items-center gap-3">
         <button
           type="button"

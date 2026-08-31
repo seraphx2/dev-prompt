@@ -80,7 +80,7 @@
       {#if i === 0 || items[i - 1].action.group !== item.action.group}
         {#if item.action.group}
           <div
-            class="truncate px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-white/25"
+            class="truncate px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-orange-400"
           >
             {item.action.group}
           </div>
