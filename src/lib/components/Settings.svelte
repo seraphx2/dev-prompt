@@ -50,6 +50,64 @@
     void loadSummary();
   });
 
+  // --- hotkey recorder ---
+  let capturing = $state(false);
+  let captureHint = $state("");
+  let typeMode = $state(false);
+
+  function codeToKey(code: string, fallback: string): string {
+    if (code.startsWith("Key")) return code.slice(3); // KeyA -> A
+    if (code.startsWith("Digit")) return code.slice(5); // Digit1 -> 1
+    return code || fallback; // Space, F5, Comma, ArrowUp, Minus, …
+  }
+
+  function onCaptureKey(e: KeyboardEvent) {
+    if (!capturing) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.key === "Escape") {
+      capturing = false;
+      captureHint = "";
+      return;
+    }
+    if (["Control", "Alt", "Shift", "Meta", "OS"].includes(e.key)) {
+      captureHint = "…keep going";
+      return;
+    }
+
+    const mods: string[] = [];
+    if (e.ctrlKey) mods.push("CmdOrCtrl");
+    if (e.altKey) mods.push("Alt");
+    if (e.shiftKey) mods.push("Shift");
+    if (e.metaKey) mods.push("Super");
+
+    const key = codeToKey(e.code, e.key);
+    if (mods.length === 0 && !/^F\d{1,2}$/.test(key)) {
+      captureHint = "needs Ctrl, Alt or Shift";
+      return;
+    }
+
+    hotkey = [...mods, key].join("+");
+    capturing = false;
+    captureHint = "";
+    void saveHotkey();
+  }
+
+  // Recording a hotkey commits immediately (typed edits still use Save).
+  async function saveHotkey() {
+    busy = true;
+    note("");
+    try {
+      await saveConfig({ hotkey: hotkey.trim() });
+      note(`Hotkey saved — ${hotkey.trim()}`);
+    } catch (e) {
+      note(`${e}`, true);
+    } finally {
+      busy = false;
+    }
+  }
+
   const addRoot = () => (roots = [...roots, ""]);
   function removeRoot(i: number) {
     roots = roots.filter((_, k) => k !== i);
@@ -137,14 +195,50 @@
   {:else}
     <label class="block space-y-1.5">
       <span class="text-orange-400">Global hotkey</span>
-      <input
-        bind:value={hotkey}
-        spellcheck="false"
-        class="w-full rounded border border-hair bg-white/[0.04] px-2 py-1.5 text-white/90 focus:border-white/25 focus:outline-none"
-      />
-      <span class="block text-[11px] text-white/25"
-        >e.g. <code>CmdOrCtrl+Shift+Space</code>, <code>Alt+Space</code></span
-      >
+      {#if typeMode}
+        <input
+          bind:value={hotkey}
+          spellcheck="false"
+          placeholder="CmdOrCtrl+Shift+Space"
+          class="w-full rounded border border-hair bg-white/[0.04] px-2 py-1.5 font-mono text-[12px] text-white/90 focus:border-white/25 focus:outline-none"
+        />
+      {:else}
+        <button
+          type="button"
+          onclick={() => {
+            captureHint = "";
+            capturing = true;
+          }}
+          onkeydown={onCaptureKey}
+          class="flex w-full items-center justify-between rounded border px-2 py-1.5 text-left transition-colors
+                 {capturing
+            ? 'border-orange-400/60 bg-orange-400/[0.08]'
+            : 'border-hair bg-white/[0.04] hover:border-white/25'}"
+        >
+          <span
+            class="font-mono text-[12px] {capturing ? 'text-white/40' : 'text-white/90'}"
+          >
+            {capturing ? "Press a combination…" : hotkey || "not set"}
+          </span>
+          <span class="shrink-0 text-[10px] uppercase tracking-wide text-white/30">
+            {capturing ? "Esc cancels" : "click to record"}
+          </span>
+        </button>
+      {/if}
+      <span class="block text-[11px] text-white/25">
+        {#if captureHint}
+          <span class="text-amber-300/70">{captureHint}</span>
+        {:else}
+          <button
+            type="button"
+            class="underline decoration-white/20 underline-offset-2 hover:text-white/50"
+            onclick={() => {
+              typeMode = !typeMode;
+              capturing = false;
+            }}>{typeMode ? "use the recorder" : "type it manually"}</button
+          >
+        {/if}
+      </span>
     </label>
 
     <div class="space-y-1.5">
