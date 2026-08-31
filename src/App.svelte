@@ -152,6 +152,15 @@
   let status = $state("");
   let search: SearchInput | undefined = $state();
 
+  // Nothing indexed and no scan running — the user hasn't pointed dev-prompt at
+  // any folders yet. Show setup guidance and glow the settings gear.
+  const noRepos = $derived(
+    mode === "repo-list" &&
+      !scanning &&
+      query.trim() === "" &&
+      results.length === 0,
+  );
+
   let searchSeq = 0;
 
   async function refresh() {
@@ -362,15 +371,27 @@
 >
   {#if mode === "repo-list"}
     <SearchInput bind:this={search} bind:value={query} />
-    <ResultList
-      entries={results}
-      {selected}
-      onselect={(i) => (selected = i)}
-      onactivate={(i) => {
-        selected = i;
-        if (results[i]) openActions(results[i]);
-      }}
-    />
+    {#if noRepos}
+      <div
+        class="flex flex-1 flex-col items-center justify-center gap-2.5 px-10 text-center"
+      >
+        <p class="text-[15px] font-medium text-white/80">No project folders yet</p>
+        <p class="text-[13px] leading-relaxed text-white/40">
+          Open <span class="text-orange-400">Settings</span> — the gear at the
+          bottom-left — and add the directories your repositories live in.
+        </p>
+      </div>
+    {:else}
+      <ResultList
+        entries={results}
+        {selected}
+        onselect={(i) => (selected = i)}
+        onactivate={(i) => {
+          selected = i;
+          if (results[i]) openActions(results[i]);
+        }}
+      />
+    {/if}
   {:else if mode === "action-menu" && activeRepo}
     <ActionMenu
       repoName={activeRepo.repo.name}
@@ -397,8 +418,11 @@
           onclick={() => (mode = "settings")}
           title="Settings (Ctrl+,)"
           aria-label="Settings"
-          class="shrink-0 rounded-[3px] border border-white/15 bg-white/[0.09] p-1
-                 text-white/80 transition-colors hover:bg-white/20 hover:text-white"
+          class:settings-glow={noRepos}
+          class="shrink-0 rounded-[3px] border p-1 text-white/80 transition-colors
+                 {noRepos
+            ? 'border-sky-400/60 bg-sky-400/10 text-white'
+            : 'border-white/15 bg-white/[0.09] hover:bg-white/20 hover:text-white'}"
         >
           <svg
             class="h-3 w-3"
@@ -432,6 +456,25 @@
 </main>
 
 <style>
+  /* Pulsing ring on the settings gear while no folders are configured. */
+  @keyframes settings-glow {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgb(56 189 248 / 0);
+    }
+    50% {
+      box-shadow: 0 0 0 4px rgb(56 189 248 / 0.35);
+    }
+  }
+  .settings-glow {
+    animation: settings-glow 1.8s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .settings-glow {
+      animation: none;
+    }
+  }
+
   /* Key hints: bright key-cap, dim descriptive label (inherited from footer). */
   kbd {
     font-family: inherit;
