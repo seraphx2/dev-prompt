@@ -28,7 +28,15 @@ pub fn launch(action: &Action, repo: &Repo) -> AppResult<()> {
         .filter(|a| !a.is_empty())
         .collect();
 
-    spawn_detached(&action.program, &args, &repo.path)
+    // Sub-project actions carry their own working directory; the rest run at the
+    // repo root.
+    let cwd = action
+        .cwd
+        .as_deref()
+        .map(|c| substitute(c, repo))
+        .unwrap_or_else(|| repo.path.clone());
+
+    spawn_detached(&action.program, &args, &cwd)
 }
 
 #[cfg(windows)]

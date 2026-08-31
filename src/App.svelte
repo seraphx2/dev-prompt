@@ -15,6 +15,7 @@
     searchRepos,
   } from "./lib/ipc";
   import type { Action, ScoredRepo } from "./lib/types";
+  import { fuzzyScore } from "./lib/fuzzy";
 
   type Mode = "repo-list" | "action-menu";
 
@@ -24,8 +25,53 @@
 
   let mode = $state<Mode>("repo-list");
   let actions = $state<Action[]>([]);
+  let actionQuery = $state("");
   let actionSel = $state(0);
   let activeRepo = $state<ScoredRepo | null>(null);
+
+  type FilteredAction = { action: Action; positions: number[] };
+
+  // Fuzzy-filter the action list, keeping the original group order. A match on
+  // the label carries highlight positions; a match only on the group/hint still
+  // includes the row but without highlights (mirrors the repo list's name-vs-path
+  // behaviour).
+  const filteredActions = $derived.by<FilteredAction[]>(() => {
+    const q = actionQuery.trim();
+    if (!q) return actions.map((action) => ({ action, positions: [] }));
+    const out: FilteredAction[] = [];
+    for (const action of actions) {
+      const onLabel = fuzzyScore(q, action.label);
+      if (onLabel) {
+        out.push({ action, positions: onLabel.positions });
+      } else if (fuzzyScore(q, `${action.group} ${action.hint}`)) {
+        out.push({ action, positions: [] });
+      }
+    }
+    return out;
+  });
+
+  // Keep the action selection within the (possibly filtered) list.
+  $effect(() => {
+    if (actionSel >= filteredActions.length) {
+      actionSel = Math.max(0, filteredActions.length - 1);
+    }
+  });
+
+  // Footer key hints, per screen. `[key, description]`.
+  const hints = $derived<[string, string][]>(
+    mode === "repo-list"
+      ? [
+          ["Up/Down", "move"],
+          ["Enter", "launch"],
+          ["Tab", "actions"],
+          ["Esc", "close"],
+        ]
+      : [
+          ["Up/Down", "move"],
+          ["Enter", "run"],
+          ["Esc", "back"],
+        ],
+  );
 
   let scanning = $state(false);
   let status = $state("");
@@ -80,6 +126,7 @@
   async function openActions(entry: ScoredRepo) {
     activeRepo = entry;
     actions = await buildActions(entry.repo.path);
+    actionQuery = "";
     actionSel = 0;
     mode = "action-menu";
   }
@@ -88,6 +135,7 @@
     mode = "repo-list";
     activeRepo = null;
     actions = [];
+    actionQuery = "";
   }
 
   // Keep the search box focused whenever the repo list is showing, so typing
@@ -114,12 +162,13 @@
     }
   }
 
-  /** Enter on a repo runs its first (default) action directly. */
+  /** Enter on a repo runs its default action (the terminal), else the first. */
   async function activateRepo(i: number) {
     const entry = results[i];
     if (!entry) return;
     const acts = await buildActions(entry.repo.path);
-    if (acts.length > 0) await execute(acts[0], entry.repo.path);
+    const def = acts.find((a) => a.default) ?? acts[0];
+    if (def) await execute(def, entry.repo.path);
   }
 
   function onListKeydown(e: KeyboardEvent) {
@@ -136,9 +185,13 @@
       } else {
         activateRepo(selected);
       }
-    } else if (e.key === "Tab" || (e.key === "ArrowRight" && atInputEnd(e))) {
+    } else if (e.key === "Tab") {
+      // Tab always goes "forward" — into the selected repo's actions.
       e.preventDefault();
       if (results[selected]) openActions(results[selected]);
+    } else if (e.key === "Delete") {
+      e.preventDefault();
+      query = "";
     } else if (e.key === "Escape") {
       e.preventDefault();
       hideOverlay();
@@ -148,23 +201,25 @@
     }
   }
 
-  function atInputEnd(e: KeyboardEvent): boolean {
-    const t = e.target;
-    return t instanceof HTMLInputElement && t.selectionStart === t.value.length;
-  }
-
   function onMenuKeydown(e: KeyboardEvent) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      actionSel = Math.min(actionSel + 1, actions.length - 1);
+      actionSel = Math.min(actionSel + 1, filteredActions.length - 1);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       actionSel = Math.max(actionSel - 1, 0);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (activeRepo && actions[actionSel])
-        execute(actions[actionSel], activeRepo.repo.path);
-    } else if (e.key === "Escape" || e.key === "ArrowLeft" || e.key === "Backspace") {
+      if (activeRepo && filteredActions[actionSel])
+        execute(filteredActions[actionSel].action, activeRepo.repo.path);
+    } else if (e.key === "Tab") {
+      e.preventDefault(); // nothing "forward" from here; keep focus in the filter
+    } else if (e.key === "Delete") {
+      e.preventDefault();
+      actionQuery = "";
+      actionSel = 0;
+    } else if (e.key === "Escape") {
+      // Esc always steps back a level.
       e.preventDefault();
       backToList();
     }
@@ -218,10 +273,13 @@
   {:else if activeRepo}
     <ActionMenu
       repoName={activeRepo.repo.name}
-      {actions}
+      items={filteredActions}
+      bind:filter={actionQuery}
       selected={actionSel}
       onselect={(i) => (actionSel = i)}
-      onrun={(i) => activeRepo && execute(actions[i], activeRepo.repo.path)}
+      onrun={(i) =>
+        activeRepo && filteredActions[i] &&
+        execute(filteredActions[i].action, activeRepo.repo.path)}
       onback={backToList}
     />
   {/if}
@@ -230,17 +288,18 @@
     class="flex items-center justify-between border-t border-hair px-4 py-2
            text-[11px] text-white/30"
   >
-    <span>{status}</span>
-    <span class="flex gap-3">
+    <span class="flex min-w-0 items-center gap-3">
+      <span class="truncate">{status}</span>
       {#if mode === "repo-list"}
-        <kbd>Up/Down</kbd> move
-        <kbd>Enter</kbd> launch
-        <kbd>Tab</kbd> actions
-        <kbd>Ctrl+R</kbd> rescan
-      {:else}
-        <kbd>Enter</kbd> run
-        <kbd>Esc</kbd> back
+        <span class="inline-flex shrink-0 items-center gap-1"
+          ><kbd>Ctrl+R</kbd>rescan</span
+        >
       {/if}
+    </span>
+    <span class="flex shrink-0 items-center gap-3.5">
+      {#each hints as [key, label] (label)}
+        <span class="inline-flex items-center gap-1"><kbd>{key}</kbd>{label}</span>
+      {/each}
     </span>
   </footer>
 
@@ -254,7 +313,15 @@
 </main>
 
 <style>
+  /* Key hints: bright key-cap, dim descriptive label (inherited from footer). */
   kbd {
     font-family: inherit;
+    font-size: 10px;
+    line-height: 1;
+    color: rgb(255 255 255 / 0.9);
+    background: rgb(255 255 255 / 0.09);
+    border: 1px solid rgb(255 255 255 / 0.12);
+    border-radius: 3px;
+    padding: 2px 4px;
   }
 </style>

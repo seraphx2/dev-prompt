@@ -8,6 +8,7 @@ use crate::cache;
 use crate::config::{self, resolved_roots, Config};
 use crate::error::{AppError, AppResult};
 use crate::index::{self, ScoredRepo};
+use crate::inspect;
 use crate::launch;
 use crate::scan::{self, Repo};
 
@@ -118,7 +119,8 @@ fn repo_for_path(state: &AppState, path: &str) -> Repo {
 #[tauri::command]
 pub fn build_actions(state: State<'_, AppState>, path: String) -> Vec<Action> {
     let repo = repo_for_path(&state, &path);
-    build_actions_impl(&repo)
+    let ctx = inspect::inspect(std::path::Path::new(&repo.path));
+    build_actions_impl(&repo, &ctx)
 }
 
 #[tauri::command]
@@ -128,7 +130,8 @@ pub fn run_action(
     path: String,
 ) -> AppResult<()> {
     let repo = repo_for_path(&state, &path);
-    let action = find_action(&repo, &action_id)
+    let ctx = inspect::inspect(std::path::Path::new(&repo.path));
+    let action = find_action(&repo, &ctx, &action_id)
         .ok_or_else(|| AppError::msg(format!("unknown action: {action_id}")))?;
     launch::launch(&action, &repo)
 }

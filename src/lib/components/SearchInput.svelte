@@ -1,4 +1,6 @@
 <script lang="ts">
+  import ClearButton from "./ClearButton.svelte";
+
   let {
     value = $bindable(),
     placeholder = "Search repositories…",
@@ -36,6 +38,13 @@
     spellcheck="false"
     autocomplete="off"
     autocapitalize="off"
-    class="flex-1 text-[15px] text-white/90 placeholder:text-white/25"
+    class="min-w-0 flex-1 text-[15px] text-white/90 placeholder:text-white/25"
+  />
+  <ClearButton
+    show={!!value}
+    onclear={() => {
+      value = "";
+      focus();
+    }}
   />
 </div>

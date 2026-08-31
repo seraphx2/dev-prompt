@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ScoredRepo } from "../types";
+  import Highlight from "./Highlight.svelte";
 
   let {
     entry,
@@ -12,10 +13,6 @@
     onclick: () => void;
     ondblclick: () => void;
   } = $props();
-
-  const hit = $derived(new Set(entry.matchIndices));
-  // Highlight matched characters in the repo name.
-  const name = $derived(entry.repo.name);
 </script>
 
 <button
@@ -27,9 +24,7 @@
 >
   <div class="min-w-0 flex-1">
     <div class="truncate text-[13px] leading-tight text-white/90">
-      {#each name.split("") as ch, i}<span
-          class={hit.has(i) ? "text-sky-300" : ""}>{ch}</span
-        >{/each}
+      <Highlight text={entry.repo.name} indices={entry.matchIndices} />
     </div>
     <div class="truncate font-mono text-[11px] leading-tight text-white/35">
       {entry.repo.path}

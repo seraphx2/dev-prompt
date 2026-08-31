@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod error;
 mod index;
+mod inspect;
 mod launch;
 mod scan;
 

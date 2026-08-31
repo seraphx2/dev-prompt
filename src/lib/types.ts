@@ -20,6 +20,10 @@ export interface Action {
   label: string;
   /** Short hint shown on the right of the row, e.g. the resolved command. */
   hint: string;
+  /** Section header to show above this action; "" means "just a divider". */
+  group: string;
+  /** Enter on a repo runs the action flagged `default` (falls back to first). */
+  default: boolean;
   /** True when this action is handled purely in the frontend (e.g. copy path). */
   clientSide: boolean;
 }
