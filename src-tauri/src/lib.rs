@@ -27,10 +27,20 @@ fn show_overlay(window: &WebviewWindow) {
     let _ = window.emit("overlay:shown", ());
 }
 
+/// Tell the frontend the overlay is going away so it resets to the repo list
+/// while off-screen. The next `show_overlay` then paints the home view directly
+/// — without this, slow machines briefly show the previous screen (action menu,
+/// settings) before Svelte catches up and snaps back. Works for both a
+/// `WebviewWindow` (hotkey/tray) and a bare `Window` (window-event callback).
+fn signal_overlay_hidden<R: tauri::Runtime>(window: &impl Emitter<R>) {
+    let _ = window.emit("overlay:hidden", ());
+}
+
 /// Show the overlay, or hide it if it is already visible.
 fn toggle_overlay(window: &WebviewWindow) {
     match window.is_visible() {
         Ok(true) => {
+            signal_overlay_hidden(window);
             let _ = window.hide();
         }
         _ => show_overlay(window),
@@ -243,6 +253,7 @@ pub fn run() {
                         .map(|s| *s.dismiss_on_blur.lock().unwrap())
                         .unwrap_or(true);
                     if dismiss {
+                        signal_overlay_hidden(window);
                         let _ = window.hide();
                     }
                 }
@@ -250,6 +261,7 @@ pub fn run() {
             // Closing just hides — the app keeps running for the next hotkey press.
             WindowEvent::CloseRequested { api, .. } if window.label() == OVERLAY_LABEL => {
                 api.prevent_close();
+                signal_overlay_hidden(window);
                 let _ = window.hide();
             }
             _ => {}
@@ -259,6 +271,7 @@ pub fn run() {
             commands::rescan_repos,
             commands::search_repos,
             commands::build_actions,
+            commands::refresh_repo_context,
             commands::run_action,
             commands::hide_overlay,
             commands::get_config,

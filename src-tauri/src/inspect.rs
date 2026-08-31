@@ -7,9 +7,10 @@
 //! OS-specific calls — so the result is identical on every platform; turning the
 //! context into runnable actions is `actions.rs`'s job.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Cap on discovered sub-projects, to keep the action list bounded.
 const MAX_SUBPROJECTS: usize = 12;
@@ -42,7 +43,7 @@ const COMPOSE_FILES: &[&str] = &[
     "compose.yaml",
 ];
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoContext {
     /// `projects[0]` is always the repo root (`rel == ""`); the rest are
@@ -52,7 +53,7 @@ pub struct RepoContext {
     pub compose: bool,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
     /// "" for the repo root, else the relative dir (`"web"`, `"packages/ui"`).
@@ -60,7 +61,8 @@ pub struct Project {
     /// Absolute path to this project's directory.
     pub dir: PathBuf,
     /// Top-level entry names in this directory (for rule glob matching).
-    #[serde(skip)]
+    /// Persisted in the repo cache so rules re-evaluate without a fresh walk.
+    #[serde(default)]
     pub files: Vec<String>,
     pub solutions: Vec<PathBuf>,
     pub node: Option<NodeInfo>,
@@ -79,7 +81,7 @@ impl Project {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeInfo {
     pub manager: PkgManager,
@@ -87,7 +89,7 @@ pub struct NodeInfo {
     pub scripts: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PkgManager {
     Npm,
@@ -109,7 +111,7 @@ impl PkgManager {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PythonInfo {
     /// `"uv"` / `"poetry"` when a matching lockfile is present, else `None`.
@@ -254,6 +256,16 @@ pub fn inspect(root: &Path) -> RepoContext {
     ctx
 }
 
+/// Inspect every repo path, producing the `path -> context` map that is cached
+/// next to the repo list. Runs on the caller's thread — the scan already calls
+/// this from a blocking task, so the extra walks stay off the UI thread.
+pub fn inspect_all<'a>(paths: impl IntoIterator<Item = &'a str>) -> HashMap<String, RepoContext> {
+    paths
+        .into_iter()
+        .map(|p| (p.to_string(), inspect(Path::new(p))))
+        .collect()
+}
+
 fn read_package_scripts(path: &Path) -> Vec<String> {
     #[derive(serde::Deserialize)]
     struct PkgJson {
@@ -337,6 +349,23 @@ mod tests {
         let rels: Vec<&str> = ctx.projects.iter().map(|p| p.rel.as_str()).collect();
         assert_eq!(rels, vec!["", "packages/ui", "web"]);
         assert!(ctx.compose);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn inspect_all_keys_by_path_and_round_trips_through_json() {
+        let d = scratch("all");
+        write(d.join("Cargo.toml"), "");
+        let key = d.to_string_lossy().into_owned();
+        let map = inspect_all([key.as_str()]);
+        assert!(map[&key].projects[0].has_cargo);
+        assert!(map[&key].projects[0].files.iter().any(|f| f == "Cargo.toml"));
+
+        // The cache persists this map as JSON — it must survive the round trip
+        // (in particular `files`, which used to be `#[serde(skip)]`).
+        let json = serde_json::to_string(&map).unwrap();
+        let back: HashMap<String, RepoContext> = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, map);
         let _ = fs::remove_dir_all(&d);
     }
 
