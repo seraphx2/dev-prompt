@@ -1,0 +1,32 @@
+// Shapes mirrored from the Rust backend (serde-serialized, camelCase).
+
+export interface Repo {
+  name: string;
+  path: string;
+  sentinels: string[];
+  /** Unix seconds when this repo was last observed on disk. */
+  lastSeen: number;
+}
+
+export interface ScoredRepo {
+  repo: Repo;
+  score: number;
+  /** Character indices in the matched haystack that the query hit. */
+  matchIndices: number[];
+}
+
+export interface Action {
+  id: string;
+  label: string;
+  /** Short hint shown on the right of the row, e.g. the resolved command. */
+  hint: string;
+  /** True when this action is handled purely in the frontend (e.g. copy path). */
+  clientSide: boolean;
+}
+
+export interface RepoListPayload {
+  repos: Repo[];
+  /** Age of the cache in seconds; -1 when there was no cache. */
+  ageSecs: number;
+  stale: boolean;
+}
