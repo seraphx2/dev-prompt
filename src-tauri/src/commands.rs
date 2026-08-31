@@ -164,13 +164,13 @@ pub fn get_config(state: State<'_, AppState>) -> Config {
 /// active, which universal actions are available.
 #[tauri::command]
 pub fn config_summary(state: State<'_, AppState>) -> AppResult<crate::rules::ConfigSummary> {
-    let path = config::config_path()?.to_string_lossy().into_owned();
+    let path = config::rules_path()?.to_string_lossy().into_owned();
     let cfg = state.config.lock().unwrap();
     Ok(crate::rules::summarize(&cfg, path))
 }
 
-/// Re-read `config.yaml` from disk, forget memoized program lookups, and return
-/// the fresh merged config (does not re-scan repos).
+/// Re-read `config.yaml` + `rules.yaml` from disk, forget memoized program
+/// lookups, and return the fresh merged config (does not re-scan repos).
 #[tauri::command]
 pub fn reload_config(state: State<'_, AppState>) -> AppResult<Config> {
     crate::rules::clear_program_cache();
@@ -185,6 +185,7 @@ pub struct ConfigPatch {
     pub hotkey: Option<String>,
     pub roots: Option<Vec<String>>,
     pub cache_ttl_secs: Option<u64>,
+    pub scan_max_depth: Option<usize>,
 }
 
 /// Apply an editable subset of settings: write `config.yaml`, update the live
@@ -214,6 +215,11 @@ pub fn save_config(
     if let Some(ttl) = patch.cache_ttl_secs {
         user.cache_ttl_secs = Some(ttl);
     }
+    if let Some(depth) = patch.scan_max_depth {
+        user.scan = Some(config::ScanConfig {
+            max_depth: depth.max(1),
+        });
+    }
 
     let new_hotkey = user.hotkey.clone().unwrap_or_else(|| old_hotkey.clone());
     if new_hotkey != old_hotkey {
@@ -236,14 +242,14 @@ pub fn set_dismiss_on_blur(state: State<'_, AppState>, enabled: bool) {
     *state.dismiss_on_blur.lock().unwrap() = enabled;
 }
 
-/// Open `config.yaml` with the OS default handler for `.yaml` (or the "Open
+/// Open `rules.yaml` with the OS default handler for `.yaml` (or the "Open
 /// with" picker when nothing is associated), and drop the overlay's
 /// always-on-top so the editor is actually visible in front of it.
 #[tauri::command]
-pub fn open_config_file(window: tauri::WebviewWindow) -> AppResult<()> {
-    let path = config::config_path()?;
+pub fn open_rules_file(window: tauri::WebviewWindow) -> AppResult<()> {
+    let path = config::rules_path()?;
     if !path.exists() {
-        let _ = config::load()?; // writes the starter file
+        let _ = config::load()?; // writes the scaffold
     }
 
     #[cfg(windows)]

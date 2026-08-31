@@ -1,0 +1,38 @@
+# dev-prompt — rule overrides. Layered over the bundled defaults; the Settings
+# screen never rewrites this file, so any comments you add here are safe.
+#
+# Your settings — hotkey, roots, scan depth, cache lifetime — are NOT here; they
+# live in the Settings screen. This file only teaches dev-prompt about tools and
+# projects. Full reference:
+# https://github.com/seraphx2/dev-prompt/blob/main/docs/configuration.md
+#
+# Uncomment a section and fill it in. Anything omitted keeps the default. Then
+# run Settings ▸ Reload config (or restart) to apply.
+
+# Extra discovery markers. A rule's `match` already counts as one.
+# markers:
+#   - my-marker-file
+# markers_replace: false          # true = ignore the built-in markers entirely
+
+# How to locate an executable, referenced from actions as {{key}}.
+# programs:
+#   anypoint:
+#     windows: ["D:/tools/AnypointStudio/AnypointStudio.exe"]
+
+# Turn off built-in rules by id.
+# rules_disable: [docker-image]
+
+# Your rules run before the built-ins.
+# rules:
+#   - id: make
+#     match: Makefile
+#     requires: [make]
+#     actions:
+#       - { name: "make", run: "make", terminal: true }
+#       - { name: "make test", run: "make test", terminal: true }
+
+# Actions offered for every repo.
+# universal:
+#   default: vscode                # which action Enter runs on a repo in the list
+#   add:
+#     - { id: helix, name: "Edit in Helix", run: "hx {{path}}", terminal: true, needs: [helix] }

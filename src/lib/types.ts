@@ -49,7 +49,7 @@ export interface AppConfig {
 }
 
 export interface ConfigSummary {
-  configPath: string;
+  rulesPath: string;
   markerCount: number;
   programs: { key: string; resolved: string | null }[];
   rules: {

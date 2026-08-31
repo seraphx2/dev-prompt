@@ -47,7 +47,7 @@ export function configSummary(): Promise<ConfigSummary> {
   return invoke<ConfigSummary>("config_summary");
 }
 
-/** Re-read config.yaml from disk and drop cached program lookups. */
+/** Re-read config.yaml + rules.yaml from disk and drop cached program lookups. */
 export function reloadConfig(): Promise<AppConfig> {
   return invoke<AppConfig>("reload_config");
 }
@@ -57,12 +57,14 @@ export function saveConfig(patch: {
   hotkey?: string;
   roots?: string[];
   cache_ttl_secs?: number;
+  scan_max_depth?: number;
 }): Promise<AppConfig> {
   return invoke<AppConfig>("save_config", { patch });
 }
 
-export function openConfigFile(): Promise<void> {
-  return invoke<void>("open_config_file");
+/** Open rules.yaml (the hand-authored overrides file) in the default editor. */
+export function openRulesFile(): Promise<void> {
+  return invoke<void>("open_rules_file");
 }
 
 /** Toggle whether clicking away dismisses the overlay (off for the settings screen). */

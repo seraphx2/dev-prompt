@@ -225,7 +225,7 @@ pub fn run() {
             commands::config_summary,
             commands::reload_config,
             commands::save_config,
-            commands::open_config_file,
+            commands::open_rules_file,
             commands::set_dismiss_on_blur,
         ])
         .run(tauri::generate_context!())

@@ -6,11 +6,19 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, AppResult};
 
 pub const APP_DIR: &str = "dev-prompt";
+/// UI-managed settings (hotkey, roots, scan, cache lifetime).
 pub const CONFIG_FILE: &str = "config.yaml";
+/// Hand-authored rule-engine overrides (markers, programs, rules, universal).
+pub const RULES_FILE: &str = "rules.yaml";
 
-/// The bundled defaults, embedded at compile time. The user's `config.yaml`
-/// layers on top of this — see [`merge_user`].
+/// The bundled defaults, embedded at compile time. `config.yaml` supplies
+/// settings and `rules.yaml` supplies overrides, both layered on top — see
+/// [`merge_settings`] and [`merge_overrides`].
 const DEFAULT_CONFIG_YAML: &str = include_str!("default_config.yaml");
+
+/// Scaffold written to `rules.yaml` on first run — structure plus commented
+/// examples; parses as an empty override set.
+const RULES_TEMPLATE: &str = include_str!("rules_template.yaml");
 
 // --- runtime (merged) config ------------------------------------------------
 
@@ -218,6 +226,8 @@ pub struct UniversalConfig {
 
 // --- user config (the on-disk file) ---------------------------------------
 
+/// `config.yaml` — the settings the Settings screen manages. No rule-engine
+/// keys live here; those are in `rules.yaml` ([`RuleOverrides`]).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct UserConfig {
@@ -229,6 +239,13 @@ pub struct UserConfig {
     pub scan: Option<ScanConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_ttl_secs: Option<u64>,
+}
+
+/// `rules.yaml` — hand-authored overrides layered over the bundled defaults.
+/// The Settings screen never rewrites this file, so comments survive.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct RuleOverrides {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub markers: Vec<Marker>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -261,7 +278,8 @@ pub fn bundled_defaults() -> Config {
         .expect("bundled default_config.yaml must parse")
 }
 
-fn merge_user(cfg: &mut Config, u: UserConfig) {
+/// Apply `config.yaml` — plain scalar settings, present values win.
+fn merge_settings(cfg: &mut Config, u: UserConfig) {
     if let Some(h) = u.hotkey {
         cfg.hotkey = h;
     }
@@ -274,7 +292,10 @@ fn merge_user(cfg: &mut Config, u: UserConfig) {
     if let Some(t) = u.cache_ttl_secs {
         cfg.cache_ttl_secs = t;
     }
+}
 
+/// Apply `rules.yaml` — the rule-engine overrides.
+fn merge_overrides(cfg: &mut Config, u: RuleOverrides) {
     if u.markers_replace {
         cfg.markers = u.markers;
     } else {
@@ -331,21 +352,33 @@ fn merge_user(cfg: &mut Config, u: UserConfig) {
     }
 }
 
-/// Load the merged runtime config, writing a starter `config.yaml` on first run.
+/// Load the merged runtime config, writing a starter `config.yaml` and a
+/// `rules.yaml` scaffold on first run.
 pub fn load() -> AppResult<Config> {
-    let path = config_path()?;
-    if !path.exists() {
+    let mut cfg = bundled_defaults();
+
+    let settings_path = config_path()?;
+    if !settings_path.exists() {
         save_user(&first_run_user())?;
     }
-    let mut cfg = bundled_defaults();
-    if let Ok(text) = std::fs::read_to_string(&path) {
+    if let Ok(text) = std::fs::read_to_string(&settings_path) {
         let user: UserConfig = serde_yaml_ng::from_str(&text)?;
-        merge_user(&mut cfg, user);
+        merge_settings(&mut cfg, user);
     }
+
+    let overrides_path = rules_path()?;
+    if !overrides_path.exists() {
+        std::fs::write(&overrides_path, RULES_TEMPLATE)?;
+    }
+    if let Ok(text) = std::fs::read_to_string(&overrides_path) {
+        let ov: RuleOverrides = serde_yaml_ng::from_str(&text)?;
+        merge_overrides(&mut cfg, ov);
+    }
+
     Ok(cfg)
 }
 
-/// The raw user file (for the settings screen), or a starter if none exists.
+/// The raw settings file (for the settings screen), or a starter if none exists.
 pub fn load_user() -> AppResult<UserConfig> {
     let path = config_path()?;
     if !path.exists() {
@@ -357,9 +390,10 @@ pub fn load_user() -> AppResult<UserConfig> {
 
 pub fn save_user(u: &UserConfig) -> AppResult<()> {
     let path = config_path()?;
-    let header = "# dev-prompt user config. Bundled defaults (markers, programs,\n\
-                  # rules, universal actions) are layered underneath — only put\n\
-                  # your overrides here. See docs/config-design.md.\n\n";
+    let header = "# dev-prompt settings — managed by the Settings screen. Rule\n\
+                  # overrides (markers / programs / rules / universal) live in\n\
+                  # rules.yaml. Reference:\n\
+                  # https://github.com/seraphx2/dev-prompt/blob/main/docs/configuration.md\n\n";
     let body = serde_yaml_ng::to_string(u)?;
     std::fs::write(&path, format!("{header}{body}"))?;
     Ok(())
@@ -369,8 +403,8 @@ fn first_run_user() -> UserConfig {
     UserConfig {
         hotkey: Some("CmdOrCtrl+Shift+Space".into()),
         roots: default_roots(),
+        scan: Some(ScanConfig::default()),
         cache_ttl_secs: Some(900),
-        ..Default::default()
     }
 }
 
@@ -432,6 +466,10 @@ pub fn cache_dir() -> AppResult<PathBuf> {
 
 pub fn config_path() -> AppResult<PathBuf> {
     Ok(config_dir()?.join(CONFIG_FILE))
+}
+
+pub fn rules_path() -> AppResult<PathBuf> {
+    Ok(config_dir()?.join(RULES_FILE))
 }
 
 /// Expand `~`, `%VAR%` (Windows-style) and `$VAR` (POSIX-style).
@@ -541,22 +579,45 @@ mod tests {
     }
 
     #[test]
-    fn user_config_overrides_and_prepends() {
+    fn settings_file_overrides_scalars() {
         let mut cfg = bundled_defaults();
-        let base_rule_count = cfg.rules.len();
-        let user: UserConfig = serde_yaml_ng::from_str(
+        let user: UserConfig =
+            serde_yaml_ng::from_str("hotkey: Alt+Space\nscan:\n  max_depth: 7\n").unwrap();
+        merge_settings(&mut cfg, user);
+        assert_eq!(cfg.hotkey, "Alt+Space");
+        assert_eq!(cfg.scan.max_depth, 7);
+    }
+
+    #[test]
+    fn rules_file_prepends_and_disables() {
+        let mut cfg = bundled_defaults();
+        let base = cfg.rules.len();
+        let ov: RuleOverrides = serde_yaml_ng::from_str(
             r#"
-hotkey: Alt+Space
 rules:
   - match: "Makefile"
     actions: [{ name: "make", run: "make", terminal: true }]
+rules_disable: [docker-image]
 "#,
         )
         .unwrap();
-        merge_user(&mut cfg, user);
-        assert_eq!(cfg.hotkey, "Alt+Space");
-        assert_eq!(cfg.rules.len(), base_rule_count + 1);
+        merge_overrides(&mut cfg, ov);
         assert_eq!(cfg.rules[0].actions[0].name, "make"); // user rule is first
+        assert_eq!(cfg.rules.len(), base + 1 - 1); // +make, -docker-image
+        assert!(cfg
+            .disabled_rules
+            .iter()
+            .any(|r| r.id.as_deref() == Some("docker-image")));
+    }
+
+    #[test]
+    fn rules_template_parses_as_an_empty_override_set() {
+        let ov: RuleOverrides = serde_yaml_ng::from_str(RULES_TEMPLATE).unwrap();
+        assert!(ov.markers.is_empty());
+        assert!(ov.programs.is_empty());
+        assert!(ov.rules.is_empty());
+        assert!(ov.rules_disable.is_empty());
+        assert!(ov.universal.is_none());
     }
 
     #[test]

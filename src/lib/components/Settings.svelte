@@ -3,7 +3,7 @@
   import {
     configSummary,
     getConfig,
-    openConfigFile,
+    openRulesFile,
     reloadConfig,
     saveConfig,
   } from "../ipc";
@@ -20,6 +20,7 @@
   let hotkey = $state("");
   let roots = $state<string[]>([]);
   let ttlMin = $state(15);
+  let scanDepth = $state(4);
   let loaded = $state(false);
   let busy = $state(false);
   let msg = $state("");
@@ -163,11 +164,13 @@
   function applyConfig(c: {
     hotkey: string;
     roots: string[];
+    scan: { max_depth: number };
     cache_ttl_secs: number;
   }) {
     hotkey = c.hotkey;
     roots = c.roots.length ? [...c.roots] : [""];
     ttlMin = Math.max(1, Math.round(c.cache_ttl_secs / 60));
+    scanDepth = Math.max(1, c.scan?.max_depth ?? 4);
   }
 
   async function reload() {
@@ -185,12 +188,12 @@
     }
   }
 
-  async function openFile() {
+  async function openRules() {
     try {
       // Backend drops the overlay's always-on-top so the editor comes to the
       // front; the settings screen stays open behind it with your edits intact.
-      await openConfigFile();
-      note("Opened in your default editor.");
+      await openRulesFile();
+      note("Opened rules.yaml in your default editor.");
     } catch (e) {
       note(`${e}`, true);
     }
@@ -204,6 +207,7 @@
         hotkey: hotkey.trim(),
         roots: roots.map((r) => r.trim()).filter(Boolean),
         cache_ttl_secs: Math.max(60, Math.round(ttlMin * 60)),
+        scan_max_depth: Math.max(1, Math.round(scanDepth)),
       });
       note("Saved.");
       onsaved();
@@ -337,15 +341,28 @@
       </button>
     </div>
 
-    <label class="block space-y-1.5">
-      <span class="text-orange-400">Cache lifetime (minutes)</span>
-      <input
-        type="number"
-        min="1"
-        bind:value={ttlMin}
-        class="w-24 rounded border border-hair bg-white/[0.04] px-2 py-1.5 text-white/90 focus:border-white/25 focus:outline-none"
-      />
-    </label>
+    <div class="flex gap-6">
+      <label class="block space-y-1.5">
+        <span class="text-orange-400">Cache lifetime (minutes)</span>
+        <input
+          type="number"
+          min="1"
+          bind:value={ttlMin}
+          class="w-24 rounded border border-hair bg-white/[0.04] px-2 py-1.5 text-white/90 focus:border-white/25 focus:outline-none"
+        />
+      </label>
+      <label class="block space-y-1.5">
+        <span class="text-orange-400">Scan depth</span>
+        <input
+          type="number"
+          min="1"
+          max="12"
+          bind:value={scanDepth}
+          title="How many directory levels deep the scan looks for repos"
+          class="w-24 rounded border border-hair bg-white/[0.04] px-2 py-1.5 text-white/90 focus:border-white/25 focus:outline-none"
+        />
+      </label>
+    </div>
 
     <div>
       <button
@@ -359,31 +376,35 @@
     </div>
 
     <div class="space-y-2 border-t border-hair pt-4">
-      <span class="text-orange-400">Configuration</span>
+      <span class="text-orange-400">Rules</span>
+      <p class="text-[11px] text-white/30">
+        Editor / build-tool / launcher mappings, layered over the built-ins. Edit
+        <span class="font-mono">rules.yaml</span>, then reload.
+      </p>
       <div class="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          onclick={openFile}
+          onclick={openRules}
           class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90"
         >
-          Open config.yaml
+          Open rules file
         </button>
         <button
           type="button"
           onclick={reload}
           disabled={busy}
-          title="Re-read config.yaml from disk"
+          title="Re-read config.yaml + rules.yaml from disk"
           class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
         >
           Reload config
         </button>
       </div>
-      {#if summary?.configPath}
+      {#if summary?.rulesPath}
         <div
           class="truncate font-mono text-[11px] text-white/25"
-          title={summary.configPath}
+          title={summary.rulesPath}
         >
-          {summary.configPath}
+          {summary.rulesPath}
         </div>
       {/if}
     </div>

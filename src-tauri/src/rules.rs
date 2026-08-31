@@ -639,7 +639,7 @@ pub fn build_actions(repo: &Repo, ctx: &RepoContext, config: &Config) -> Vec<Act
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigSummary {
-    pub config_path: String,
+    pub rules_path: String,
     pub marker_count: usize,
     pub programs: Vec<ProgramStatus>,
     pub rules: Vec<RuleStatus>,
@@ -677,7 +677,7 @@ pub struct UniversalStatus {
     pub disabled: bool,
 }
 
-pub fn summarize(config: &Config, config_path: String) -> ConfigSummary {
+pub fn summarize(config: &Config, rules_path: String) -> ConfigSummary {
     let resolver = Resolver::new(&config.programs);
 
     let programs = config
@@ -751,7 +751,7 @@ pub fn summarize(config: &Config, config_path: String) -> ConfigSummary {
         .collect();
 
     ConfigSummary {
-        config_path,
+        rules_path,
         marker_count: config.markers.len(),
         programs,
         rules,

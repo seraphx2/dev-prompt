@@ -1,11 +1,11 @@
 # dev-prompt bundled defaults.
 #
-# This file is embedded in the binary. The user's config.yaml is layered on top:
-#   - hotkey / roots / scan / cache_ttl_secs : replace
-#   - markers   : appended (set markers_replace: true to start fresh)
-#   - programs  : merged by key
-#   - rules     : user rules are prepended; rules_disable: [id] drops built-ins
-#   - universal : universal.disable / universal.add / universal.default
+# Embedded in the binary. Two user files layer on top (see docs/configuration.md):
+#   config.yaml (Settings screen)  — hotkey / roots / scan / cache_ttl_secs: replace
+#   rules.yaml  (hand-authored)    — markers  : appended (markers_replace: true to reset)
+#                                    programs : merged by key
+#                                    rules    : prepended; rules_disable: [id] drops built-ins
+#                                    universal: universal.disable / .add / .default
 #
 # Every rules[].match also acts as a discovery marker, so adding a rule for an
 # ecosystem makes those repos show up in the list as well as gain actions.
