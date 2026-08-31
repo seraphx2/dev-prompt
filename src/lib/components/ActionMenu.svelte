@@ -37,11 +37,18 @@
   const key = (it: MenuItem) =>
     it.kind === "submenu" ? `sub:${it.target}` : it.action.id;
 
-  // Keep the selected row in view as the user arrows through a long list.
+  // Auto-scroll follows keyboard navigation only — see the note in ResultList:
+  // scrolling a hovered row shifts the list under the mouse and loops.
+  let skipScroll = false;
+
   $effect(() => {
-    if (!container) return;
+    const idx = selected; // track the selection
+    if (skipScroll) {
+      skipScroll = false;
+      return;
+    }
     container
-      .querySelector<HTMLElement>(`[data-idx="${selected}"]`)
+      ?.querySelector<HTMLElement>(`[data-idx="${idx}"]`)
       ?.scrollIntoView({ block: "nearest" });
   });
 </script>
@@ -102,7 +109,10 @@
         class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors
                {i === selected ? 'bg-white/10' : 'hover:bg-white/[0.04]'}"
         onclick={() => onrun(i)}
-        onpointerenter={() => onselect(i)}
+        onpointerenter={() => {
+          if (i !== selected) skipScroll = true;
+          onselect(i);
+        }}
       >
         {#if item.kind === "submenu"}
           <svg

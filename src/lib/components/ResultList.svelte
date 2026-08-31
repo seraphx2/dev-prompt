@@ -18,11 +18,20 @@
 
   let container: HTMLDivElement | undefined = $state();
 
-  // Keep the selected row scrolled into view as the user arrows through.
+  // Auto-scroll follows keyboard navigation only. A pointer hover also moves the
+  // selection, but that row is already under the cursor — scrolling it would
+  // shift the list under the mouse and trigger a hover/scroll feedback loop.
+  let skipScroll = false;
+
   $effect(() => {
-    if (!container) return;
-    const el = container.querySelector<HTMLElement>(`[data-idx="${selected}"]`);
-    el?.scrollIntoView({ block: "nearest" });
+    const idx = selected; // track the selection
+    if (skipScroll) {
+      skipScroll = false;
+      return;
+    }
+    container
+      ?.querySelector<HTMLElement>(`[data-idx="${idx}"]`)
+      ?.scrollIntoView({ block: "nearest" });
   });
 </script>
 
@@ -41,7 +50,10 @@
           {entry}
           active={i === selected}
           onactivate={() => onactivate(i)}
-          onhover={() => onselect(i)}
+          onhover={() => {
+            if (i !== selected) skipScroll = true;
+            onselect(i);
+          }}
         />
       </div>
     {/each}
