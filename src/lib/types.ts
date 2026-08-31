@@ -31,8 +31,23 @@ export interface Action {
 export interface AppConfig {
   hotkey: string;
   roots: string[];
-  scan: { max_depth: number; sentinels: string[] };
+  scan: { max_depth: number };
   cache_ttl_secs: number;
+}
+
+export interface ConfigSummary {
+  configPath: string;
+  markerCount: number;
+  programs: { key: string; resolved: string | null }[];
+  rules: {
+    id: string;
+    matches: string[];
+    kind: string;
+    scope: string;
+    available: boolean;
+    missing: string[];
+  }[];
+  universal: { id: string; label: string; default: boolean; available: boolean }[];
 }
 
 export interface RepoListPayload {

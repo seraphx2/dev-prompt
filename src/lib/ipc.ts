@@ -1,7 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import type { Action, AppConfig, RepoListPayload, ScoredRepo } from "./types";
+import type {
+  Action,
+  AppConfig,
+  ConfigSummary,
+  RepoListPayload,
+  ScoredRepo,
+} from "./types";
 
 /** Cache-first repo list; returns instantly from the on-disk cache when present. */
 export function listRepos(): Promise<RepoListPayload> {
@@ -34,6 +40,16 @@ export function hideOverlay(): Promise<void> {
 
 export function getConfig(): Promise<AppConfig> {
   return invoke<AppConfig>("get_config");
+}
+
+/** Read-only view of the merged config (program resolution + rule availability). */
+export function configSummary(): Promise<ConfigSummary> {
+  return invoke<ConfigSummary>("config_summary");
+}
+
+/** Re-read config.yaml from disk and drop cached program lookups. */
+export function reloadConfig(): Promise<AppConfig> {
+  return invoke<AppConfig>("reload_config");
 }
 
 /** Save an editable subset of settings; returns the updated config. */

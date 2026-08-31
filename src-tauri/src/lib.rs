@@ -214,6 +214,8 @@ pub fn run() {
             commands::run_action,
             commands::hide_overlay,
             commands::get_config,
+            commands::config_summary,
+            commands::reload_config,
             commands::save_config,
             commands::open_config_file,
             commands::set_dismiss_on_blur,

@@ -1,6 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { getConfig, openConfigFile, saveConfig } from "../ipc";
+  import {
+    configSummary,
+    getConfig,
+    openConfigFile,
+    reloadConfig,
+    saveConfig,
+  } from "../ipc";
+  import type { ConfigSummary } from "../types";
 
   let { onback, onsaved }: { onback: () => void; onsaved: () => void } = $props();
 
@@ -11,19 +18,53 @@
   let busy = $state(false);
   let msg = $state("");
   let confirmIdx = $state<number | null>(null);
+  let summary = $state<ConfigSummary | null>(null);
+
+  const base = (p: string) => p.split(/[\\/]/).pop() || p;
+
+  async function loadSummary() {
+    try {
+      summary = await configSummary();
+    } catch {
+      summary = null;
+    }
+  }
 
   onMount(async () => {
-    const c = await getConfig();
-    hotkey = c.hotkey;
-    roots = c.roots.length ? [...c.roots] : [""];
-    ttlMin = Math.max(1, Math.round(c.cache_ttl_secs / 60));
+    applyConfig(await getConfig());
     loaded = true;
+    void loadSummary();
   });
 
   const addRoot = () => (roots = [...roots, ""]);
   function removeRoot(i: number) {
     roots = roots.filter((_, k) => k !== i);
     confirmIdx = null;
+  }
+
+  function applyConfig(c: {
+    hotkey: string;
+    roots: string[];
+    cache_ttl_secs: number;
+  }) {
+    hotkey = c.hotkey;
+    roots = c.roots.length ? [...c.roots] : [""];
+    ttlMin = Math.max(1, Math.round(c.cache_ttl_secs / 60));
+  }
+
+  async function reload() {
+    busy = true;
+    msg = "";
+    try {
+      applyConfig(await reloadConfig());
+      await loadSummary();
+      onsaved(); // re-scan so marker/rule changes take effect in the repo list
+      msg = "Reloaded from disk.";
+    } catch (e) {
+      msg = `${e}`;
+    } finally {
+      busy = false;
+    }
   }
 
   async function openFile() {
@@ -48,6 +89,7 @@
       });
       msg = "Saved.";
       onsaved();
+      void loadSummary();
     } catch (e) {
       msg = `${e}`;
     } finally {
@@ -161,6 +203,15 @@
       >
         Open config.yaml
       </button>
+      <button
+        type="button"
+        onclick={reload}
+        disabled={busy}
+        title="Re-read config.yaml from disk"
+        class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
+      >
+        Reload config
+      </button>
       {#if msg}<span class="text-[12px] text-white/40">{msg}</span>{/if}
     </div>
 
@@ -168,5 +219,75 @@
       Detection rules — which files map to which launch actions — are edited
       directly in <code>config.yaml</code>. Saving here re-scans your roots.
     </p>
+
+    {#if summary}
+      <details open class="rounded border border-hair">
+        <summary
+          class="cursor-pointer select-none px-3 py-2 text-[12px] text-white/60 hover:text-white/90"
+        >
+          Active configuration
+          <span class="text-white/25"
+            >· {summary.rules.length} rules · {summary.programs.length} programs · {summary.markerCount}
+            markers</span
+          >
+        </summary>
+
+        <div class="space-y-3 border-t border-hair px-3 py-3 font-mono text-[11px]">
+          <div>
+            <div class="mb-1 text-white/35">programs</div>
+            <div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+              {#each summary.programs as p (p.key)}
+                <span class="text-white/70">{p.key}</span>
+                {#if p.resolved}
+                  <span class="truncate text-emerald-300/70" title={p.resolved}
+                    >{base(p.resolved)}</span
+                  >
+                {:else}
+                  <span class="text-white/25">not found</span>
+                {/if}
+              {/each}
+            </div>
+          </div>
+
+          <div>
+            <div class="mb-1 text-white/35">rules</div>
+            <div class="space-y-1">
+              {#each summary.rules as r (r.id)}
+                <div class="flex flex-wrap items-baseline gap-x-2">
+                  <span class={r.available ? "text-white/70" : "text-white/30"}
+                    >{r.id}</span
+                  >
+                  <span class="text-white/30">{r.matches.join(", ")}</span>
+                  <span class="text-white/40">→ {r.kind}</span>
+                  {#if r.scope === "repo"}<span class="text-white/25">@repo</span>{/if}
+                  {#if !r.available}
+                    <span class="text-amber-300/70">unmet: {r.missing.join(", ")}</span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          </div>
+
+          <div>
+            <div class="mb-1 text-white/35">universal</div>
+            <div class="space-y-0.5">
+              {#each summary.universal as u (u.id)}
+                <div class="flex items-baseline gap-2">
+                  <span class={u.available ? "text-white/70" : "text-white/30"}
+                    >{u.label}</span
+                  >
+                  {#if u.default}<span class="text-sky-300/70">default</span>{/if}
+                  {#if !u.available}<span class="text-white/25">unavailable</span>{/if}
+                </div>
+              {/each}
+            </div>
+          </div>
+
+          <div class="truncate text-white/20" title={summary.configPath}>
+            {summary.configPath}
+          </div>
+        </div>
+      </details>
+    {/if}
   {/if}
 </div>

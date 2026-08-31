@@ -46,6 +46,9 @@ programs:
   code:
     any: [code]
     windows: [code.cmd]
+  claude:
+    any: [claude]
+    windows: [claude.cmd]
   terminal:
     windows: [wt.exe]
     linux:
@@ -98,7 +101,7 @@ universal:
   default: terminal
   actions:
     - { id: terminal, name: "Open in terminal", terminal: true }
-    - { id: claude-code, name: "Launch Claude Code", terminal: true, run: "claude" }
+    - { id: claude-code, name: "Launch Claude Code", terminal: true, run: "claude", needs: [claude] }
     - { id: vscode, name: "Open in VS Code", program: "{{code}}", args: ["{{path}}"], needs: [code] }
     - { id: filemanager, name: "Reveal in file manager", program: "{{filemanager}}", args: ["{{path}}"] }
     - { id: copy-path, name: "Copy path", client: true }

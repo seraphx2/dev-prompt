@@ -48,6 +48,12 @@ fn program_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Forget every memoized program lookup (call after the config changes or a tool
+/// is installed while the app runs).
+pub fn clear_program_cache() {
+    program_cache().lock().unwrap().clear();
+}
+
 pub struct Resolver<'a> {
     programs: &'a std::collections::BTreeMap<String, ProgramSpec>,
 }
@@ -625,6 +631,114 @@ pub fn evaluate(config: &Config, ctx: &RepoContext, repo: &Repo) -> Vec<Action> 
 
 pub fn build_actions(repo: &Repo, ctx: &RepoContext, config: &Config) -> Vec<Action> {
     evaluate(config, ctx, repo)
+}
+
+// --- read-only summary (settings "what's active" view) --------------------
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigSummary {
+    pub config_path: String,
+    pub marker_count: usize,
+    pub programs: Vec<ProgramStatus>,
+    pub rules: Vec<RuleStatus>,
+    pub universal: Vec<UniversalStatus>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgramStatus {
+    pub key: String,
+    pub resolved: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleStatus {
+    pub id: String,
+    pub matches: Vec<String>,
+    pub kind: String,
+    pub scope: String,
+    pub available: bool,
+    pub missing: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UniversalStatus {
+    pub id: String,
+    pub label: String,
+    pub default: bool,
+    pub available: bool,
+}
+
+pub fn summarize(config: &Config, config_path: String) -> ConfigSummary {
+    let resolver = Resolver::new(&config.programs);
+
+    let programs = config
+        .programs
+        .keys()
+        .map(|k| ProgramStatus {
+            key: k.clone(),
+            resolved: resolver.resolve(k),
+        })
+        .collect();
+
+    let rules = config
+        .rules
+        .iter()
+        .filter(|r| r.disable.is_none())
+        .map(|r| {
+            let mut missing = Vec::new();
+            if !os_matches(r.when.as_deref()) {
+                missing.push(format!("os≠{}", r.when.clone().unwrap_or_default()));
+            }
+            for k in &r.needs {
+                if resolver.resolve(k).is_none() {
+                    missing.push(format!("{k}?"));
+                }
+            }
+            for b in &r.requires {
+                if which(b).is_none() {
+                    missing.push(format!("{b} (PATH)"));
+                }
+            }
+            RuleStatus {
+                id: r.id.clone().unwrap_or_else(|| "(unnamed)".into()),
+                matches: r.match_.globs().iter().map(|s| s.to_string()).collect(),
+                kind: match &r.provider {
+                    Some(p) => format!("provider: {p}"),
+                    None => format!("{} action(s)", r.actions.len()),
+                },
+                scope: format!("{:?}", r.scope).to_lowercase(),
+                available: missing.is_empty(),
+                missing,
+            }
+        })
+        .collect();
+
+    let universal = config
+        .universal
+        .actions
+        .iter()
+        .map(|a| {
+            let id = a.action_id();
+            UniversalStatus {
+                default: a.default || config.universal.default.as_deref() == Some(&id),
+                available: a.client || a.needs.iter().all(|k| resolver.resolve(k).is_some()),
+                label: a.name.clone(),
+                id,
+            }
+        })
+        .collect();
+
+    ConfigSummary {
+        config_path,
+        marker_count: config.markers.len(),
+        programs,
+        rules,
+        universal,
+    }
 }
 
 pub fn find_action(

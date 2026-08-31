@@ -68,8 +68,10 @@ pub async fn rescan_repos(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<RepoListPayload> {
-    // Re-read config.yaml so edits to `roots` take effect without an app restart.
-    // A YAML syntax error surfaces here instead of being silently ignored.
+    // Re-read config.yaml so edits to `roots` / rules take effect without an app
+    // restart. A YAML syntax error surfaces here instead of being silently
+    // ignored, and stale program lookups are forgotten.
+    crate::rules::clear_program_cache();
     let cfg = config::load()?;
     *state.config.lock().unwrap() = cfg.clone();
     let previous = state.repos.lock().unwrap().clone();
@@ -156,6 +158,25 @@ pub fn hide_overlay(window: tauri::WebviewWindow) -> AppResult<()> {
 #[tauri::command]
 pub fn get_config(state: State<'_, AppState>) -> Config {
     state.config.lock().unwrap().clone()
+}
+
+/// Read-only view of the merged config: which programs resolve, which rules are
+/// active, which universal actions are available.
+#[tauri::command]
+pub fn config_summary(state: State<'_, AppState>) -> AppResult<crate::rules::ConfigSummary> {
+    let path = config::config_path()?.to_string_lossy().into_owned();
+    let cfg = state.config.lock().unwrap();
+    Ok(crate::rules::summarize(&cfg, path))
+}
+
+/// Re-read `config.yaml` from disk, forget memoized program lookups, and return
+/// the fresh merged config (does not re-scan repos).
+#[tauri::command]
+pub fn reload_config(state: State<'_, AppState>) -> AppResult<Config> {
+    crate::rules::clear_program_cache();
+    let cfg = config::load()?;
+    *state.config.lock().unwrap() = cfg.clone();
+    Ok(cfg)
 }
 
 #[derive(Debug, serde::Deserialize)]
