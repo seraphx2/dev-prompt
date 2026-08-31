@@ -28,6 +28,19 @@ export interface Action {
   clientSide: boolean;
 }
 
+/** A row in the action menu — a runnable action, or a drill-in to a
+ *  sub-project's own action list. */
+export type MenuItem =
+  | { kind: "action"; group: string; action: Action; positions: number[] }
+  | {
+      kind: "submenu";
+      group: string;
+      /** The `Detected · <x>` group this row opens. */
+      target: string;
+      label: string;
+      count: number;
+    };
+
 export interface AppConfig {
   hotkey: string;
   roots: string[];

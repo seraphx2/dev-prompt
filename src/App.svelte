@@ -17,7 +17,7 @@
     searchRepos,
     setDismissOnBlur,
   } from "./lib/ipc";
-  import type { Action, ScoredRepo } from "./lib/types";
+  import type { Action, MenuItem, ScoredRepo } from "./lib/types";
   import { fuzzyScore } from "./lib/fuzzy";
 
   type Mode = "repo-list" | "action-menu" | "settings";
@@ -31,34 +31,99 @@
   let actionQuery = $state("");
   let actionSel = $state(0);
   let activeRepo = $state<ScoredRepo | null>(null);
+  /** When set, the action menu is drilled into this `Detected · <x>` group. */
+  let subGroup = $state<string | null>(null);
 
-  type FilteredAction = { action: Action; positions: number[] };
+  const SUB_PREFIX = "Detected · ";
 
-  // Fuzzy-filter the action list, keeping the original group order. A match on
-  // the label carries highlight positions; a match only on the group/hint still
-  // includes the row but without highlights (mirrors the repo list's name-vs-path
-  // behaviour).
-  const filteredActions = $derived.by<FilteredAction[]>(() => {
-    const q = actionQuery.trim();
-    if (!q) return actions.map((action) => ({ action, positions: [] }));
-    const out: FilteredAction[] = [];
-    for (const action of actions) {
+  function fuzzyItems(list: Action[], q: string, blankGroup = false): MenuItem[] {
+    const grp = (a: Action) => (blankGroup ? "" : a.group);
+    if (!q) {
+      return list.map((action) => ({
+        kind: "action" as const,
+        group: grp(action),
+        action,
+        positions: [],
+      }));
+    }
+    const out: MenuItem[] = [];
+    for (const action of list) {
       const onLabel = fuzzyScore(q, action.label);
       if (onLabel) {
-        out.push({ action, positions: onLabel.positions });
+        out.push({ kind: "action", group: grp(action), action, positions: onLabel.positions });
       } else if (fuzzyScore(q, `${action.group} ${action.hint}`)) {
-        out.push({ action, positions: [] });
+        out.push({ kind: "action", group: grp(action), action, positions: [] });
       }
     }
     return out;
+  }
+
+  // The rows shown in the action menu.
+  //  - drilled into a sub-project: just its actions (filtered)
+  //  - top level while typing: every action, flattened, so search reaches
+  //    into sub-projects
+  //  - top level idle: each sub-project collapses to one drill-in row
+  const menuItems = $derived.by<MenuItem[]>(() => {
+    const q = actionQuery.trim();
+
+    if (subGroup) {
+      return fuzzyItems(
+        actions.filter((a) => a.group === subGroup),
+        q,
+        true,
+      );
+    }
+    if (q) return fuzzyItems(actions, q);
+
+    const items: MenuItem[] = [];
+    const seen = new Set<string>();
+    for (const a of actions) {
+      if (a.group.startsWith(SUB_PREFIX)) {
+        if (!seen.has(a.group)) {
+          seen.add(a.group);
+          items.push({
+            kind: "submenu",
+            group: "Detected",
+            target: a.group,
+            label: a.group.slice(SUB_PREFIX.length),
+            count: actions.filter((x) => x.group === a.group).length,
+          });
+        }
+        continue;
+      }
+      items.push({ kind: "action", group: a.group, action: a, positions: [] });
+    }
+    return items;
   });
 
-  // Keep the action selection within the (possibly filtered) list.
+  // Keep the action selection within the current list.
   $effect(() => {
-    if (actionSel >= filteredActions.length) {
-      actionSel = Math.max(0, filteredActions.length - 1);
+    if (actionSel >= menuItems.length) {
+      actionSel = Math.max(0, menuItems.length - 1);
     }
   });
+
+  function activateMenuItem(i: number) {
+    const it = menuItems[i];
+    if (!it) return;
+    if (it.kind === "submenu") {
+      subGroup = it.target;
+      actionQuery = "";
+      actionSel = 0;
+    } else if (activeRepo) {
+      execute(it.action, activeRepo.repo.path);
+    }
+  }
+
+  function menuBack() {
+    if (subGroup) {
+      subGroup = null;
+      actionQuery = "";
+      actionSel = 0;
+    } else {
+      backToList();
+    }
+  }
 
   // The settings screen is a form — don't let a click-away dismiss it.
   $effect(() => {
@@ -138,6 +203,7 @@
     actions = await buildActions(entry.repo.path);
     actionQuery = "";
     actionSel = 0;
+    subGroup = null;
     mode = "action-menu";
   }
 
@@ -146,6 +212,7 @@
     activeRepo = null;
     actions = [];
     actionQuery = "";
+    subGroup = null;
   }
 
   // Keep the search box focused whenever the repo list is showing, so typing
@@ -225,24 +292,25 @@
   function onMenuKeydown(e: KeyboardEvent) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      actionSel = Math.min(actionSel + 1, filteredActions.length - 1);
+      actionSel = Math.min(actionSel + 1, menuItems.length - 1);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       actionSel = Math.max(actionSel - 1, 0);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (activeRepo && filteredActions[actionSel])
-        execute(filteredActions[actionSel].action, activeRepo.repo.path);
+      activateMenuItem(actionSel);
     } else if (e.key === "Tab") {
-      e.preventDefault(); // nothing "forward" from here; keep focus in the filter
+      // Tab goes "forward" — into a sub-project, if one is selected.
+      e.preventDefault();
+      if (menuItems[actionSel]?.kind === "submenu") activateMenuItem(actionSel);
     } else if (e.key === "Delete") {
       e.preventDefault();
       actionQuery = "";
       actionSel = 0;
     } else if (e.key === "Escape") {
-      // Esc always steps back a level.
+      // Esc steps back one level: sub-project → menu → repo list.
       e.preventDefault();
-      backToList();
+      menuBack();
     }
   }
 
@@ -306,14 +374,13 @@
   {:else if mode === "action-menu" && activeRepo}
     <ActionMenu
       repoName={activeRepo.repo.name}
-      items={filteredActions}
+      crumb={subGroup ? subGroup.slice(SUB_PREFIX.length) : null}
+      items={menuItems}
       bind:filter={actionQuery}
       selected={actionSel}
       onselect={(i) => (actionSel = i)}
-      onrun={(i) =>
-        activeRepo && filteredActions[i] &&
-        execute(filteredActions[i].action, activeRepo.repo.path)}
-      onback={backToList}
+      onrun={(i) => activateMenuItem(i)}
+      onback={menuBack}
     />
   {:else if mode === "settings"}
     <Settings onback={backToList} onsaved={() => rescan()} />

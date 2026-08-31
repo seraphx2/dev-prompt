@@ -1,13 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { Action } from "../types";
+  import type { MenuItem } from "../types";
   import Highlight from "./Highlight.svelte";
   import ClearButton from "./ClearButton.svelte";
 
-  type Item = { action: Action; positions: number[] };
-
   let {
     repoName,
+    crumb,
     items,
     filter = $bindable(),
     selected,
@@ -16,8 +15,10 @@
     onback,
   }: {
     repoName: string;
-    /** Already filtered by the parent; headers for empty groups fall away. */
-    items: Item[];
+    /** Sub-project name when drilled into one, else null. */
+    crumb: string | null;
+    /** Already filtered / grouped by the parent. */
+    items: MenuItem[];
     filter: string;
     selected: number;
     onselect: (i: number) => void;
@@ -33,6 +34,9 @@
     filterEl?.select();
   });
 
+  const key = (it: MenuItem) =>
+    it.kind === "submenu" ? `sub:${it.target}` : it.action.id;
+
   // Keep the selected row in view as the user arrows through a long list.
   $effect(() => {
     if (!container) return;
@@ -47,11 +51,15 @@
     type="button"
     class="shrink-0 rounded px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
     onclick={onback}
-    aria-label="Back to repository list"
+    aria-label="Back"
   >
     ←
   </button>
   <span class="shrink-0 truncate text-[13px] font-medium text-white/80">{repoName}</span>
+  {#if crumb}
+    <span class="shrink-0 text-white/25">›</span>
+    <span class="shrink-0 truncate text-[13px] font-medium text-orange-300">{crumb}</span>
+  {/if}
   <span class="shrink-0 text-white/15">/</span>
   <input
     bind:this={filterEl}
@@ -76,13 +84,13 @@
       No actions match.
     </div>
   {:else}
-    {#each items as item, i (item.action.id)}
-      {#if i === 0 || items[i - 1].action.group !== item.action.group}
-        {#if item.action.group}
+    {#each items as item, i (key(item))}
+      {#if i === 0 || items[i - 1].group !== item.group}
+        {#if item.group}
           <div
             class="truncate px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-orange-400"
           >
-            {item.action.group}
+            {item.group}
           </div>
         {:else}
           <div class="my-1 border-t border-hair"></div>
@@ -96,12 +104,43 @@
         onclick={() => onrun(i)}
         onpointerenter={() => onselect(i)}
       >
-        <span class="flex-1 truncate text-[13px] text-white/90">
-          <Highlight text={item.action.label} indices={item.positions} />
-        </span>
-        <span class="shrink-0 truncate font-mono text-[11px] text-white/35"
-          >{item.action.hint}</span
-        >
+        {#if item.kind === "submenu"}
+          <svg
+            class="h-4 w-4 shrink-0 text-orange-300"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M4 6a2 2 0 0 1 2-2h3l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+          </svg>
+          <span class="flex-1 truncate text-[13px] font-medium text-white/90"
+            >{item.label}</span
+          >
+          <span class="shrink-0 font-mono text-[11px] text-white/30"
+            >{item.count} action{item.count === 1 ? "" : "s"}</span
+          >
+          <svg
+            class="h-4 w-4 shrink-0 text-white/50"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="m9 6 6 6-6 6" />
+          </svg>
+        {:else}
+          <span class="flex-1 truncate text-[13px] text-white/90">
+            <Highlight text={item.action.label} indices={item.positions} />
+          </span>
+          <span class="shrink-0 truncate font-mono text-[11px] text-white/35"
+            >{item.action.hint}</span
+          >
+        {/if}
       </button>
     {/each}
   {/if}
