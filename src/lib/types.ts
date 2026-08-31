@@ -46,8 +46,15 @@ export interface ConfigSummary {
     scope: string;
     available: boolean;
     missing: string[];
+    disabled: boolean;
   }[];
-  universal: { id: string; label: string; default: boolean; available: boolean }[];
+  universal: {
+    id: string;
+    label: string;
+    default: boolean;
+    available: boolean;
+    disabled: boolean;
+  }[];
 }
 
 export interface RepoListPayload {

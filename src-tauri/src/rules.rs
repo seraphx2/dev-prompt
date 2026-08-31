@@ -661,6 +661,8 @@ pub struct RuleStatus {
     pub scope: String,
     pub available: bool,
     pub missing: Vec<String>,
+    /// The user turned this built-in off (`rules_disable` / bare `disable:`).
+    pub disabled: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -670,6 +672,8 @@ pub struct UniversalStatus {
     pub label: String,
     pub default: bool,
     pub available: bool,
+    /// The user turned this built-in off (`universal.disable`).
+    pub disabled: bool,
 }
 
 pub fn summarize(config: &Config, config_path: String) -> ConfigSummary {
@@ -684,52 +688,65 @@ pub fn summarize(config: &Config, config_path: String) -> ConfigSummary {
         })
         .collect();
 
+    let rule_status = |r: &Rule, disabled: bool| {
+        let mut missing = Vec::new();
+        if !os_matches(r.when.as_deref()) {
+            missing.push(format!("os≠{}", r.when.clone().unwrap_or_default()));
+        }
+        for k in &r.needs {
+            if resolver.resolve(k).is_none() {
+                missing.push(format!("{k}?"));
+            }
+        }
+        for b in &r.requires {
+            if which(b).is_none() {
+                missing.push(format!("{b} (PATH)"));
+            }
+        }
+        RuleStatus {
+            id: r.id.clone().unwrap_or_else(|| "(unnamed)".into()),
+            matches: r.match_.globs().iter().map(|s| s.to_string()).collect(),
+            kind: match &r.provider {
+                Some(p) => format!("provider: {p}"),
+                None => format!("{} action(s)", r.actions.len()),
+            },
+            scope: format!("{:?}", r.scope).to_lowercase(),
+            available: !disabled && missing.is_empty(),
+            missing,
+            disabled,
+        }
+    };
     let rules = config
         .rules
         .iter()
         .filter(|r| r.disable.is_none())
-        .map(|r| {
-            let mut missing = Vec::new();
-            if !os_matches(r.when.as_deref()) {
-                missing.push(format!("os≠{}", r.when.clone().unwrap_or_default()));
-            }
-            for k in &r.needs {
-                if resolver.resolve(k).is_none() {
-                    missing.push(format!("{k}?"));
-                }
-            }
-            for b in &r.requires {
-                if which(b).is_none() {
-                    missing.push(format!("{b} (PATH)"));
-                }
-            }
-            RuleStatus {
-                id: r.id.clone().unwrap_or_else(|| "(unnamed)".into()),
-                matches: r.match_.globs().iter().map(|s| s.to_string()).collect(),
-                kind: match &r.provider {
-                    Some(p) => format!("provider: {p}"),
-                    None => format!("{} action(s)", r.actions.len()),
-                },
-                scope: format!("{:?}", r.scope).to_lowercase(),
-                available: missing.is_empty(),
-                missing,
-            }
-        })
+        .map(|r| rule_status(r, false))
+        .chain(config.disabled_rules.iter().map(|r| rule_status(r, true)))
         .collect();
 
+    let universal_status = |a: &RuleAction, disabled: bool| {
+        let id = a.action_id();
+        UniversalStatus {
+            default: a.default || config.universal.default.as_deref() == Some(&id),
+            available: !disabled
+                && (a.client || a.needs.iter().all(|k| resolver.resolve(k).is_some())),
+            label: a.name.clone(),
+            id,
+            disabled,
+        }
+    };
     let universal = config
         .universal
         .actions
         .iter()
-        .map(|a| {
-            let id = a.action_id();
-            UniversalStatus {
-                default: a.default || config.universal.default.as_deref() == Some(&id),
-                available: a.client || a.needs.iter().all(|k| resolver.resolve(k).is_some()),
-                label: a.name.clone(),
-                id,
-            }
-        })
+        .map(|a| universal_status(a, false))
+        .chain(
+            config
+                .universal
+                .disabled
+                .iter()
+                .map(|a| universal_status(a, true)),
+        )
         .collect();
 
     ConfigSummary {

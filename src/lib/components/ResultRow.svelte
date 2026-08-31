@@ -5,13 +5,15 @@
   let {
     entry,
     active,
-    onclick,
-    ondblclick,
+    onactivate,
+    onhover,
   }: {
     entry: ScoredRepo;
     active: boolean;
-    onclick: () => void;
-    ondblclick: () => void;
+    /** Row clicked -> open this repo's actions. */
+    onactivate: () => void;
+    /** Pointer moved onto the row -> move the selection here. */
+    onhover: () => void;
   } = $props();
 </script>
 
@@ -19,8 +21,8 @@
   type="button"
   class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors
          {active ? 'bg-white/10' : 'hover:bg-white/[0.04]'}"
-  {onclick}
-  {ondblclick}
+  onclick={onactivate}
+  onpointerenter={onhover}
 >
   <div class="min-w-0 flex-1">
     <div class="truncate text-[13px] leading-tight text-white/90">

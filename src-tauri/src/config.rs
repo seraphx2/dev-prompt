@@ -33,6 +33,10 @@ pub struct Config {
     pub rules: Vec<Rule>,
     /// Always-available actions.
     pub universal: UniversalConfig,
+    /// Built-in rules the user turned off (kept for the settings viewer, never
+    /// evaluated).
+    #[serde(skip)]
+    pub disabled_rules: Vec<Rule>,
 }
 
 impl Default for Config {
@@ -48,6 +52,7 @@ impl Default for Config {
             programs: BTreeMap::new(),
             rules: Vec::new(),
             universal: UniversalConfig::default(),
+            disabled_rules: Vec::new(),
         }
     }
 }
@@ -206,6 +211,9 @@ pub struct UniversalConfig {
     pub actions: Vec<RuleAction>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<String>,
+    /// Built-ins the user turned off — kept for the settings viewer.
+    #[serde(skip)]
+    pub disabled: Vec<RuleAction>,
 }
 
 // --- user config (the on-disk file) ---------------------------------------
@@ -284,21 +292,37 @@ fn merge_user(cfg: &mut Config, u: UserConfig) {
         cfg.rules = rules;
     }
 
-    // Drop built-ins named by `rules_disable` or by a bare `disable:` rule.
+    // Move built-ins named by `rules_disable` or a bare `disable:` rule aside
+    // (kept for the settings viewer, never evaluated).
     let mut disabled: HashSet<String> = u.rules_disable.into_iter().collect();
     disabled.extend(cfg.rules.iter().filter_map(|r| r.disable.clone()));
     if !disabled.is_empty() {
-        cfg.rules
-            .retain(|r| r.disable.is_some() || r.id.as_deref().map_or(true, |id| !disabled.contains(id)));
-        cfg.rules.retain(|r| r.disable.is_none());
+        let mut kept = Vec::with_capacity(cfg.rules.len());
+        for r in cfg.rules.drain(..) {
+            if r.disable.is_some() {
+                continue; // bare disable-marker rule — no content to keep
+            }
+            if r.id.as_deref().is_some_and(|id| disabled.contains(id)) {
+                cfg.disabled_rules.push(r);
+            } else {
+                kept.push(r);
+            }
+        }
+        cfg.rules = kept;
     }
 
     if let Some(p) = u.universal {
         if !p.disable.is_empty() {
             let dis: HashSet<&String> = p.disable.iter().collect();
-            cfg.universal
-                .actions
-                .retain(|a| !dis.contains(&a.action_id()));
+            let mut kept = Vec::with_capacity(cfg.universal.actions.len());
+            for a in cfg.universal.actions.drain(..) {
+                if dis.contains(&a.action_id()) {
+                    cfg.universal.disabled.push(a);
+                } else {
+                    kept.push(a);
+                }
+            }
+            cfg.universal.actions = kept;
         }
         cfg.universal.actions.extend(p.add);
         if p.default.is_some() {

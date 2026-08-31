@@ -93,8 +93,8 @@
         data-idx={i}
         class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors
                {i === selected ? 'bg-white/10' : 'hover:bg-white/[0.04]'}"
-        onclick={() => onselect(i)}
-        ondblclick={() => onrun(i)}
+        onclick={() => onrun(i)}
+        onpointerenter={() => onselect(i)}
       >
         <span class="flex-1 truncate text-[13px] text-white/90">
           <Highlight text={item.action.label} indices={item.positions} />

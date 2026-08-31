@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import {
     configSummary,
     getConfig,
@@ -17,7 +17,21 @@
   let loaded = $state(false);
   let busy = $state(false);
   let msg = $state("");
+  let msgError = $state(false);
   let confirmIdx = $state<number | null>(null);
+  let msgTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Errors stay put (red); confirmations flash green and clear after 5s. */
+  function note(text: string, isError = false) {
+    clearTimeout(msgTimer);
+    msg = text;
+    msgError = isError;
+    if (text && !isError) {
+      msgTimer = setTimeout(() => (msg = ""), 5000);
+    }
+  }
+
+  onDestroy(() => clearTimeout(msgTimer));
   let summary = $state<ConfigSummary | null>(null);
 
   const base = (p: string) => p.split(/[\\/]/).pop() || p;
@@ -54,14 +68,14 @@
 
   async function reload() {
     busy = true;
-    msg = "";
+    note("");
     try {
       applyConfig(await reloadConfig());
       await loadSummary();
       onsaved(); // re-scan so marker/rule changes take effect in the repo list
-      msg = "Reloaded from disk.";
+      note("Reloaded from disk.");
     } catch (e) {
-      msg = `${e}`;
+      note(`${e}`, true);
     } finally {
       busy = false;
     }
@@ -72,26 +86,26 @@
       // Backend drops the overlay's always-on-top so the editor comes to the
       // front; the settings screen stays open behind it with your edits intact.
       await openConfigFile();
-      msg = "Opened in your default editor.";
+      note("Opened in your default editor.");
     } catch (e) {
-      msg = `${e}`;
+      note(`${e}`, true);
     }
   }
 
   async function save() {
     busy = true;
-    msg = "";
+    note("");
     try {
       await saveConfig({
         hotkey: hotkey.trim(),
         roots: roots.map((r) => r.trim()).filter(Boolean),
         cache_ttl_secs: Math.max(60, Math.round(ttlMin * 60)),
       });
-      msg = "Saved.";
+      note("Saved.");
       onsaved();
       void loadSummary();
     } catch (e) {
-      msg = `${e}`;
+      note(`${e}`, true);
     } finally {
       busy = false;
     }
@@ -108,6 +122,13 @@
     ←
   </button>
   <span class="text-[13px] font-medium text-white/80">Settings</span>
+  {#if msg}
+    <span
+      class="ml-auto truncate pl-2 text-[11px] {msgError
+        ? 'text-red-300'
+        : 'text-emerald-300'}">{msg}</span
+    >
+  {/if}
 </div>
 
 <div class="scroll-thin flex-1 space-y-5 overflow-y-auto px-5 py-4 text-[13px]">
@@ -127,7 +148,10 @@
     </label>
 
     <div class="space-y-1.5">
-      <span class="text-white/50">Root directories</span>
+      <span class="text-white/50"
+        >Root directories
+        <span class="text-white/25">— scanned recursively for projects</span></span
+      >
       {#each roots as _root, i (i)}
         <div class="flex items-center gap-2">
           <input
@@ -171,10 +195,6 @@
       >
         + Add root
       </button>
-      <p class="text-[11px] text-white/25">
-        Removing a row only stops dev-prompt from scanning that path — it never
-        touches the folder on disk.
-      </p>
     </div>
 
     <label class="block space-y-1.5">
@@ -187,7 +207,7 @@
       />
     </label>
 
-    <div class="flex flex-wrap items-center gap-3 pt-1">
+    <div>
       <button
         type="button"
         onclick={save}
@@ -196,29 +216,37 @@
       >
         Save
       </button>
-      <button
-        type="button"
-        onclick={openFile}
-        class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90"
-      >
-        Open config.yaml
-      </button>
-      <button
-        type="button"
-        onclick={reload}
-        disabled={busy}
-        title="Re-read config.yaml from disk"
-        class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
-      >
-        Reload config
-      </button>
-      {#if msg}<span class="text-[12px] text-white/40">{msg}</span>{/if}
     </div>
 
-    <p class="text-[11px] leading-relaxed text-white/25">
-      Detection rules — which files map to which launch actions — are edited
-      directly in <code>config.yaml</code>. Saving here re-scans your roots.
-    </p>
+    <div class="space-y-2 border-t border-hair pt-4">
+      <span class="text-white/50">Configuration</span>
+      <div class="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onclick={openFile}
+          class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90"
+        >
+          Open config.yaml
+        </button>
+        <button
+          type="button"
+          onclick={reload}
+          disabled={busy}
+          title="Re-read config.yaml from disk"
+          class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
+        >
+          Reload config
+        </button>
+      </div>
+      {#if summary?.configPath}
+        <div
+          class="truncate font-mono text-[11px] text-white/25"
+          title={summary.configPath}
+        >
+          {summary.configPath}
+        </div>
+      {/if}
+    </div>
 
     {#if summary}
       <details open class="rounded border border-hair">
@@ -234,7 +262,9 @@
 
         <div class="space-y-3 border-t border-hair px-3 py-3 font-mono text-[11px]">
           <div>
-            <div class="mb-1 text-white/35">programs</div>
+            <div class="mb-1 font-semibold uppercase tracking-wide text-sky-300/80">
+              programs
+            </div>
             <div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
               {#each summary.programs as p (p.key)}
                 <span class="text-white/70">{p.key}</span>
@@ -243,24 +273,32 @@
                     >{base(p.resolved)}</span
                   >
                 {:else}
-                  <span class="text-white/25">not found</span>
+                  <span class="text-amber-300/70">not found</span>
                 {/if}
               {/each}
             </div>
           </div>
 
           <div>
-            <div class="mb-1 text-white/35">rules</div>
+            <div class="mb-1 font-semibold uppercase tracking-wide text-sky-300/80">
+              rules
+            </div>
             <div class="space-y-1">
               {#each summary.rules as r (r.id)}
                 <div class="flex flex-wrap items-baseline gap-x-2">
-                  <span class={r.available ? "text-white/70" : "text-white/30"}
-                    >{r.id}</span
+                  <span
+                    class={r.disabled
+                      ? "text-white/40"
+                      : r.available
+                        ? "text-white/70"
+                        : "text-white/30"}>{r.id}</span
                   >
                   <span class="text-white/30">{r.matches.join(", ")}</span>
                   <span class="text-white/40">→ {r.kind}</span>
                   {#if r.scope === "repo"}<span class="text-white/25">@repo</span>{/if}
-                  {#if !r.available}
+                  {#if r.disabled}
+                    <span class="text-red-300/70">disabled</span>
+                  {:else if !r.available}
                     <span class="text-amber-300/70">unmet: {r.missing.join(", ")}</span>
                   {/if}
                 </div>
@@ -269,22 +307,28 @@
           </div>
 
           <div>
-            <div class="mb-1 text-white/35">universal</div>
+            <div class="mb-1 font-semibold uppercase tracking-wide text-sky-300/80">
+              universal
+            </div>
             <div class="space-y-0.5">
               {#each summary.universal as u (u.id)}
                 <div class="flex items-baseline gap-2">
-                  <span class={u.available ? "text-white/70" : "text-white/30"}
-                    >{u.label}</span
+                  <span
+                    class={u.disabled
+                      ? "text-white/40"
+                      : u.available
+                        ? "text-white/70"
+                        : "text-white/30"}>{u.label}</span
                   >
                   {#if u.default}<span class="text-sky-300/70">default</span>{/if}
-                  {#if !u.available}<span class="text-white/25">unavailable</span>{/if}
+                  {#if u.disabled}
+                    <span class="text-red-300/70">disabled</span>
+                  {:else if !u.available}
+                    <span class="text-amber-300/70">unavailable</span>
+                  {/if}
                 </div>
               {/each}
             </div>
-          </div>
-
-          <div class="truncate text-white/20" title={summary.configPath}>
-            {summary.configPath}
           </div>
         </div>
       </details>

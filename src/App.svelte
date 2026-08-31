@@ -158,17 +158,22 @@
     }
   });
 
+  let running = false;
+
   async function execute(action: Action, repoPath: string) {
-    if (action.clientSide) {
-      if (action.id === "copy-path") await copyPath(repoPath);
-      await hideOverlay();
-      return;
-    }
+    if (running) return; // guard against a double-click spawning twice
+    running = true;
     try {
-      await runAction(action.id, repoPath);
+      if (action.clientSide) {
+        if (action.id === "copy-path") await copyPath(repoPath);
+      } else {
+        await runAction(action.id, repoPath);
+      }
       await hideOverlay();
     } catch (e) {
       status = `Launch failed: ${e}`;
+    } finally {
+      running = false;
     }
   }
 
@@ -293,7 +298,10 @@
       entries={results}
       {selected}
       onselect={(i) => (selected = i)}
-      onactivate={(i) => activateRepo(i)}
+      onactivate={(i) => {
+        selected = i;
+        if (results[i]) openActions(results[i]);
+      }}
     />
   {:else if mode === "action-menu" && activeRepo}
     <ActionMenu
@@ -316,17 +324,6 @@
            text-[11px] text-white/30"
   >
     <span class="flex min-w-0 items-center gap-3">
-      <span class="truncate">{status}</span>
-      {#if mode === "repo-list"}
-        <span class="inline-flex shrink-0 items-center gap-1"
-          ><kbd>Ctrl+R</kbd>rescan</span
-        >
-      {/if}
-    </span>
-    <span class="flex shrink-0 items-center gap-3.5">
-      {#each hints as [key, label] (label)}
-        <span class="inline-flex items-center gap-1"><kbd>{key}</kbd>{label}</span>
-      {/each}
       {#if mode !== "settings"}
         <button
           type="button"
@@ -352,16 +349,19 @@
           </svg>
         </button>
       {/if}
+      <span class="truncate">{status}</span>
+      {#if mode === "repo-list"}
+        <span class="inline-flex shrink-0 items-center gap-1"
+          ><kbd>Ctrl+R</kbd>rescan</span
+        >
+      {/if}
+    </span>
+    <span class="flex shrink-0 items-center gap-3.5">
+      {#each hints as [key, label] (label)}
+        <span class="inline-flex items-center gap-1"><kbd>{key}</kbd>{label}</span>
+      {/each}
     </span>
   </footer>
-
-  {#if scanning}
-    <div
-      class="pointer-events-none absolute right-4 top-3 text-[11px] text-sky-300/70"
-    >
-      scanning…
-    </div>
-  {/if}
 </main>
 
 <style>

@@ -10,9 +10,9 @@
   }: {
     entries: ScoredRepo[];
     selected: number;
-    /** Row was clicked once -> move selection there. */
+    /** Pointer moved onto a row -> move the selection there. */
     onselect: (i: number) => void;
-    /** Row was double-clicked or picked -> run default action. */
+    /** Row clicked -> open that repo's actions. */
     onactivate: (i: number) => void;
   } = $props();
 
@@ -40,8 +40,8 @@
         <ResultRow
           {entry}
           active={i === selected}
-          onclick={() => onselect(i)}
-          ondblclick={() => onactivate(i)}
+          onactivate={() => onactivate(i)}
+          onhover={() => onselect(i)}
         />
       </div>
     {/each}
