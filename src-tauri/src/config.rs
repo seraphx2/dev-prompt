@@ -97,6 +97,24 @@ impl Marker {
             Marker::Detail { name, .. } => name,
         }
     }
+
+    pub fn kind(&self) -> Option<&str> {
+        match self {
+            Marker::Detail { kind, .. } => kind.as_deref(),
+            Marker::Name(_) => None,
+        }
+    }
+
+    /// Display label, falling back to the marker name.
+    pub fn label(&self) -> &str {
+        match self {
+            Marker::Detail {
+                label: Some(l),
+                ..
+            } => l,
+            _ => self.name(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -435,6 +453,16 @@ fn default_roots() -> Vec<String> {
 }
 
 // --- discovery helpers --------------------------------------------------
+
+/// `(marker name, display label)` for every `kind: vcs` marker — used to badge
+/// a repo row with its version-control system.
+pub fn vcs_markers(cfg: &Config) -> Vec<(String, String)> {
+    cfg.markers
+        .iter()
+        .filter(|m| m.kind() == Some("vcs"))
+        .map(|m| (m.name().to_string(), m.label().to_string()))
+        .collect()
+}
 
 /// Every glob that makes a directory count as a project: markers ∪ rule matchers.
 pub fn discovery_globs(cfg: &Config) -> Vec<String> {

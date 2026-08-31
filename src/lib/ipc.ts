@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
   Action,
   AppConfig,
@@ -65,6 +66,26 @@ export function saveConfig(patch: {
 /** Open rules.yaml (the hand-authored overrides file) in the default editor. */
 export function openRulesFile(): Promise<void> {
   return invoke<void>("open_rules_file");
+}
+
+/** Native folder picker; returns the chosen directories (empty if cancelled). */
+export async function pickDirectories(): Promise<string[]> {
+  const res = await openDialog({
+    directory: true,
+    multiple: true,
+    title: "Add root directories",
+  });
+  if (!res) return [];
+  return Array.isArray(res) ? res : [res];
+}
+
+/** Whether the app starts at login. */
+export function getAutostart(): Promise<boolean> {
+  return invoke<boolean>("get_autostart");
+}
+
+export function setAutostart(enabled: boolean): Promise<void> {
+  return invoke<void>("set_autostart", { enabled });
 }
 
 /** Toggle whether clicking away dismisses the overlay (off for the settings screen). */

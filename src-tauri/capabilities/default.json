@@ -19,6 +19,8 @@
     "clipboard-manager:allow-write-text",
     "updater:default",
     "process:default",
-    "notification:default"
+    "notification:default",
+    "dialog:default",
+    "autostart:default"
   ]
 }

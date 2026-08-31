@@ -2,10 +2,13 @@
   import { onDestroy, onMount } from "svelte";
   import {
     configSummary,
+    getAutostart,
     getConfig,
     openRulesFile,
+    pickDirectories,
     reloadConfig,
     saveConfig,
+    setAutostart,
   } from "../ipc";
   import type { ConfigSummary } from "../types";
   import { icons, iconKeys } from "../icons";
@@ -24,6 +27,7 @@
   let roots = $state<string[]>([]);
   let ttlMin = $state(15);
   let scanDepth = $state(4);
+  let autostart = $state(false);
   let loaded = $state(false);
   let busy = $state(false);
   let msg = $state("");
@@ -59,12 +63,37 @@
     loaded = true;
     void loadSummary();
     try {
+      autostart = await getAutostart();
+    } catch {
+      autostart = false;
+    }
+    try {
       appVersion = await currentVersion();
     } catch {
       appVersion = "";
     }
     void pollUpdates(true);
   });
+
+  // Autostart applies immediately (the OS is the source of truth), not via Save.
+  async function toggleAutostart() {
+    try {
+      await setAutostart(autostart);
+    } catch (e) {
+      autostart = !autostart; // revert on failure
+      note(`${e}`, true);
+    }
+  }
+
+  async function browseRoots() {
+    const picked = await pickDirectories();
+    if (!picked.length) return;
+    const have = new Set(roots.map((r) => r.trim()).filter(Boolean));
+    const add = picked.filter((p) => !have.has(p));
+    if (add.length) {
+      roots = [...roots.map((r) => r.trim()).filter(Boolean), ...add];
+    }
+  }
 
   // --- software update (shared store; see lib/updateStore) ---
   let appVersion = $state("");
@@ -317,13 +346,22 @@
           {/if}
         </div>
       {/each}
-      <button
-        type="button"
-        onclick={addRoot}
-        class="rounded border border-hair px-2 py-1 text-[12px] text-white/50 hover:bg-white/10 hover:text-white/80"
-      >
-        + Add root
-      </button>
+      <div class="flex gap-2">
+        <button
+          type="button"
+          onclick={addRoot}
+          class="rounded border border-hair px-2 py-1 text-[12px] text-white/50 hover:bg-white/10 hover:text-white/80"
+        >
+          + Add root
+        </button>
+        <button
+          type="button"
+          onclick={browseRoots}
+          class="rounded border border-hair px-2 py-1 text-[12px] text-white/50 hover:bg-white/10 hover:text-white/80"
+        >
+          Browse…
+        </button>
+      </div>
     </div>
 
     <div class="flex gap-6">
@@ -348,6 +386,16 @@
         />
       </label>
     </div>
+
+    <label class="flex items-center gap-2">
+      <input
+        type="checkbox"
+        bind:checked={autostart}
+        onchange={toggleAutostart}
+        class="h-3.5 w-3.5 accent-sky-500"
+      />
+      <span class="text-orange-400">Start at login</span>
+    </label>
 
     <div>
       <button

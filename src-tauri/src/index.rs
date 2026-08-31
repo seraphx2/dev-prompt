@@ -92,7 +92,8 @@ mod tests {
         Repo {
             name: name.into(),
             path: path.into(),
-            sentinels: vec![".git".into()],
+            vcs: Some("Git".into()),
+            sentinels: vec![],
             last_seen,
         }
     }
