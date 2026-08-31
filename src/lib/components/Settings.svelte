@@ -10,12 +10,8 @@
   import type { ConfigSummary } from "../types";
   import { icons, iconKeys } from "../icons";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-  import {
-    checkForUpdate,
-    currentVersion,
-    installUpdate,
-    type UpdateInfo,
-  } from "../updater";
+  import { currentVersion, installUpdate } from "../updater";
+  import { upd, pollUpdates } from "../updateStore.svelte";
 
   async function copyIcon(k: string) {
     await writeText(`icon: ${k}`);
@@ -62,45 +58,27 @@
     applyConfig(await getConfig());
     loaded = true;
     void loadSummary();
-    void initUpdates();
-  });
-
-  // --- software update ---
-  let appVersion = $state("");
-  let update = $state<UpdateInfo | null>(null);
-  let updateState = $state<"idle" | "checking" | "installing">("idle");
-  let updateNote = $state("");
-
-  async function initUpdates() {
     try {
       appVersion = await currentVersion();
     } catch {
       appVersion = "";
     }
-    void runUpdateCheck(true);
-  }
+    void pollUpdates(true);
+  });
 
-  async function runUpdateCheck(silent = false) {
-    updateState = "checking";
-    if (!silent) updateNote = "";
-    try {
-      update = await checkForUpdate();
-      if (!silent) updateNote = update ? "" : "You're on the latest version.";
-    } catch (e) {
-      if (!silent) updateNote = `${e}`;
-    } finally {
-      updateState = "idle";
-    }
-  }
+  // --- software update (shared store; see lib/updateStore) ---
+  let appVersion = $state("");
+  let installing = $state(false);
+  let installError = $state("");
 
   async function applyUpdate() {
-    updateState = "installing";
-    updateNote = "";
+    installing = true;
+    installError = "";
     try {
       await installUpdate(); // relaunches on success
     } catch (e) {
-      updateNote = `${e}`;
-      updateState = "idle";
+      installError = `${e}`;
+      installing = false;
     }
   }
 
@@ -400,10 +378,10 @@
           type="button"
           onclick={reload}
           disabled={busy}
-          title="Re-read config.yaml + rules.yaml from disk"
+          title="Re-read rules.yaml (and config.yaml) from disk"
           class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
         >
-          Reload config
+          Reload rules
         </button>
       </div>
       {#if summary?.rulesPath}
@@ -416,55 +394,12 @@
       {/if}
     </div>
 
-    <div class="space-y-2 border-t border-hair pt-4">
-      <span class="text-orange-400"
-        >Software update
-        {#if appVersion}<span class="font-mono text-white/25">— v{appVersion}</span
-          >{/if}</span
-      >
-      {#if update}
-        <div class="rounded border border-sky-400/30 bg-sky-500/[0.06] px-3 py-2">
-          <div class="text-[12px] text-white/80">
-            Version <span class="font-mono text-sky-300">{update.version}</span> is
-            available.
-          </div>
-          {#if update.notes}
-            <div class="mt-1 whitespace-pre-line text-[11px] text-white/45">
-              {update.notes}
-            </div>
-          {/if}
-          <button
-            type="button"
-            onclick={applyUpdate}
-            disabled={updateState !== "idle"}
-            class="mt-2 rounded bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
-          >
-            {updateState === "installing" ? "Installing…" : "Install & restart"}
-          </button>
-        </div>
-      {:else}
-        <div class="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onclick={() => runUpdateCheck(false)}
-            disabled={updateState !== "idle"}
-            class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
-          >
-            {updateState === "checking" ? "Checking…" : "Check for updates"}
-          </button>
-          {#if updateNote}
-            <span class="text-[11px] text-white/40">{updateNote}</span>
-          {/if}
-        </div>
-      {/if}
-    </div>
-
     {#if summary}
       <details open class="rounded border border-hair">
         <summary
           class="cursor-pointer select-none px-3 py-2 text-[12px] text-white/60 hover:text-white/90"
         >
-          Active configuration
+          Active rules
           <span class="text-white/25"
             >· {summary.rules.length} rules · {summary.programs.length} programs · {summary.markerCount}
             markers</span
@@ -584,5 +519,51 @@
         {/each}
       </div>
     </details>
+
+    <div class="space-y-2 border-t border-hair pt-4">
+      <span class="text-orange-400"
+        >Software update
+        {#if appVersion}<span class="font-mono text-white/25">— v{appVersion}</span
+          >{/if}</span
+      >
+      {#if upd.info}
+        <div class="rounded border border-sky-400/30 bg-sky-500/[0.06] px-3 py-2">
+          <div class="text-[12px] text-white/80">
+            Version <span class="font-mono text-sky-300">{upd.info.version}</span> is
+            available.
+          </div>
+          {#if upd.info.notes}
+            <div class="mt-1 whitespace-pre-line text-[11px] text-white/45">
+              {upd.info.notes}
+            </div>
+          {/if}
+          <button
+            type="button"
+            onclick={applyUpdate}
+            disabled={installing}
+            class="mt-2 rounded bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+          >
+            {installing ? "Installing…" : "Install & restart"}
+          </button>
+          {#if installError}
+            <div class="mt-1 text-[11px] text-red-300">{installError}</div>
+          {/if}
+        </div>
+      {:else}
+        <div class="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onclick={() => pollUpdates(true)}
+            disabled={upd.checking}
+            class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
+          >
+            {upd.checking ? "Checking…" : "Check for updates"}
+          </button>
+          {#if upd.note}
+            <span class="text-[11px] text-white/40">{upd.note}</span>
+          {/if}
+        </div>
+      {/if}
+    </div>
   {/if}
 </div>

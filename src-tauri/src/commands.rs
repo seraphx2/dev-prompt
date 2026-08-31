@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::cache;
 use crate::config::{self, resolved_roots, Config};
@@ -240,6 +240,18 @@ pub fn save_config(
 #[tauri::command]
 pub fn set_dismiss_on_blur(state: State<'_, AppState>, enabled: bool) {
     *state.dismiss_on_blur.lock().unwrap() = enabled;
+}
+
+/// Reflect update availability in the tray tooltip. `version` = `None` resets it.
+#[tauri::command]
+pub fn set_update_hint(app: AppHandle, version: Option<String>) {
+    if let Some(tray) = app.tray_by_id("main") {
+        let tip = match version {
+            Some(v) => format!("dev-prompt — v{v} available"),
+            None => "dev-prompt".to_string(),
+        };
+        let _ = tray.set_tooltip(Some(tip));
+    }
 }
 
 /// Open `rules.yaml` with the OS default handler for `.yaml` (or the "Open

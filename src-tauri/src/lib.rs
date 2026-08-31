@@ -95,7 +95,8 @@ pub fn run() {
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_process::init());
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init());
 
     #[cfg(desktop)]
     {
@@ -227,6 +228,7 @@ pub fn run() {
             commands::save_config,
             commands::open_rules_file,
             commands::set_dismiss_on_blur,
+            commands::set_update_hint,
         ])
         .run(tauri::generate_context!())
         .expect("error while running dev-prompt");

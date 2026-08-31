@@ -19,6 +19,9 @@
   } from "./lib/ipc";
   import type { Action, MenuItem, ScoredRepo } from "./lib/types";
   import { fuzzyScore } from "./lib/fuzzy";
+  import { upd, pollUpdates } from "./lib/updateStore.svelte";
+
+  const DAY_MS = 24 * 60 * 60 * 1000;
 
   type Mode = "repo-list" | "action-menu" | "settings";
 
@@ -375,7 +378,12 @@
     search?.focus();
     void loadInitial();
 
+    // Update check: once now, then daily while the app runs.
+    void pollUpdates();
+    const updTimer = setInterval(() => void pollUpdates(), DAY_MS);
+
     return () => {
+      clearInterval(updTimer);
       for (const u of unlisteners) u.then((fn) => fn());
     };
   });
@@ -469,6 +477,17 @@
         <span class="inline-flex shrink-0 items-center gap-1"
           ><kbd>Ctrl+R</kbd>rescan</span
         >
+      {/if}
+      {#if upd.info && mode !== "settings"}
+        <button
+          type="button"
+          onclick={() => (mode = "settings")}
+          title={`Update ${upd.info.version} available`}
+          class="shrink-0 rounded-[3px] border border-sky-400/50 bg-sky-400/10 px-1.5 py-0.5
+                 text-[10px] font-medium text-sky-200 hover:bg-sky-400/20"
+        >
+          ↑ {upd.info.version}
+        </button>
       {/if}
     </span>
     <span class="flex shrink-0 items-center gap-3.5">
