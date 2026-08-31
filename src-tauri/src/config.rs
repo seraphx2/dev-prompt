@@ -515,6 +515,32 @@ mod tests {
     }
 
     #[test]
+    fn bundled_defaults_carry_the_fattened_rules_and_programs() {
+        let cfg = bundled_defaults();
+
+        let has_rule = |id: &str| cfg.rules.iter().any(|r| r.id.as_deref() == Some(id));
+        for id in [
+            "maven", "gradle", "cmake", "composer", "mix", "deno", "nix-flake",
+            "docker-image", "csproj-editors", "eclipse-project",
+        ] {
+            assert!(has_rule(id), "missing bundled rule `{id}`");
+        }
+
+        for key in ["cursor", "zed", "idea", "goland", "lazygit", "anypoint", "eclipse", "sts"] {
+            assert!(cfg.programs.contains_key(key), "missing bundled program `{key}`");
+        }
+
+        let has_universal = |id: &str| cfg.universal.actions.iter().any(|a| a.action_id() == id);
+        assert!(has_universal("cursor") && has_universal("gitkraken") && has_universal("lazygit"));
+
+        // A rule's `match` doubles as a discovery marker.
+        let globs = discovery_globs(&cfg);
+        for g in ["pom.xml", "Dockerfile", "composer.json", "go.work"] {
+            assert!(globs.iter().any(|x| x == g), "`{g}` should be a discovery glob");
+        }
+    }
+
+    #[test]
     fn user_config_overrides_and_prepends() {
         let mut cfg = bundled_defaults();
         let base_rule_count = cfg.rules.len();

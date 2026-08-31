@@ -1,8 +1,8 @@
 //! Milestone 3 — the config-driven rule engine.
 //!
-//! `evaluate` walks every project in a repo, runs the merged `rules` over its
-//! file list (matching globs, resolving `{{program}}` references, expanding
-//! templates, invoking providers), then appends the `universal` actions. All the
+//! `evaluate` emits the `universal` actions first, then walks every project in a
+//! repo running the merged `rules` over its file list (matching globs, resolving
+//! `{{program}}` references, expanding templates, invoking providers). All the
 //! per-ecosystem knowledge that used to be hardcoded now lives in
 //! `default_config.yaml`; Rust only keeps the providers and the program resolver.
 
@@ -522,6 +522,26 @@ pub fn evaluate(config: &Config, ctx: &RepoContext, repo: &Repo) -> Vec<Action> 
     let resolver = Resolver::new(&config.programs);
     let mut out: Vec<Action> = Vec::new();
 
+    // Universal actions first — "open in terminal / editor / file manager" is the
+    // common case; the detected per-ecosystem stuff sits below it.
+    for ra in &config.universal.actions {
+        let id = ra.action_id();
+        let is_default = ra.default || config.universal.default.as_deref() == Some(&id);
+        let mut ra = ra.clone();
+        ra.default = is_default;
+        let t = Tmpl {
+            repo: &repo.path,
+            path: &repo.path,
+            rel: "",
+            name: &repo.name,
+            file: None,
+            resolver: &resolver,
+        };
+        if let Some(a) = build_action(&ra, id, "General", &repo.path, &t, &resolver) {
+            out.push(a);
+        }
+    }
+
     for proj in &ctx.projects {
         let group = if proj.rel.is_empty() {
             "Detected".to_string()
@@ -604,25 +624,6 @@ pub fn evaluate(config: &Config, ctx: &RepoContext, repo: &Repo) -> Vec<Action> 
                     }
                 }
             }
-        }
-    }
-
-    // Universal actions.
-    for ra in &config.universal.actions {
-        let id = ra.action_id();
-        let is_default = ra.default || config.universal.default.as_deref() == Some(&id);
-        let mut ra = ra.clone();
-        ra.default = is_default;
-        let t = Tmpl {
-            repo: &repo.path,
-            path: &repo.path,
-            rel: "",
-            name: &repo.name,
-            file: None,
-            resolver: &resolver,
-        };
-        if let Some(a) = build_action(&ra, id, "General", &repo.path, &t, &resolver) {
-            out.push(a);
         }
     }
 

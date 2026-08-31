@@ -7,6 +7,13 @@
 #   - rules     : user rules are prepended; rules_disable: [id] drops built-ins
 #   - universal : universal.disable / universal.add / universal.default
 #
+# Every rules[].match also acts as a discovery marker, so adding a rule for an
+# ecosystem makes those repos show up in the list as well as gain actions.
+#
+# Gating: `requires: [bin]` hides a rule unless `bin` is on PATH (PATHEXT-aware).
+#         `needs: [key]` hides an action unless that `programs` key resolves.
+# Nothing here breaks when a tool is absent — it just doesn't appear.
+#
 # Template variables usable in rule/universal actions:
 #   {{path}}  project dir      {{repo}} repo root       {{rel}} sub-project path
 #   {{name}}  project/repo name {{file}} matched file    {{file.name}} {{file.stem}}
@@ -19,13 +26,20 @@ scan:
 cache_ttl_secs: 900
 
 # --- discovery markers -------------------------------------------------------
+# VCS dirs + workspace files with no distinct actions. Build manifests
+# (pom.xml, Gemfile, …) ride in via their rule's `match` instead.
 markers:
   - .git
   - { name: .hg, kind: vcs, label: Mercurial }
   - { name: .jj, kind: vcs, label: Jujutsu }
   - { name: .svn, kind: vcs, label: Subversion }
+  - { name: .bzr, kind: vcs, label: Bazaar }
+  - { name: _darcs, kind: vcs, label: Darcs }
+  - { name: .fslckout, kind: vcs, label: Fossil }
   - "*.sln"
   - package.json
+  - pnpm-workspace.yaml
+  - "*.code-workspace"
   - Cargo.toml
   - go.mod
   - pyproject.toml
@@ -49,6 +63,74 @@ programs:
   claude:
     any: [claude]
     windows: [claude.cmd]
+
+  # editors
+  cursor:
+    any: [cursor]
+    windows:
+      - "%LOCALAPPDATA%/Programs/cursor/Cursor.exe"
+  zed:
+    any: [zed]
+    windows:
+      - "%LOCALAPPDATA%/Programs/Zed/Zed.exe"
+  subl:
+    any: [subl]
+    windows:
+      - "%ProgramFiles%/Sublime Text/subl.exe"
+      - "%ProgramFiles%/Sublime Text 3/subl.exe"
+  idea:
+    any: [idea]
+    windows:
+      - "%LOCALAPPDATA%/JetBrains/Toolbox/scripts/idea.cmd"
+      - "%ProgramFiles%/JetBrains/IntelliJ IDEA*/bin/idea64.exe"
+  webstorm:
+    any: [webstorm]
+    windows:
+      - "%LOCALAPPDATA%/JetBrains/Toolbox/scripts/webstorm.cmd"
+      - "%ProgramFiles%/JetBrains/WebStorm*/bin/webstorm64.exe"
+  pycharm:
+    any: [pycharm]
+    windows:
+      - "%LOCALAPPDATA%/JetBrains/Toolbox/scripts/pycharm.cmd"
+      - "%ProgramFiles%/JetBrains/PyCharm*/bin/pycharm64.exe"
+  goland:
+    any: [goland]
+    windows:
+      - "%LOCALAPPDATA%/JetBrains/Toolbox/scripts/goland.cmd"
+      - "%ProgramFiles%/JetBrains/GoLand*/bin/goland64.exe"
+
+  # git GUIs
+  fork:
+    windows:
+      - "%LOCALAPPDATA%/Fork/Fork.exe"
+  gitkraken:
+    windows:
+      - "%LOCALAPPDATA%/gitkraken/app-*/gitkraken.exe"
+  smerge:
+    any: [smerge]
+    windows:
+      - "%ProgramFiles%/Sublime Merge/smerge.exe"
+  lazygit:
+    any: [lazygit]
+
+  # Eclipse-family IDEs — ship as zips, so install paths vary wildly.
+  # Expect users to pin an absolute path in config.yaml.
+  anypoint:
+    any: [AnypointStudio]
+    windows:
+      - "%USERPROFILE%/AnypointStudio/AnypointStudio.exe"
+      - "C:/AnypointStudio/AnypointStudio.exe"
+  eclipse:
+    any: [eclipse]
+    windows:
+      - "%USERPROFILE%/eclipse/*/eclipse.exe"
+      - "C:/eclipse/eclipse.exe"
+  sts:
+    any: [SpringToolSuite4]
+    windows:
+      - "%USERPROFILE%/sts-*/SpringToolSuite4.exe"
+      - "%USERPROFILE%/springtoolsuite4/SpringToolSuite4.exe"
+
   terminal:
     windows: [wt.exe]
     linux:
@@ -75,6 +157,20 @@ rules:
         args: ["{{file}}"]
         needs: [rider]
 
+  - id: csproj-editors
+    match: ["*.csproj", "*.fsproj"]
+    when: windows
+    per_file: true
+    actions:
+      - name: "Open {{file.stem}} in Visual Studio"
+        program: "{{vs}}"
+        args: ["{{file}}"]
+        needs: [vs]
+      - name: "Open {{file.stem}} in Rider"
+        program: "{{rider}}"
+        args: ["{{file}}"]
+        needs: [rider]
+
   - id: node
     match: package.json
     provider: npm-scripts
@@ -84,7 +180,7 @@ rules:
     provider: cargo
 
   - id: go
-    match: go.mod
+    match: [go.mod, go.work]
     provider: go
 
   - id: python
@@ -96,12 +192,121 @@ rules:
     scope: repo
     provider: compose
 
+  # --- build tools: gated on the CLI, run in a terminal --------------------
+  - id: maven
+    match: pom.xml
+    requires: [mvn]
+    actions:
+      - { name: "mvn compile", run: "mvn -B compile", terminal: true }
+      - { name: "mvn test", run: "mvn -B test", terminal: true }
+      - { name: "mvn package", run: "mvn -B package", terminal: true }
+
+  - id: gradle
+    match: [build.gradle, build.gradle.kts]
+    requires: [gradle]
+    actions:
+      - { name: "gradle build", run: "gradle build", terminal: true }
+      - { name: "gradle test", run: "gradle test", terminal: true }
+      - { name: "gradle clean", run: "gradle clean", terminal: true }
+
+  - id: cmake
+    match: CMakeLists.txt
+    requires: [cmake]
+    actions:
+      - { name: "cmake configure", run: "cmake -B build", terminal: true }
+      - { name: "cmake build", run: "cmake --build build", terminal: true }
+
+  - id: bundler
+    match: Gemfile
+    requires: [bundle]
+    actions:
+      - { name: "bundle install", run: "bundle install", terminal: true }
+
+  - id: mix
+    match: mix.exs
+    requires: [mix]
+    actions:
+      - { name: "mix deps.get", run: "mix deps.get", terminal: true }
+      - { name: "mix compile", run: "mix compile", terminal: true }
+      - { name: "mix test", run: "mix test", terminal: true }
+
+  - id: composer
+    match: composer.json
+    requires: [composer]
+    actions:
+      - { name: "composer install", run: "composer install", terminal: true }
+      - { name: "composer update", run: "composer update", terminal: true }
+
+  - id: deno
+    match: [deno.json, deno.jsonc]
+    requires: [deno]
+    actions:
+      - { name: "deno task", run: "deno task", terminal: true }
+      - { name: "deno test", run: "deno test", terminal: true }
+      - { name: "deno cache", run: "deno cache .", terminal: true }
+
+  - id: nix-flake
+    match: flake.nix
+    requires: [nix]
+    actions:
+      - { name: "nix develop", run: "nix develop", terminal: true }
+      - { name: "nix build", run: "nix build", terminal: true }
+      - { name: "nix flake check", run: "nix flake check", terminal: true }
+
+  - id: nix-shell
+    match: shell.nix
+    requires: [nix-shell]
+    actions:
+      - { name: "nix-shell", run: "nix-shell", terminal: true }
+
+  - id: docker-image
+    match: Dockerfile
+    scope: repo
+    requires: [docker]
+    actions:
+      - { name: "docker build", run: "docker build -t {{name}} .", terminal: true }
+
+  # --- Eclipse-family IDEs ------------------------------------------------
+  # `-data <dir>` opens that dir as the WORKSPACE. One-click when the scanned
+  # folder is (or becomes) the workspace; otherwise Studio opens an empty
+  # workspace and you import once (File > Open Projects from File System).
+  # A configured default-workspace + metadata seeding is a later milestone.
+  - id: eclipse-project
+    match: [".project", "mule-artifact.json"]
+    actions:
+      - name: "Open in Anypoint Studio"
+        program: "{{anypoint}}"
+        args: ["-data", "{{path}}"]
+        needs: [anypoint]
+      - name: "Open in Eclipse"
+        program: "{{eclipse}}"
+        args: ["-data", "{{path}}"]
+        needs: [eclipse]
+      - name: "Open in Spring Tool Suite"
+        program: "{{sts}}"
+        args: ["-data", "{{path}}"]
+        needs: [sts]
+
 # --- universal actions -------------------------------------------------
+# The first three work on every system; everything below is an app that may or
+# may not be installed (and is hidden via `needs:` when it isn't).
 universal:
   default: terminal
   actions:
     - { id: terminal, name: "Open in terminal", terminal: true }
-    - { id: claude-code, name: "Launch Claude Code", terminal: true, run: "claude", needs: [claude] }
-    - { id: vscode, name: "Open in VS Code", program: "{{code}}", args: ["{{path}}"], needs: [code] }
     - { id: filemanager, name: "Reveal in file manager", program: "{{filemanager}}", args: ["{{path}}"] }
     - { id: copy-path, name: "Copy path", client: true }
+
+    - { id: claude-code, name: "Launch Claude Code", terminal: true, run: "claude", needs: [claude] }
+    - { id: vscode, name: "Open in VS Code", program: "{{code}}", args: ["{{path}}"], needs: [code] }
+    - { id: cursor, name: "Open in Cursor", program: "{{cursor}}", args: ["{{path}}"], needs: [cursor] }
+    - { id: zed, name: "Open in Zed", program: "{{zed}}", args: ["{{path}}"], needs: [zed] }
+    - { id: sublime, name: "Open in Sublime Text", program: "{{subl}}", args: ["{{path}}"], needs: [subl] }
+    - { id: idea, name: "Open in IntelliJ IDEA", program: "{{idea}}", args: ["{{path}}"], needs: [idea] }
+    - { id: webstorm, name: "Open in WebStorm", program: "{{webstorm}}", args: ["{{path}}"], needs: [webstorm] }
+    - { id: pycharm, name: "Open in PyCharm", program: "{{pycharm}}", args: ["{{path}}"], needs: [pycharm] }
+    - { id: goland, name: "Open in GoLand", program: "{{goland}}", args: ["{{path}}"], needs: [goland] }
+    - { id: fork, name: "Open in Fork", program: "{{fork}}", args: ["{{path}}"], needs: [fork] }
+    - { id: gitkraken, name: "Open in GitKraken", program: "{{gitkraken}}", args: ["-p", "{{path}}"], needs: [gitkraken] }
+    - { id: sublime-merge, name: "Open in Sublime Merge", program: "{{smerge}}", args: ["{{path}}"], needs: [smerge] }
+    - { id: lazygit, name: "lazygit", run: "lazygit", terminal: true, needs: [lazygit] }
