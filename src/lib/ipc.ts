@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import type { Action, RepoListPayload, ScoredRepo } from "./types";
+import type { Action, AppConfig, RepoListPayload, ScoredRepo } from "./types";
 
 /** Cache-first repo list; returns instantly from the on-disk cache when present. */
 export function listRepos(): Promise<RepoListPayload> {
@@ -30,6 +30,28 @@ export function runAction(actionId: string, path: string): Promise<void> {
 
 export function hideOverlay(): Promise<void> {
   return invoke<void>("hide_overlay");
+}
+
+export function getConfig(): Promise<AppConfig> {
+  return invoke<AppConfig>("get_config");
+}
+
+/** Save an editable subset of settings; returns the updated config. */
+export function saveConfig(patch: {
+  hotkey?: string;
+  roots?: string[];
+  cache_ttl_secs?: number;
+}): Promise<AppConfig> {
+  return invoke<AppConfig>("save_config", { patch });
+}
+
+export function openConfigFile(): Promise<void> {
+  return invoke<void>("open_config_file");
+}
+
+/** Toggle whether clicking away dismisses the overlay (off for the settings screen). */
+export function setDismissOnBlur(enabled: boolean): Promise<void> {
+  return invoke<void>("set_dismiss_on_blur", { enabled });
 }
 
 export function copyPath(path: string): Promise<void> {

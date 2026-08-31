@@ -23,6 +23,7 @@ fn toggle_overlay(window: &WebviewWindow) {
         }
         _ => {
             let _ = window.center();
+            let _ = window.set_always_on_top(true); // may have been dropped by "open config.yaml"
             let _ = window.show();
             let _ = window.set_focus();
             let _ = window.emit("overlay:shown", ());
@@ -121,10 +122,18 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| match event {
-            // Overlay dismisses itself the moment it loses focus.
+            // Overlay dismisses itself on focus loss — unless the frontend has
+            // opted out (settings screen).
             WindowEvent::Focused(false) => {
                 if window.label() == OVERLAY_LABEL {
-                    let _ = window.hide();
+                    let dismiss = window
+                        .app_handle()
+                        .try_state::<AppState>()
+                        .map(|s| *s.dismiss_on_blur.lock().unwrap())
+                        .unwrap_or(true);
+                    if dismiss {
+                        let _ = window.hide();
+                    }
                 }
             }
             // Closing just hides — the app keeps running for the next hotkey press.
@@ -143,6 +152,10 @@ pub fn run() {
             commands::build_actions,
             commands::run_action,
             commands::hide_overlay,
+            commands::get_config,
+            commands::save_config,
+            commands::open_config_file,
+            commands::set_dismiss_on_blur,
         ])
         .run(tauri::generate_context!())
         .expect("error while running dev-prompt");

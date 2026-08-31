@@ -18,6 +18,9 @@ pub struct AppState {
     pub repos: Mutex<Vec<Repo>>,
     /// Age (secs) of the list currently in `repos`; -1 when never cached.
     pub age_secs: Mutex<i64>,
+    /// Whether losing focus dismisses the overlay. Off while the settings
+    /// screen is open so clicking away to copy a path doesn't nuke edits.
+    pub dismiss_on_blur: Mutex<bool>,
 }
 
 impl AppState {
@@ -31,6 +34,7 @@ impl AppState {
             config: Mutex::new(config),
             repos: Mutex::new(loaded.repos),
             age_secs: Mutex::new(loaded.age_secs),
+            dismiss_on_blur: Mutex::new(true),
         }
     }
 }
@@ -141,4 +145,92 @@ pub fn hide_overlay(window: tauri::WebviewWindow) -> AppResult<()> {
     window
         .hide()
         .map_err(|e| AppError::msg(format!("hide failed: {e}")))
+}
+
+// --- settings ---------------------------------------------------------------
+
+#[tauri::command]
+pub fn get_config(state: State<'_, AppState>) -> Config {
+    state.config.lock().unwrap().clone()
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ConfigPatch {
+    pub hotkey: Option<String>,
+    pub roots: Option<Vec<String>>,
+    pub cache_ttl_secs: Option<u64>,
+}
+
+/// Apply an editable subset of settings: write `config.yaml`, update the live
+/// config, and re-register the global hotkey if it changed (validated first, so
+/// a bad accelerator is rejected before anything is persisted).
+#[tauri::command]
+pub fn save_config(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    patch: ConfigPatch,
+) -> AppResult<Config> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+
+    let mut cfg = state.config.lock().unwrap().clone();
+    let old_hotkey = cfg.hotkey.clone();
+
+    if let Some(h) = patch.hotkey {
+        cfg.hotkey = h.trim().to_string();
+    }
+    if let Some(roots) = patch.roots {
+        cfg.roots = roots
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
+    if let Some(ttl) = patch.cache_ttl_secs {
+        cfg.cache_ttl_secs = ttl;
+    }
+
+    if cfg.hotkey != old_hotkey {
+        let gs = app.global_shortcut();
+        gs.register(cfg.hotkey.as_str())
+            .map_err(|e| AppError::msg(format!("invalid hotkey `{}`: {e}", cfg.hotkey)))?;
+        let _ = gs.unregister(old_hotkey.as_str());
+    }
+
+    config::save(&cfg)?;
+    *state.config.lock().unwrap() = cfg.clone();
+    Ok(cfg)
+}
+
+/// Toggle whether focus loss dismisses the overlay (frontend turns this off for
+/// the settings screen).
+#[tauri::command]
+pub fn set_dismiss_on_blur(state: State<'_, AppState>, enabled: bool) {
+    *state.dismiss_on_blur.lock().unwrap() = enabled;
+}
+
+/// Open `config.yaml` with the OS default handler for `.yaml` (or the "Open
+/// with" picker when nothing is associated), and drop the overlay's
+/// always-on-top so the editor is actually visible in front of it.
+#[tauri::command]
+pub fn open_config_file(window: tauri::WebviewWindow) -> AppResult<()> {
+    let path = config::config_path()?;
+    if !path.exists() {
+        config::save(&config::load()?)?;
+    }
+
+    #[cfg(windows)]
+    let program = "explorer";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let program = "xdg-open";
+
+    std::process::Command::new(program)
+        .arg(&path)
+        .spawn()
+        .map_err(|e| AppError::msg(format!("could not open {}: {e}", path.display())))?;
+
+    let _ = window.set_always_on_top(false);
+    Ok(())
 }

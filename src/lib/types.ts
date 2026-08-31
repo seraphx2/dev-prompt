@@ -28,6 +28,13 @@ export interface Action {
   clientSide: boolean;
 }
 
+export interface AppConfig {
+  hotkey: string;
+  roots: string[];
+  scan: { max_depth: number; sentinels: string[] };
+  cache_ttl_secs: number;
+}
+
 export interface RepoListPayload {
   repos: Repo[];
   /** Age of the cache in seconds; -1 when there was no cache. */

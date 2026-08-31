@@ -3,6 +3,7 @@
   import SearchInput from "./lib/components/SearchInput.svelte";
   import ResultList from "./lib/components/ResultList.svelte";
   import ActionMenu from "./lib/components/ActionMenu.svelte";
+  import Settings from "./lib/components/Settings.svelte";
   import {
     buildActions,
     copyPath,
@@ -13,11 +14,12 @@
     rescanRepos,
     runAction,
     searchRepos,
+    setDismissOnBlur,
   } from "./lib/ipc";
   import type { Action, ScoredRepo } from "./lib/types";
   import { fuzzyScore } from "./lib/fuzzy";
 
-  type Mode = "repo-list" | "action-menu";
+  type Mode = "repo-list" | "action-menu" | "settings";
 
   let query = $state("");
   let results = $state<ScoredRepo[]>([]);
@@ -57,6 +59,11 @@
     }
   });
 
+  // The settings screen is a form — don't let a click-away dismiss it.
+  $effect(() => {
+    void setDismissOnBlur(mode !== "settings");
+  });
+
   // Footer key hints, per screen. `[key, description]`.
   const hints = $derived<[string, string][]>(
     mode === "repo-list"
@@ -66,11 +73,13 @@
           ["Tab", "actions"],
           ["Esc", "close"],
         ]
-      : [
-          ["Up/Down", "move"],
-          ["Enter", "run"],
-          ["Esc", "back"],
-        ],
+      : mode === "settings"
+        ? [["Esc", "back"]]
+        : [
+            ["Up/Down", "move"],
+            ["Enter", "run"],
+            ["Esc", "back"],
+          ],
   );
 
   let scanning = $state(false);
@@ -198,6 +207,12 @@
     } else if (e.key.toLowerCase() === "r" && e.ctrlKey) {
       e.preventDefault();
       rescan();
+    } else if (
+      (e.key === "," || e.code === "Comma") &&
+      (e.ctrlKey || e.metaKey)
+    ) {
+      e.preventDefault();
+      mode = "settings";
     }
   }
 
@@ -230,8 +245,16 @@
   // returning from the action menu). Character keys fall through to the focused
   // search input untouched.
   function onWindowKeydown(e: KeyboardEvent) {
-    if (mode === "action-menu") onMenuKeydown(e);
-    else onListKeydown(e);
+    if (mode === "action-menu") {
+      onMenuKeydown(e);
+    } else if (mode === "settings") {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        backToList();
+      }
+    } else {
+      onListKeydown(e);
+    }
   }
 
   onMount(() => {
@@ -270,7 +293,7 @@
       onselect={(i) => (selected = i)}
       onactivate={(i) => activateRepo(i)}
     />
-  {:else if activeRepo}
+  {:else if mode === "action-menu" && activeRepo}
     <ActionMenu
       repoName={activeRepo.repo.name}
       items={filteredActions}
@@ -282,6 +305,8 @@
         execute(filteredActions[i].action, activeRepo.repo.path)}
       onback={backToList}
     />
+  {:else if mode === "settings"}
+    <Settings onback={backToList} onsaved={() => rescan()} />
   {/if}
 
   <footer
@@ -300,6 +325,31 @@
       {#each hints as [key, label] (label)}
         <span class="inline-flex items-center gap-1"><kbd>{key}</kbd>{label}</span>
       {/each}
+      {#if mode !== "settings"}
+        <button
+          type="button"
+          onclick={() => (mode = "settings")}
+          title="Settings (Ctrl+,)"
+          aria-label="Settings"
+          class="shrink-0 rounded-[3px] border border-white/15 bg-white/[0.09] p-1
+                 text-white/80 transition-colors hover:bg-white/20 hover:text-white"
+        >
+          <svg
+            class="h-3 w-3"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+            />
+          </svg>
+        </button>
+      {/if}
     </span>
   </footer>
 
