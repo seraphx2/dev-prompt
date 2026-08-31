@@ -31,6 +31,9 @@ pub struct Action {
     pub group: String,
     /// The action `Enter` runs on a repo.
     pub default: bool,
+    /// Icon key resolved against `src/lib/icons.ts` in the frontend.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     #[serde(skip)]
     pub program: String,
     #[serde(skip)]
@@ -303,6 +306,7 @@ fn build_action(
             hint: String::new(),
             group: group.to_string(),
             default: ra.default,
+            icon: ra.icon.clone(),
             program: String::new(),
             args: Vec::new(),
             cwd: None,
@@ -354,6 +358,7 @@ fn build_action(
         hint,
         group: group.to_string(),
         default: ra.default,
+        icon: ra.icon.clone(),
         program: final_prog,
         args: final_args,
         cwd: final_cwd,
@@ -388,6 +393,7 @@ fn provider_actions(
             hint,
             group: group.to_string(),
             default: false,
+            icon: None,
             program: p,
             args: a,
             cwd: c,
@@ -395,7 +401,16 @@ fn provider_actions(
         }
     };
 
-    match name {
+    let prov_icon = match name {
+        "npm-scripts" => "npm",
+        "cargo" => "rust",
+        "go" => "go",
+        "python" => "python",
+        "compose" => "docker",
+        _ => "run",
+    };
+
+    let mut acts = match name {
         "npm-scripts" => {
             let Some(node) = &proj.node else {
                 return Vec::new();
@@ -485,7 +500,12 @@ fn provider_actions(
             })
             .collect(),
         _ => Vec::new(),
+    };
+
+    for a in &mut acts {
+        a.icon.get_or_insert_with(|| prov_icon.to_string());
     }
+    acts
 }
 
 // --- evaluation --------------------------------------------------

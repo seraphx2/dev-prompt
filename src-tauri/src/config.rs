@@ -202,6 +202,9 @@ pub struct RuleAction {
     pub terminal: bool,
     /// Handled in the frontend (e.g. copy path). No process spawned.
     pub client: bool,
+    /// Icon key for the menu row (see `src/lib/icons.ts` / Settings ▸ Icons).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     pub needs: Vec<String>,
     /// The action `Enter` runs on a repo (universal actions only).
     pub default: bool,

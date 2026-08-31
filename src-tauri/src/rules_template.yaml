@@ -28,8 +28,10 @@
 #     match: Makefile
 #     requires: [make]
 #     actions:
-#       - { name: "make", run: "make", terminal: true }
-#       - { name: "make test", run: "make test", terminal: true }
+#       - { name: "make", run: "make", terminal: true, icon: run }
+#       - { name: "make test", run: "make test", terminal: true, icon: run }
+#
+# `icon:` sets the menu-row glyph — see Settings > Icons for the available keys.
 
 # Actions offered for every repo.
 # universal:

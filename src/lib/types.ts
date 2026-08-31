@@ -24,6 +24,8 @@ export interface Action {
   group: string;
   /** Enter on a repo runs the action flagged `default` (falls back to first). */
   default: boolean;
+  /** Icon key resolved against `lib/icons.ts`; absent -> fallback glyph. */
+  icon?: string | null;
   /** True when this action is handled purely in the frontend (e.g. copy path). */
   clientSide: boolean;
 }

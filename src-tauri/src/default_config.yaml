@@ -152,10 +152,12 @@ rules:
         program: "{{vs}}"
         args: ["{{file}}"]
         needs: [vs]
+        icon: vs
       - name: "Open {{file.stem}} in Rider"
         program: "{{rider}}"
         args: ["{{file}}"]
         needs: [rider]
+        icon: rider
 
   - id: csproj-editors
     match: ["*.csproj", "*.fsproj"]
@@ -166,10 +168,12 @@ rules:
         program: "{{vs}}"
         args: ["{{file}}"]
         needs: [vs]
+        icon: vs
       - name: "Open {{file.stem}} in Rider"
         program: "{{rider}}"
         args: ["{{file}}"]
         needs: [rider]
+        icon: rider
 
   - id: node
     match: package.json
@@ -197,74 +201,74 @@ rules:
     match: pom.xml
     requires: [mvn]
     actions:
-      - { name: "mvn compile", run: "mvn -B compile", terminal: true }
-      - { name: "mvn test", run: "mvn -B test", terminal: true }
-      - { name: "mvn package", run: "mvn -B package", terminal: true }
+      - { name: "mvn compile", run: "mvn -B compile", terminal: true, icon: java }
+      - { name: "mvn test", run: "mvn -B test", terminal: true, icon: java }
+      - { name: "mvn package", run: "mvn -B package", terminal: true, icon: java }
 
   - id: gradle
     match: [build.gradle, build.gradle.kts]
     requires: [gradle]
     actions:
-      - { name: "gradle build", run: "gradle build", terminal: true }
-      - { name: "gradle test", run: "gradle test", terminal: true }
-      - { name: "gradle clean", run: "gradle clean", terminal: true }
+      - { name: "gradle build", run: "gradle build", terminal: true, icon: gradle }
+      - { name: "gradle test", run: "gradle test", terminal: true, icon: gradle }
+      - { name: "gradle clean", run: "gradle clean", terminal: true, icon: gradle }
 
   - id: cmake
     match: CMakeLists.txt
     requires: [cmake]
     actions:
-      - { name: "cmake configure", run: "cmake -B build", terminal: true }
-      - { name: "cmake build", run: "cmake --build build", terminal: true }
+      - { name: "cmake configure", run: "cmake -B build", terminal: true, icon: cmake }
+      - { name: "cmake build", run: "cmake --build build", terminal: true, icon: cmake }
 
   - id: bundler
     match: Gemfile
     requires: [bundle]
     actions:
-      - { name: "bundle install", run: "bundle install", terminal: true }
+      - { name: "bundle install", run: "bundle install", terminal: true, icon: ruby }
 
   - id: mix
     match: mix.exs
     requires: [mix]
     actions:
-      - { name: "mix deps.get", run: "mix deps.get", terminal: true }
-      - { name: "mix compile", run: "mix compile", terminal: true }
-      - { name: "mix test", run: "mix test", terminal: true }
+      - { name: "mix deps.get", run: "mix deps.get", terminal: true, icon: elixir }
+      - { name: "mix compile", run: "mix compile", terminal: true, icon: elixir }
+      - { name: "mix test", run: "mix test", terminal: true, icon: elixir }
 
   - id: composer
     match: composer.json
     requires: [composer]
     actions:
-      - { name: "composer install", run: "composer install", terminal: true }
-      - { name: "composer update", run: "composer update", terminal: true }
+      - { name: "composer install", run: "composer install", terminal: true, icon: php }
+      - { name: "composer update", run: "composer update", terminal: true, icon: php }
 
   - id: deno
     match: [deno.json, deno.jsonc]
     requires: [deno]
     actions:
-      - { name: "deno task", run: "deno task", terminal: true }
-      - { name: "deno test", run: "deno test", terminal: true }
-      - { name: "deno cache", run: "deno cache .", terminal: true }
+      - { name: "deno task", run: "deno task", terminal: true, icon: deno }
+      - { name: "deno test", run: "deno test", terminal: true, icon: deno }
+      - { name: "deno cache", run: "deno cache .", terminal: true, icon: deno }
 
   - id: nix-flake
     match: flake.nix
     requires: [nix]
     actions:
-      - { name: "nix develop", run: "nix develop", terminal: true }
-      - { name: "nix build", run: "nix build", terminal: true }
-      - { name: "nix flake check", run: "nix flake check", terminal: true }
+      - { name: "nix develop", run: "nix develop", terminal: true, icon: nix }
+      - { name: "nix build", run: "nix build", terminal: true, icon: nix }
+      - { name: "nix flake check", run: "nix flake check", terminal: true, icon: nix }
 
   - id: nix-shell
     match: shell.nix
     requires: [nix-shell]
     actions:
-      - { name: "nix-shell", run: "nix-shell", terminal: true }
+      - { name: "nix-shell", run: "nix-shell", terminal: true, icon: nix }
 
   - id: docker-image
     match: Dockerfile
     scope: repo
     requires: [docker]
     actions:
-      - { name: "docker build", run: "docker build -t {{name}} .", terminal: true }
+      - { name: "docker build", run: "docker build -t {{name}} .", terminal: true, icon: docker }
 
   # --- Eclipse-family IDEs ------------------------------------------------
   # `-data <dir>` opens that dir as the WORKSPACE. One-click when the scanned
@@ -278,14 +282,17 @@ rules:
         program: "{{anypoint}}"
         args: ["-data", "{{path}}"]
         needs: [anypoint]
+        icon: eclipse
       - name: "Open in Eclipse"
         program: "{{eclipse}}"
         args: ["-data", "{{path}}"]
         needs: [eclipse]
+        icon: eclipse
       - name: "Open in Spring Tool Suite"
         program: "{{sts}}"
         args: ["-data", "{{path}}"]
         needs: [sts]
+        icon: eclipse
 
 # --- universal actions -------------------------------------------------
 # The first three work on every system; everything below is an app that may or
@@ -293,20 +300,20 @@ rules:
 universal:
   default: terminal
   actions:
-    - { id: terminal, name: "Open in terminal", terminal: true }
-    - { id: filemanager, name: "Reveal in file manager", program: "{{filemanager}}", args: ["{{path}}"] }
-    - { id: copy-path, name: "Copy path", client: true }
+    - { id: terminal, name: "Open in terminal", terminal: true, icon: terminal }
+    - { id: filemanager, name: "Reveal in file manager", program: "{{filemanager}}", args: ["{{path}}"], icon: folder }
+    - { id: copy-path, name: "Copy path", client: true, icon: copy }
 
-    - { id: claude-code, name: "Launch Claude Code", terminal: true, run: "claude", needs: [claude] }
-    - { id: vscode, name: "Open in VS Code", program: "{{code}}", args: ["{{path}}"], needs: [code] }
-    - { id: cursor, name: "Open in Cursor", program: "{{cursor}}", args: ["{{path}}"], needs: [cursor] }
-    - { id: zed, name: "Open in Zed", program: "{{zed}}", args: ["{{path}}"], needs: [zed] }
-    - { id: sublime, name: "Open in Sublime Text", program: "{{subl}}", args: ["{{path}}"], needs: [subl] }
-    - { id: idea, name: "Open in IntelliJ IDEA", program: "{{idea}}", args: ["{{path}}"], needs: [idea] }
-    - { id: webstorm, name: "Open in WebStorm", program: "{{webstorm}}", args: ["{{path}}"], needs: [webstorm] }
-    - { id: pycharm, name: "Open in PyCharm", program: "{{pycharm}}", args: ["{{path}}"], needs: [pycharm] }
-    - { id: goland, name: "Open in GoLand", program: "{{goland}}", args: ["{{path}}"], needs: [goland] }
-    - { id: fork, name: "Open in Fork", program: "{{fork}}", args: ["{{path}}"], needs: [fork] }
-    - { id: gitkraken, name: "Open in GitKraken", program: "{{gitkraken}}", args: ["-p", "{{path}}"], needs: [gitkraken] }
-    - { id: sublime-merge, name: "Open in Sublime Merge", program: "{{smerge}}", args: ["{{path}}"], needs: [smerge] }
-    - { id: lazygit, name: "lazygit", run: "lazygit", terminal: true, needs: [lazygit] }
+    - { id: claude-code, name: "Launch Claude Code", terminal: true, run: "claude", needs: [claude], icon: claude }
+    - { id: vscode, name: "Open in VS Code", program: "{{code}}", args: ["{{path}}"], needs: [code], icon: vscode }
+    - { id: cursor, name: "Open in Cursor", program: "{{cursor}}", args: ["{{path}}"], needs: [cursor], icon: cursor }
+    - { id: zed, name: "Open in Zed", program: "{{zed}}", args: ["{{path}}"], needs: [zed], icon: zed }
+    - { id: sublime, name: "Open in Sublime Text", program: "{{subl}}", args: ["{{path}}"], needs: [subl], icon: sublime }
+    - { id: idea, name: "Open in IntelliJ IDEA", program: "{{idea}}", args: ["{{path}}"], needs: [idea], icon: intellij }
+    - { id: webstorm, name: "Open in WebStorm", program: "{{webstorm}}", args: ["{{path}}"], needs: [webstorm], icon: webstorm }
+    - { id: pycharm, name: "Open in PyCharm", program: "{{pycharm}}", args: ["{{path}}"], needs: [pycharm], icon: pycharm }
+    - { id: goland, name: "Open in GoLand", program: "{{goland}}", args: ["{{path}}"], needs: [goland], icon: goland }
+    - { id: fork, name: "Open in Fork", program: "{{fork}}", args: ["{{path}}"], needs: [fork], icon: git }
+    - { id: gitkraken, name: "Open in GitKraken", program: "{{gitkraken}}", args: ["-p", "{{path}}"], needs: [gitkraken], icon: gitkraken }
+    - { id: sublime-merge, name: "Open in Sublime Merge", program: "{{smerge}}", args: ["{{path}}"], needs: [smerge], icon: git }
+    - { id: lazygit, name: "lazygit", run: "lazygit", terminal: true, needs: [lazygit], icon: git }

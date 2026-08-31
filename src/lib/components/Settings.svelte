@@ -8,12 +8,19 @@
     saveConfig,
   } from "../ipc";
   import type { ConfigSummary } from "../types";
+  import { icons, iconKeys } from "../icons";
+  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import {
     checkForUpdate,
     currentVersion,
     installUpdate,
     type UpdateInfo,
   } from "../updater";
+
+  async function copyIcon(k: string) {
+    await writeText(`icon: ${k}`);
+    note(`Copied "icon: ${k}"`);
+  }
 
   let { onback, onsaved }: { onback: () => void; onsaved: () => void } = $props();
 
@@ -537,5 +544,45 @@
         </div>
       </details>
     {/if}
+
+    <details class="rounded border border-hair">
+      <summary
+        class="cursor-pointer select-none px-3 py-2 text-[12px] text-white/60 hover:text-white/90"
+      >
+        Icons
+        <span class="text-white/25"
+          >· {iconKeys.length} keys for <span class="font-mono">icon:</span> in rules.yaml</span
+        >
+      </summary>
+      <div
+        class="grid grid-cols-[repeat(auto-fill,minmax(76px,1fr))] gap-1 border-t border-hair p-2"
+      >
+        {#each iconKeys as k (k)}
+          <button
+            type="button"
+            onclick={() => copyIcon(k)}
+            title={`Copy "icon: ${k}"`}
+            class="flex flex-col items-center gap-1.5 rounded px-1 py-2.5 hover:bg-white/[0.06]"
+          >
+            <svg
+              class="h-5 w-5 {icons[k].hex ? '' : 'text-white/45'}"
+              viewBox={icons[k].vb ?? "0 0 24 24"}
+              fill="currentColor"
+              style={icons[k].hex ? `color:${icons[k].hex}` : ""}
+            >
+              {#if icons[k].raw}
+                {@html icons[k].raw}
+              {:else}
+                <path d={icons[k].d} />
+              {/if}
+            </svg>
+            <span
+              class="w-full truncate text-center font-mono text-[9px] text-white/40"
+              >{k}</span
+            >
+          </button>
+        {/each}
+      </div>
+    </details>
   {/if}
 </div>

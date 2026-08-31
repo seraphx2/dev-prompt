@@ -121,6 +121,11 @@ actions:
 
   - name: "Copy path"
     client: true              # handled in the frontend, no process (copy-path only)
+
+  - name: "make"
+    run: "make"
+    terminal: true
+    icon: run                 # glyph for the menu row — see Settings > Icons
 ```
 
 **`{{vs}}` and `needs: [vs]` refer to the same thing** — `vs` is a key in the
@@ -140,6 +145,9 @@ or when the action has no program at all (a gated `terminal: true`).
   on `PATH` rather than `programs` keys.
 - `client: true` is reserved for the built-in `copy-path`; custom client
   actions aren't wired up.
+- `icon:` picks the row glyph. **Settings ▸ Icons** lists every bundled key
+  (click one to copy `icon: <key>`); untagged actions fall back to a neutral
+  glyph.
 
 ### `universal`
 

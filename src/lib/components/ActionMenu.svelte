@@ -1,8 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { MenuItem } from "../types";
+  import type { Action, MenuItem } from "../types";
+  import { icons, type Glyph } from "../icons";
   import Highlight from "./Highlight.svelte";
   import ClearButton from "./ClearButton.svelte";
+
+  const glyph = (a: Action): Glyph =>
+    (a.icon && icons[a.icon]) || icons.run;
 
   let {
     repoName,
@@ -144,6 +148,15 @@
             <path d="m9 6 6 6-6 6" />
           </svg>
         {:else}
+          {@const g = glyph(item.action)}
+          <svg
+            class="h-4 w-4 shrink-0 {g.hex ? 'opacity-90' : 'text-white/30'}"
+            viewBox={g.vb ?? "0 0 24 24"}
+            fill="currentColor"
+            style={g.hex ? `color:${g.hex}` : ""}
+          >
+            {#if g.raw}{@html g.raw}{:else}<path d={g.d} />{/if}
+          </svg>
           <span class="flex-1 truncate text-[13px] text-white/90">
             <Highlight text={item.action.label} indices={item.positions} />
           </span>
