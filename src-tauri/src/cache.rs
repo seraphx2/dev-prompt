@@ -4,12 +4,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::apps::AppEntry;
 use crate::config::cache_dir;
 use crate::error::AppResult;
 use crate::inspect::RepoContext;
 use crate::scan::Repo;
 
 pub const CACHE_FILE: &str = "repos.json";
+pub const APPS_CACHE_FILE: &str = "apps.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct CacheFile {
@@ -74,6 +76,37 @@ pub fn save(repos: &[Repo], contexts: &HashMap<String, RepoContext>) -> AppResul
 
 pub fn is_stale(age_secs: i64, ttl_secs: u64) -> bool {
     age_secs < 0 || age_secs as u64 >= ttl_secs
+}
+
+// --- installed-apps cache (parallel to the repo cache) --------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+struct AppsCacheFile {
+    written_at: u64,
+    apps: Vec<AppEntry>,
+}
+
+/// `(apps, age_secs)` — `age_secs` is -1 when no cache file exists yet.
+pub fn load_apps() -> AppResult<(Vec<AppEntry>, i64)> {
+    let path = cache_dir()?.join(APPS_CACHE_FILE);
+    if !path.exists() {
+        return Ok((Vec::new(), -1));
+    }
+    let parsed: AppsCacheFile =
+        serde_json::from_str(&std::fs::read_to_string(&path)?).unwrap_or_default();
+    let age = now_secs().saturating_sub(parsed.written_at) as i64;
+    Ok((parsed.apps, age))
+}
+
+pub fn save_apps(apps: &[AppEntry]) -> AppResult<()> {
+    let path = cache_dir()?.join(APPS_CACHE_FILE);
+    let file = AppsCacheFile {
+        written_at: now_secs(),
+        apps: apps.to_vec(),
+    };
+    std::fs::write(&path, serde_json::to_string_pretty(&file)?)?;
+    Ok(())
 }
 
 /// Merge a fresh scan over the previous cache: fresh entries win; anything not in
@@ -141,5 +174,33 @@ mod tests {
         let json = r#"{ "written_at": 5, "repos": [] }"#;
         let parsed: CacheFile = serde_json::from_str(json).unwrap();
         assert!(parsed.contexts.is_empty());
+    }
+
+    #[test]
+    fn apps_cache_file_round_trips() {
+        let app = crate::apps::AppEntry {
+            name: "DBeaver".into(),
+            exec: r"C:\Program Files\DBeaver\dbeaver.exe".into(),
+            kind: crate::apps::AppKind::Exe,
+            args: vec![],
+            icon: Some("data:image/png;base64,AAAA".into()),
+            source: "start-menu".into(),
+            uses: 3,
+        };
+        let file = AppsCacheFile {
+            written_at: 100,
+            apps: vec![app.clone()],
+        };
+        let json = serde_json::to_string(&file).unwrap();
+        let back: AppsCacheFile = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.apps, vec![app]);
+    }
+
+    #[test]
+    fn apps_cache_missing_file_is_empty() {
+        let json = r#"{}"#;
+        let parsed: AppsCacheFile = serde_json::from_str(json).unwrap();
+        assert!(parsed.apps.is_empty());
+        assert_eq!(parsed.written_at, 0);
     }
 }

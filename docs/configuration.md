@@ -32,9 +32,9 @@ The rest of this document is about `rules.yaml`.
 | `universal` | `universal.disable: [id]` removes built-ins, `universal.add: [...]` appends yours, `universal.default: id` sets which action Enter runs on a repo in the main list. |
 
 (`hotkey`, `roots`, `scan`, `cache_ttl_secs`, `terminal`, `terminal_template`,
-`shell` are **settings**, not overrides — they live in `config.yaml` and are
-edited in the Settings screen. Putting them in `rules.yaml` has no effect. See
-[Terminal](#terminal).)
+`shell`, `apps` are **settings**, not overrides — they live in `config.yaml` and
+are edited in the Settings screen. Putting them in `rules.yaml` has no effect.
+See [Terminal](#terminal) and [Apps](#apps).)
 
 A disabled built-in isn't deleted — it still appears in the Settings
 "Active configuration" viewer marked *disabled*, it's just never evaluated. This
@@ -221,6 +221,41 @@ real console (ANSI colour, a live TTY — tools like Claude Code need it). The
 shell is `pwsh` (else Windows PowerShell) unless you set **Settings ▸ Shell** /
 `shell:` — `cmd`, `bash`, `nu`, … are recognised for their "run and hold" flags.
 The **Run command…** action picks a shell per-run, defaulting to that setting.
+
+---
+
+## Apps
+
+Type `>` in the search bar to switch the list from repositories to **installed
+applications**. Delete back to an empty box (or clear it) to return — the repo
+list is always the default when the overlay opens. Enter launches the selected
+app; `Ctrl+R` re-enumerates. Frecency: apps you launch from dev-prompt float to
+the top of the empty-query list.
+
+**Windows only.** On other platforms the `>` scope shows an empty list.
+
+Discovery unions four sources and de-duplicates by executable path:
+
+- **Start Menu** shortcuts (both the machine and per-user `Programs` trees)
+- **Store apps** (`Get-StartApps` AppUserModelIDs)
+- the three **Uninstall** registry hives (`HKLM`, `HKLM\WOW6432Node`, `HKCU`)
+- a bounded `*.exe` scan of `%LOCALAPPDATA%\Programs` plus any `extra_dirs`
+
+Icons are extracted from the executables and cached under
+`%LOCALAPPDATA%\dev-prompt\cache\app-icons\`.
+
+```yaml
+# config.yaml — managed from Settings ▸ "Index installed apps"
+apps:
+  enabled: true
+  extra_dirs:                 # extra folders to scan for portable executables
+    - D:\tools
+  exclude:                    # drop apps whose name or path contains any of
+    - zoom                    #   these (case-insensitive)
+```
+
+Installer stubs, updaters, redistributables, crash handlers and OS components
+under `\Windows\` are filtered out automatically; `exclude` is for the rest.
 
 ---
 

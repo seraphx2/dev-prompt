@@ -39,6 +39,13 @@ pub fn launch(action: &Action, repo: &Repo) -> AppResult<()> {
     spawn_detached(&action.program, &args, &cwd)
 }
 
+/// Spawn an arbitrary program fully detached (no console, outlives the overlay).
+/// Shared by the app launcher; an empty `cwd` leaves the working directory
+/// inherited rather than set.
+pub fn spawn(program: &str, args: &[String], cwd: &str) -> AppResult<()> {
+    spawn_detached(program, args, cwd)
+}
+
 #[cfg(windows)]
 fn spawn_detached(program: &str, args: &[String], cwd: &str) -> AppResult<()> {
     use std::os::windows::process::CommandExt;
@@ -49,7 +56,9 @@ fn spawn_detached(program: &str, args: &[String], cwd: &str) -> AppResult<()> {
     // aliases (`wt.exe`) resolve the same way they do in a shell.
     let mut cmd = Command::new("cmd");
     cmd.arg("/c").arg(program).args(args);
-    cmd.current_dir(cwd);
+    if !cwd.is_empty() {
+        cmd.current_dir(cwd);
+    }
     cmd.creation_flags(FLAGS);
     cmd.spawn()
         .map(|_| ())
@@ -60,7 +69,9 @@ fn spawn_detached(program: &str, args: &[String], cwd: &str) -> AppResult<()> {
 fn spawn_detached(program: &str, args: &[String], cwd: &str) -> AppResult<()> {
     let mut cmd = Command::new(program);
     cmd.args(args);
-    cmd.current_dir(cwd);
+    if !cwd.is_empty() {
+        cmd.current_dir(cwd);
+    }
 
     #[cfg(unix)]
     {

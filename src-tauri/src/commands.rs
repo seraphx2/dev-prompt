@@ -5,6 +5,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::apps::{self, AppEntry};
 use crate::cache;
 use crate::config::{self, resolved_roots, Config};
 use crate::error::{AppError, AppResult};
@@ -25,6 +26,10 @@ pub struct AppState {
     pub contexts: Mutex<HashMap<String, RepoContext>>,
     /// Age (secs) of the list currently in `repos`; -1 when never cached.
     pub age_secs: Mutex<i64>,
+    /// Installed apps for the `>` scope, cached in `apps.json`.
+    pub apps: Mutex<Vec<AppEntry>>,
+    /// Age (secs) of `apps`; -1 when never cached.
+    pub apps_age_secs: Mutex<i64>,
     /// Whether losing focus dismisses the overlay. Off while the settings
     /// screen is open so clicking away to copy a path doesn't nuke edits.
     pub dismiss_on_blur: Mutex<bool>,
@@ -41,11 +46,14 @@ impl AppState {
             contexts: HashMap::new(),
             age_secs: -1,
         });
+        let (apps, apps_age) = cache::load_apps().unwrap_or((Vec::new(), -1));
         AppState {
             config: Mutex::new(config),
             repos: Mutex::new(loaded.repos),
             contexts: Mutex::new(loaded.contexts),
             age_secs: Mutex::new(loaded.age_secs),
+            apps: Mutex::new(apps),
+            apps_age_secs: Mutex::new(apps_age),
             dismiss_on_blur: Mutex::new(true),
             first_run,
         }
@@ -279,6 +287,7 @@ pub struct ConfigPatch {
     pub terminal: Option<String>,
     pub terminal_template: Option<String>,
     pub shell: Option<String>,
+    pub apps: Option<config::AppsConfig>,
 }
 
 /// Apply an editable subset of settings: write `config.yaml`, update the live
@@ -329,6 +338,21 @@ pub fn save_config(
     if let Some(s) = patch.shell {
         let s = s.trim();
         user.shell = (!s.is_empty()).then(|| s.to_string());
+    }
+    if let Some(mut a) = patch.apps {
+        a.extra_dirs = a
+            .extra_dirs
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        a.exclude = a
+            .exclude
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        user.apps = Some(a);
     }
 
     let new_hotkey = user.hotkey.clone().unwrap_or_else(|| old_hotkey.clone());
@@ -441,6 +465,89 @@ pub fn run_command(
         prompt: false,
     };
     launch::launch(&action, &repo)
+}
+
+// --- installed-app launcher ( > scope ) -----------------------------------
+
+/// Apps change rarely — a day-long freshness window keeps re-enumeration cheap.
+const APPS_TTL_SECS: u64 = 86_400;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppsPayload {
+    pub apps: Vec<AppEntry>,
+    pub age_secs: i64,
+    pub stale: bool,
+}
+
+/// Fold current launch counts into a freshly-cloned app list.
+fn apps_with_usage(mut apps: Vec<AppEntry>) -> Vec<AppEntry> {
+    let counts = crate::usage::counts();
+    for a in &mut apps {
+        a.uses = counts.get(&a.exec.to_lowercase()).copied().unwrap_or(0);
+    }
+    apps
+}
+
+/// Cache-first installed-app list for the `>` scope.
+#[tauri::command]
+pub fn list_apps(state: State<'_, AppState>) -> AppsPayload {
+    let apps = apps_with_usage(state.apps.lock().unwrap().clone());
+    let age = *state.apps_age_secs.lock().unwrap();
+    AppsPayload {
+        apps,
+        age_secs: age,
+        stale: cache::is_stale(age, APPS_TTL_SECS),
+    }
+}
+
+/// Re-enumerate installed apps off the UI thread. Emits `apps:updated`.
+#[tauri::command]
+pub async fn rescan_apps(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppsPayload> {
+    let cfg = state.config.lock().unwrap().clone();
+
+    let fresh = if cfg.apps.enabled {
+        tauri::async_runtime::spawn_blocking(move || apps::discover(&cfg))
+            .await
+            .map_err(|e| AppError::msg(format!("app scan task failed: {e}")))?
+    } else {
+        Vec::new()
+    };
+
+    cache::save_apps(&fresh)?;
+    *state.apps.lock().unwrap() = fresh.clone();
+    *state.apps_age_secs.lock().unwrap() = 0;
+
+    let _ = app.emit("apps:updated", ());
+    Ok(AppsPayload {
+        apps: apps_with_usage(fresh),
+        age_secs: 0,
+        stale: false,
+    })
+}
+
+/// Launch an installed app (and bump its frecency count).
+#[tauri::command]
+pub fn run_app(
+    exec: String,
+    kind: String,
+    args: Option<Vec<String>>,
+) -> AppResult<()> {
+    let kind = match kind.as_str() {
+        "aumid" => crate::apps::AppKind::Aumid,
+        _ => crate::apps::AppKind::Exe,
+    };
+    let entry = AppEntry {
+        name: String::new(),
+        exec: exec.clone(),
+        kind,
+        args: args.unwrap_or_default(),
+        icon: None,
+        source: String::new(),
+        uses: 0,
+    };
+    crate::usage::bump(&exec);
+    apps::launch(&entry)
 }
 
 /// Toggle whether focus loss dismisses the overlay (frontend turns this off for

@@ -5,6 +5,8 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
   Action,
   AppConfig,
+  AppEntry,
+  AppListPayload,
   ConfigSummary,
   RepoListPayload,
   RepoTrace,
@@ -79,6 +81,7 @@ export function saveConfig(patch: {
   terminal?: string;
   terminal_template?: string;
   shell?: string;
+  apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
 }): Promise<AppConfig> {
   return invoke<AppConfig>("save_config", { patch });
 }
@@ -100,6 +103,30 @@ export function runCommand(
   shell?: string,
 ): Promise<void> {
   return invoke<void>("run_command", { path, command, shell: shell || null });
+}
+
+/** Cache-first list of installed apps for the `>` scope. */
+export function listApps(): Promise<AppListPayload> {
+  return invoke<AppListPayload>("list_apps");
+}
+
+/** Force a fresh enumeration of installed apps. Emits `apps:updated`. */
+export function rescanApps(): Promise<AppListPayload> {
+  return invoke<AppListPayload>("rescan_apps");
+}
+
+/** Launch an installed app (bumps its frecency count). */
+export function runApp(e: AppEntry): Promise<void> {
+  return invoke<void>("run_app", {
+    exec: e.exec,
+    kind: e.kind,
+    args: e.args ?? null,
+  });
+}
+
+/** Fired after a background app re-enumeration replaces the cache. */
+export function onAppsUpdated(cb: () => void): Promise<UnlistenFn> {
+  return listen("apps:updated", () => cb());
 }
 
 /** Open rules.yaml (the hand-authored overrides file) in the default editor. */

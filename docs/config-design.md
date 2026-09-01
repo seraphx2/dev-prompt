@@ -43,6 +43,29 @@ Files: `rules.rs` (`terminalize`, `shell_wrap`), `default_config.yaml`.
 
 ---
 
+## 16. App launcher — phase 2 · _incremental on the shipped V1_
+
+The `>` app scope shipped (see Done): Windows discovery (Start Menu + Store +
+Uninstall keys + bounded `%LOCALAPPDATA%\Programs` scan), extracted+cached
+icons, frecency, `apps.{enabled,extra_dirs,exclude}`, Settings controls. Left:
+
+- **Blended overflow** — when a no-prefix repo query has few/no matches, show the
+  top ~4 app hits under a dim `— Apps —` divider without leaving repo scope.
+  Needs the keyboard-nav model to walk a mixed list and Enter to branch (repo →
+  action menu, app → launch).
+- **App action menu** — Tab on an app row → Open / Open file location / Run as
+  administrator / Copy path. Currently Tab is a no-op in the `>` scope.
+- **Non-Windows discovery** — `apps::discover` returns `[]` off Windows. Linux:
+  parse `$XDG_DATA_DIRS/applications/*.desktop` (`Name`, `Exec`, `Icon`, skip
+  `NoDisplay=true`). macOS: enumerate `/Applications` + `~/Applications`
+  `.app` bundles, launch via `open -a`.
+- **Native enumeration** — replace the embedded PowerShell script with direct
+  registry reads + `IShellLink` if the ~4 s cold rescan ever matters.
+
+Files: `src-tauri/src/apps.rs`, `src/App.svelte`, `src/lib/components/AppList.svelte`.
+
+---
+
 ## 11. fs watcher / incremental reindex · _hard — new dep, concurrency, cross-platform_
 
 Avoid the "stale until next open + rescan" model.
@@ -201,11 +224,19 @@ Files: `rules.rs` (`expand` + `build_action`), `config.rs` (schema),
   picker; `run_command` / `list_shells`; `config.shell` + per-shell `shell_wrap`
   ("run and hold" for pwsh / cmd / bash / nu / …) + a Settings **Shell**
   dropdown. — 2026-09-01
+- **App launcher — `>` scope (Windows)** — type `>` in the search bar to search
+  installed apps instead of repos. `apps.rs` discovery via one embedded
+  PowerShell script (Start Menu + `Get-StartApps` Store + Uninstall hives +
+  bounded `%LOCALAPPDATA%\Programs` scan), extracted + disk-cached icons,
+  `keep_entry` noise filter + path dedupe; `apps.json` cache (24 h TTL),
+  `list_apps` / `rescan_apps` / `run_app`, `app-usage.json` frecency;
+  `AppList` / `AppRow`, `config.apps.{enabled,extra_dirs,exclude}` + Settings
+  controls. Phase 2 in #16. — 2026-09-01
 
-Remaining, hardest-first: #6 task-targets provider, #15 conditional template
-expansion, #14 (Cargo-workspace / Xcode / Nx-Turbo-Bazel), #10 terminal
-abstraction (non-Windows), #11 fs watcher, #12 Wayland hotkey, #13 Eclipse
-provisioner.
+Remaining, hardest-first: #6 task-targets provider, #16 app-launcher phase 2,
+#15 conditional template expansion, #14 (Cargo-workspace / Xcode / Nx-Turbo-
+Bazel), #10 terminal abstraction (non-Windows), #11 fs watcher, #12 Wayland
+hotkey, #13 Eclipse provisioner.
 
 ## Not on this list (shipped alongside)
 

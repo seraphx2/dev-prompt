@@ -1,3 +1,4 @@
+mod apps;
 mod cache;
 mod commands;
 mod config;
@@ -11,6 +12,7 @@ mod launch;
 mod maven;
 mod rules;
 mod scan;
+mod usage;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -286,6 +288,9 @@ pub fn run() {
             commands::list_terminals,
             commands::list_shells,
             commands::run_command,
+            commands::list_apps,
+            commands::rescan_apps,
+            commands::run_app,
             commands::open_rules_file,
             commands::set_dismiss_on_blur,
             commands::set_update_hint,

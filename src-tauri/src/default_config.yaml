@@ -32,6 +32,17 @@ scan:
   collapse_nested: true
 cache_ttl_secs: 900
 
+# --- installed-app launcher (the ">" scope in the search bar) ---------------
+# Type ">" in the overlay to search installed apps instead of repos. Windows
+# only for now. Discovery unions Start Menu shortcuts, Store apps, the Uninstall
+# registry entries, and a bounded *.exe scan of %LOCALAPPDATA%\Programs.
+apps:
+  enabled: true
+  # Extra folders to scan for portable / unregistered executables.
+  extra_dirs: []
+  # Drop any app whose name or path contains one of these (case-insensitive).
+  exclude: []
+
 # --- discovery markers -------------------------------------------------------
 # VCS dirs + workspace files with no distinct actions. Build manifests
 # (pom.xml, Gemfile, …) ride in via their rule's `match` instead.

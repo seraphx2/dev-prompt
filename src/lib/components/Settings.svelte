@@ -11,6 +11,7 @@
     pickDirectories,
     reloadConfig,
     repoRuleTrace,
+    rescanApps,
     saveConfig,
     setAutostart,
   } from "../ipc";
@@ -40,6 +41,11 @@
   // "" = default shell (pwsh -> powershell), else a shell name.
   let shellSel = $state("");
   let shells = $state<string[]>([]);
+  // Installed-app launcher (the ">" scope).
+  let appsEnabled = $state(true);
+  let appExtraDirs = $state<string[]>([]);
+  let appExclude = $state<string[]>([]);
+  let appsSnapshot = "";
   let autostart = $state(false);
   let loaded = $state(false);
   let busy = $state(false);
@@ -237,6 +243,7 @@
     terminal?: string | null;
     terminal_template?: string | null;
     shell?: string | null;
+    apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
   }) {
     hotkey = c.hotkey;
     roots = c.roots.length ? [...c.roots] : [""];
@@ -249,6 +256,27 @@
     terminalTemplate = c.terminal_template ?? "";
     terminalSel = terminalTemplate ? "__custom__" : (c.terminal ?? "");
     shellSel = c.shell ?? "";
+    appsEnabled = c.apps?.enabled ?? true;
+    appExtraDirs = [...(c.apps?.extra_dirs ?? [])];
+    appExclude = [...(c.apps?.exclude ?? [])];
+    appsSnapshot = JSON.stringify([appsEnabled, appExtraDirs, appExclude]);
+  }
+
+  const addAppDir = () => (appExtraDirs = [...appExtraDirs, ""]);
+  function removeAppDir(i: number) {
+    appExtraDirs = appExtraDirs.filter((_, k) => k !== i);
+  }
+  async function browseAppDirs() {
+    const picked = await pickDirectories();
+    if (!picked.length) return;
+    const have = new Set(appExtraDirs.map((d) => d.trim()).filter(Boolean));
+    const add = picked.filter((p) => !have.has(p));
+    if (add.length) {
+      appExtraDirs = [
+        ...appExtraDirs.map((d) => d.trim()).filter(Boolean),
+        ...add,
+      ];
+    }
   }
 
   async function reload() {
@@ -281,6 +309,8 @@
     busy = true;
     note("");
     try {
+      const appExtra = appExtraDirs.map((d) => d.trim()).filter(Boolean);
+      const appExcl = appExclude.map((d) => d.trim()).filter(Boolean);
       await saveConfig({
         hotkey: hotkey.trim(),
         roots: roots.map((r) => r.trim()).filter(Boolean),
@@ -291,10 +321,18 @@
         terminal_template:
           terminalSel === "__custom__" ? terminalTemplate.trim() : "",
         shell: shellSel,
+        apps: { enabled: appsEnabled, extra_dirs: appExtra, exclude: appExcl },
       });
       note("Saved.");
       onsaved();
       void loadSummary();
+
+      // Re-enumerate apps only when the app settings actually changed.
+      const nextAppsSnapshot = JSON.stringify([appsEnabled, appExtra, appExcl]);
+      if (nextAppsSnapshot !== appsSnapshot) {
+        appsSnapshot = nextAppsSnapshot;
+        void rescanApps();
+      }
     } catch (e) {
       note(`${e}`, true);
     } finally {
@@ -515,6 +553,69 @@
         {/if}
       </select>
     </label>
+
+    <div class="space-y-2 border-t border-hair pt-4">
+      <label class="flex items-center gap-2">
+        <input
+          type="checkbox"
+          bind:checked={appsEnabled}
+          class="h-3.5 w-3.5 accent-sky-500"
+        />
+        <span class="text-orange-400">Index installed apps</span>
+        <span class="text-white/25">— type <span class="font-mono">›</span> in the search bar</span>
+      </label>
+      {#if appsEnabled}
+        <div class="space-y-1.5 pl-5">
+          <span class="text-[11px] text-white/30"
+            >Extra folders to scan for portable executables (Start Menu, Store
+            apps and installed programs are found automatically).</span
+          >
+          {#each appExtraDirs as _d, i (i)}
+            <div class="flex items-center gap-2">
+              <input
+                bind:value={appExtraDirs[i]}
+                spellcheck="false"
+                placeholder="D:\tools"
+                class="min-w-0 flex-1 rounded border border-hair bg-white/[0.04] px-2 py-1.5 font-mono text-[12px] text-white/90 focus:border-white/25 focus:outline-none"
+              />
+              <button
+                type="button"
+                onclick={() => removeAppDir(i)}
+                aria-label="Remove folder"
+                title="Remove folder"
+                class="shrink-0 rounded border border-hair px-2 py-1 text-[11px] text-white/40 hover:bg-white/10 hover:text-white/70"
+              >
+                ×
+              </button>
+            </div>
+          {/each}
+          <div class="flex gap-2">
+            <button
+              type="button"
+              onclick={addAppDir}
+              class="rounded border border-hair px-2 py-1 text-[12px] text-white/50 hover:bg-white/10 hover:text-white/80"
+            >
+              + Add folder
+            </button>
+            <button
+              type="button"
+              onclick={browseAppDirs}
+              class="rounded border border-hair px-2 py-1 text-[12px] text-white/50 hover:bg-white/10 hover:text-white/80"
+            >
+              Browse…
+            </button>
+            <button
+              type="button"
+              onclick={() => rescanApps()}
+              title="Re-enumerate installed apps now"
+              class="rounded border border-hair px-2 py-1 text-[12px] text-white/50 hover:bg-white/10 hover:text-white/80"
+            >
+              Rescan apps
+            </button>
+          </div>
+        </div>
+      {/if}
+    </div>
 
     <label class="flex items-center gap-2">
       <input

@@ -59,6 +59,8 @@ export interface AppConfig {
   terminal_template?: string | null;
   /** Shell a one-shot terminal command runs inside; absent = pwsh/powershell. */
   shell?: string | null;
+  /** Installed-app launcher (`>` scope) settings. */
+  apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
 }
 
 /** An installed terminal emulator dev-prompt can drive — for the Settings dropdown. */
@@ -117,6 +119,27 @@ export interface ProjectHit {
 export interface RepoListPayload {
   repos: Repo[];
   /** Age of the cache in seconds; -1 when there was no cache. */
+  ageSecs: number;
+  stale: boolean;
+}
+
+/** An installed application for the `>` launcher scope. */
+export interface AppEntry {
+  name: string;
+  /** Executable path (`exe`) or AppUserModelID (`aumid`). */
+  exec: string;
+  kind: "exe" | "aumid";
+  args?: string[];
+  /** `data:image/png;base64,…` when an icon was extracted. */
+  icon?: string | null;
+  /** "start-menu" | "store" | "uninstall" | "scan". */
+  source: string;
+  /** Times launched from dev-prompt (frecency). */
+  uses: number;
+}
+
+export interface AppListPayload {
+  apps: AppEntry[];
   ageSecs: number;
   stale: boolean;
 }

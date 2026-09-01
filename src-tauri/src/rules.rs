@@ -244,8 +244,8 @@ fn resolve_var(key: &str, t: &Tmpl) -> String {
     }
 }
 
-/// Quote-aware split for `run:` strings.
-fn shell_split(s: &str) -> Vec<String> {
+/// Quote-aware split for `run:` strings (and `.lnk` argument strings).
+pub fn shell_split(s: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut quote: Option<char> = None;

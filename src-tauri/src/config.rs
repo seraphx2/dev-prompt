@@ -45,6 +45,8 @@ pub struct Config {
     /// / …). `None` = `pwsh`, falling back to Windows PowerShell.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell: Option<String>,
+    /// Installed-app launcher (`>` scope) settings.
+    pub apps: AppsConfig,
     /// Discovery markers — "this folder is a project". Every `rules[].match`
     /// also counts, so a rule implies a marker.
     pub markers: Vec<Marker>,
@@ -72,11 +74,36 @@ impl Default for Config {
             terminal: None,
             terminal_template: None,
             shell: None,
+            apps: AppsConfig::default(),
             markers: Vec::new(),
             programs: BTreeMap::new(),
             rules: Vec::new(),
             universal: UniversalConfig::default(),
             disabled_rules: Vec::new(),
+        }
+    }
+}
+
+/// `apps:` in `config.yaml` — the installed-app launcher reached with `>`.
+/// Windows only; on other platforms discovery yields nothing regardless.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct AppsConfig {
+    /// Index installed applications at all.
+    pub enabled: bool,
+    /// Extra directories to scan for `*.exe` beyond `%LOCALAPPDATA%\Programs`.
+    pub extra_dirs: Vec<String>,
+    /// Case-insensitive substrings; an app whose name or path contains any is
+    /// dropped.
+    pub exclude: Vec<String>,
+}
+
+impl Default for AppsConfig {
+    fn default() -> Self {
+        AppsConfig {
+            enabled: true,
+            extra_dirs: Vec::new(),
+            exclude: Vec::new(),
         }
     }
 }
@@ -337,6 +364,8 @@ pub struct UserConfig {
     pub terminal_template: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apps: Option<AppsConfig>,
 }
 
 /// `rules.yaml` — hand-authored overrides layered over the bundled defaults.
@@ -398,6 +427,9 @@ fn merge_settings(cfg: &mut Config, u: UserConfig) {
     }
     if let Some(s) = u.shell {
         cfg.shell = Some(s);
+    }
+    if let Some(a) = u.apps {
+        cfg.apps = a;
     }
 }
 
@@ -518,6 +550,9 @@ fn first_run_user() -> UserConfig {
         terminal: None,
         terminal_template: None,
         shell: None,
+        // Bundled default is already `enabled: true`; leave the key out of the
+        // starter file so it stays uncluttered.
+        apps: None,
     }
 }
 
@@ -723,6 +758,27 @@ mod tests {
         })
         .unwrap();
         assert!(y.contains("collapse_nested: auto"), "{y}");
+    }
+
+    #[test]
+    fn apps_config_defaults_to_enabled() {
+        let cfg = bundled_defaults();
+        assert!(cfg.apps.enabled);
+        assert!(cfg.apps.extra_dirs.is_empty());
+        assert!(cfg.apps.exclude.is_empty());
+    }
+
+    #[test]
+    fn settings_file_carries_apps() {
+        let mut cfg = bundled_defaults();
+        let user: UserConfig = serde_yaml_ng::from_str(
+            "apps:\n  enabled: false\n  extra_dirs: [D:\\tools]\n  exclude: [zoom]\n",
+        )
+        .unwrap();
+        merge_settings(&mut cfg, user);
+        assert!(!cfg.apps.enabled);
+        assert_eq!(cfg.apps.extra_dirs, vec!["D:\\tools"]);
+        assert_eq!(cfg.apps.exclude, vec!["zoom"]);
     }
 
     #[test]
