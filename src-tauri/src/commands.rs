@@ -57,7 +57,9 @@ fn context_for(state: &AppState, repo: &Repo) -> RepoContext {
     if let Some(ctx) = state.contexts.lock().unwrap().get(&repo.path).cloned() {
         return ctx;
     }
-    inspect::inspect(Path::new(&repo.path))
+    let cfg = state.config.lock().unwrap();
+    let discovery = config::compile_globset(&config::discovery_globs(&cfg));
+    inspect::inspect(Path::new(&repo.path), &discovery)
 }
 
 #[derive(Debug, Serialize)]
@@ -103,7 +105,8 @@ pub async fn rescan_repos(
     let (fresh, contexts) = tauri::async_runtime::spawn_blocking(move || {
         let roots = resolved_roots(&cfg);
         let repos = scan::scan(&roots, &cfg);
-        let contexts = inspect::inspect_all(repos.iter().map(|r| r.path.as_str()));
+        let discovery = config::compile_globset(&config::discovery_globs(&cfg));
+        let contexts = inspect::inspect_all(repos.iter().map(|r| r.path.as_str()), &discovery);
         (repos, contexts)
     })
     .await
@@ -182,9 +185,14 @@ pub async fn refresh_repo_context(
     path: String,
 ) -> AppResult<()> {
     let walk_path = path.clone();
-    let fresh = tauri::async_runtime::spawn_blocking(move || inspect::inspect(Path::new(&walk_path)))
-        .await
-        .map_err(|e| AppError::msg(format!("inspect task failed: {e}")))?;
+    let discovery = config::compile_globset(&config::discovery_globs(
+        &state.config.lock().unwrap(),
+    ));
+    let fresh = tauri::async_runtime::spawn_blocking(move || {
+        inspect::inspect(Path::new(&walk_path), &discovery)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("inspect task failed: {e}")))?;
 
     let changed = {
         let mut map = state.contexts.lock().unwrap();

@@ -144,6 +144,17 @@ Files: `rules.rs` (one provider arm each) + a small parser module per tool;
 - **#8** per-repo rule trace in Settings ("Trace a repo") — 2026-09-01
 - **#7** `dotnet` provider — `.sln` / `.slnx` / lone `.??proj` → build/run/test — 2026-09-01
 - **go-work / maven-modules / gradle-modules** providers (#14's cheap tier) — 2026-09-01
+- **Sub-project discovery generalized** — `has_any_marker()` used to hardcode
+  5 ecosystems (`.sln`, package.json, Cargo.toml, go.mod, Python); the other 13
+  rule-based ones (compose, Maven, Gradle ×2, CMake, Bundler, Mix, Composer,
+  Deno, Nix ×2, Docker, Eclipse) only ever worked at a repo root, invisible as
+  a sub-project. Now checks `proj.files` against the same `discovery_globs`
+  scan.rs uses to find repos, so any rule — present or future — is
+  automatically enough. — 2026-09-01
+- **Flutter/Dart support** — `pubspec.yaml` rule (pub get/run/build/test), plus
+  `flutter-android` reaching into `android/` for the Gradle project Flutter
+  generates there (one level below the project root, invisible to
+  `gradle-modules`); uses the bundled `gradlew` wrapper when present. — 2026-09-01
 
 Remaining, hardest-first: #6 task-targets provider, #9 `prompt:` action, #14
 (Cargo-workspace / Xcode / Nx-Turbo-Bazel), #10 Linux terminal picker, #11 fs

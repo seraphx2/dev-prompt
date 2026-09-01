@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use globset::GlobSet;
 use serde::{Deserialize, Serialize};
 
 /// Cap on discovered sub-projects, to keep the action list bounded.
@@ -72,12 +73,22 @@ pub struct Project {
 }
 
 impl Project {
-    pub fn has_any_marker(&self) -> bool {
+    /// Is this directory worth surfacing as its own sub-project? True for the
+    /// ecosystems inspect knows by name (below — these feed typed provider
+    /// data, e.g. `node.scripts`), OR when a top-level file matches `discovery`
+    /// — the same marker-and-rule glob set `scan.rs` uses to find repos, so any
+    /// rule you add is automatically enough to surface a matching sub-project
+    /// too, with nothing to keep in sync by hand.
+    pub fn has_any_marker(&self, discovery: &GlobSet) -> bool {
         !self.solutions.is_empty()
             || self.node.is_some()
             || self.has_cargo
             || self.has_go_mod
             || self.python.is_some()
+            || self
+                .files
+                .iter()
+                .any(|f| discovery.is_match(f.to_lowercase()))
     }
 }
 
@@ -196,8 +207,10 @@ fn inspect_dir(dir: &Path, rel: &str) -> Project {
 }
 
 /// Inspect a repo: root project + side-by-side sub-projects. A missing /
-/// unreadable root still yields one (empty) root project.
-pub fn inspect(root: &Path) -> RepoContext {
+/// unreadable root still yields one (empty) root project. `discovery` is the
+/// compiled marker-and-rule glob set (`config::discovery_globs`) — see
+/// [`Project::has_any_marker`].
+pub fn inspect(root: &Path, discovery: &GlobSet) -> RepoContext {
     let mut ctx = RepoContext::default();
     ctx.projects.push(inspect_dir(root, ""));
     ctx.compose = COMPOSE_FILES.iter().any(|f| root.join(f).is_file());
@@ -222,7 +235,7 @@ pub fn inspect(root: &Path) -> RepoContext {
         let dir = ent.path();
 
         let proj = inspect_dir(&dir, name);
-        if proj.has_any_marker() {
+        if proj.has_any_marker(discovery) {
             subs.push(proj);
             continue;
         }
@@ -246,7 +259,7 @@ pub fn inspect(root: &Path) -> RepoContext {
                     continue;
                 }
                 let cp = inspect_dir(&child.path(), &format!("{name}/{cname}"));
-                if cp.has_any_marker() {
+                if cp.has_any_marker(discovery) {
                     subs.push(cp);
                 }
             }
@@ -261,10 +274,13 @@ pub fn inspect(root: &Path) -> RepoContext {
 /// Inspect every repo path, producing the `path -> context` map that is cached
 /// next to the repo list. Runs on the caller's thread — the scan already calls
 /// this from a blocking task, so the extra walks stay off the UI thread.
-pub fn inspect_all<'a>(paths: impl IntoIterator<Item = &'a str>) -> HashMap<String, RepoContext> {
+pub fn inspect_all<'a>(
+    paths: impl IntoIterator<Item = &'a str>,
+    discovery: &GlobSet,
+) -> HashMap<String, RepoContext> {
     paths
         .into_iter()
-        .map(|p| (p.to_string(), inspect(Path::new(p))))
+        .map(|p| (p.to_string(), inspect(Path::new(p), discovery)))
         .collect()
 }
 
@@ -286,7 +302,18 @@ fn read_package_scripts(path: &Path) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use globset::{Glob, GlobSetBuilder};
     use std::fs;
+
+    /// Compile a discovery globset for tests, same shape as
+    /// `config::discovery_globs` + `config::compile_globset`.
+    fn gs(patterns: &[&str]) -> GlobSet {
+        let mut b = GlobSetBuilder::new();
+        for p in patterns {
+            b.add(Glob::new(&p.to_lowercase()).unwrap());
+        }
+        b.build().unwrap()
+    }
 
     fn scratch(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!(
@@ -313,7 +340,7 @@ mod tests {
         write(d.join("requirements.txt"), "");
         write(d.join("uv.lock"), "");
         write(d.join("pyproject.toml"), "");
-        let ctx = inspect(&d);
+        let ctx = inspect(&d, &gs(&[]));
         let root = &ctx.projects[0];
         assert_eq!(root.rel, "");
         assert_eq!(root.solutions.len(), 1);
@@ -332,7 +359,7 @@ mod tests {
             r#"{ "scripts": { "dev": "vite", "build": "vite build", "check": "tsc" } }"#,
         );
         write(d.join("pnpm-lock.yaml"), "");
-        let node = inspect(&d).projects.remove(0).node.unwrap();
+        let node = inspect(&d, &gs(&[])).projects.remove(0).node.unwrap();
         assert_eq!(node.manager, PkgManager::Pnpm);
         assert_eq!(node.scripts, vec!["dev", "build", "check"]);
         let _ = fs::remove_dir_all(&d);
@@ -347,10 +374,27 @@ mod tests {
         write(d.join("node_modules/junk/package.json"), r#"{ "scripts": {} }"#);
         write(d.join("docs/readme.md"), "no project here");
         write(d.join("docker-compose.yml"), "services: {}");
-        let ctx = inspect(&d);
+        let ctx = inspect(&d, &gs(&[]));
         let rels: Vec<&str> = ctx.projects.iter().map(|p| p.rel.as_str()).collect();
         assert_eq!(rels, vec!["", "packages/ui", "web"]);
         assert!(ctx.compose);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn discovers_subproject_via_generic_discovery_glob() {
+        // `pom.xml` isn't one of the typed markers (no `has_maven` field) — it
+        // only surfaces `backend/` as a sub-project through the discovery
+        // globset, same one `scan.rs` uses to find repos in the first place.
+        let d = scratch("generic");
+        write(d.join("backend/pom.xml"), "<project/>");
+
+        assert_eq!(inspect(&d, &gs(&[])).projects.len(), 1); // root only
+
+        let ctx = inspect(&d, &gs(&["pom.xml"]));
+        let rels: Vec<&str> = ctx.projects.iter().map(|p| p.rel.as_str()).collect();
+        assert_eq!(rels, vec!["", "backend"]);
+
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -359,7 +403,7 @@ mod tests {
         let d = scratch("all");
         write(d.join("Cargo.toml"), "");
         let key = d.to_string_lossy().into_owned();
-        let map = inspect_all([key.as_str()]);
+        let map = inspect_all([key.as_str()], &gs(&[]));
         assert!(map[&key].projects[0].has_cargo);
         assert!(map[&key].projects[0].files.iter().any(|f| f == "Cargo.toml"));
 
@@ -373,9 +417,9 @@ mod tests {
 
     #[test]
     fn missing_dir_yields_lone_empty_root() {
-        let ctx = inspect(Path::new("/no/such/path/hopefully"));
+        let ctx = inspect(Path::new("/no/such/path/hopefully"), &gs(&[]));
         assert_eq!(ctx.projects.len(), 1);
-        assert!(!ctx.projects[0].has_any_marker());
+        assert!(!ctx.projects[0].has_any_marker(&gs(&[])));
         assert!(!ctx.compose);
     }
 }

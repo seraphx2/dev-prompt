@@ -427,7 +427,7 @@ fn provider_actions(
         "compose" => "docker",
         "dotnet" => "dotnet",
         "maven-modules" => "java",
-        "gradle-modules" => "gradle",
+        "gradle-modules" | "flutter-android" => "gradle",
         _ => "run",
     };
 
@@ -617,6 +617,43 @@ fn provider_actions(
                 ]
             })
             .collect(),
+        // A Flutter app's Gradle project lives one level down, in `android/` —
+        // invisible to `gradle-modules` (which only checks the project's own
+        // top-level files). Point the same parser at that subdir instead. Uses
+        // the bundled `gradlew` wrapper when present (the common case for
+        // Flutter, which rarely has a global `gradle` on PATH), else falls
+        // back to PATH. Silently empty when there's no `android/` — nothing to
+        // gate on beyond that.
+        "flutter-android" => {
+            let android_dir = proj.dir.join("android");
+            let wrapper_name = if cfg!(windows) { "gradlew.bat" } else { "gradlew" };
+            let gradle_cmd = if android_dir.join(wrapper_name).is_file() {
+                android_dir.join(wrapper_name).to_string_lossy().into_owned()
+            } else {
+                "gradle".to_string()
+            };
+            let at = android_dir.to_string_lossy().into_owned();
+            crate::gradle::projects(&android_dir)
+                .into_iter()
+                .flat_map(|(m, gpath)| {
+                    let k = slug(&m);
+                    [
+                        term_in(
+                            format!("flutterandroid:{ns}:{k}:build"),
+                            format!("gradle {gpath}:build (android)"),
+                            vec![gradle_cmd.clone(), format!("{gpath}:build")],
+                            &at,
+                        ),
+                        term_in(
+                            format!("flutterandroid:{ns}:{k}:test"),
+                            format!("gradle {gpath}:test (android)"),
+                            vec![gradle_cmd.clone(), format!("{gpath}:test")],
+                            &at,
+                        ),
+                    ]
+                })
+                .collect()
+        }
         _ => Vec::new(),
     };
 
@@ -1243,6 +1280,84 @@ mod tests {
         assert!(gr.iter().all(|a| a.icon.as_deref() == Some("gradle")));
 
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn flutter_android_reaches_into_the_android_subdir() {
+        let d = std::env::temp_dir().join(format!(
+            "dp-rules-flutter-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(d.join("android")).unwrap();
+        std::fs::write(d.join("pubspec.yaml"), "name: child_flutter\n").unwrap();
+        std::fs::write(
+            d.join("android").join("settings.gradle.kts"),
+            "include(\":app\")\n",
+        )
+        .unwrap();
+
+        let proj = Project {
+            dir: d.clone(),
+            ..Default::default()
+        };
+        let programs = std::collections::BTreeMap::new();
+        let r = Resolver::new(&programs);
+        let cwd = d.to_string_lossy().into_owned();
+        let acts = provider_actions(
+            "flutter-android",
+            &crate::config::Rule::default(),
+            &proj,
+            "Detected",
+            "root",
+            &cwd,
+            &r,
+        );
+
+        assert_eq!(acts.len(), 2); // build + test for :app
+        assert!(acts.iter().all(|a| a.icon.as_deref() == Some("gradle")));
+        // no bundled wrapper in this fixture -> falls back to plain "gradle".
+        // `hint` is the pre-terminalize argv, so it's the same on every OS.
+        assert!(acts.iter().any(|a| a.hint == "gradle :app:build"));
+        assert!(acts.iter().any(|a| a.hint == "gradle :app:test"));
+        // The android/ dir made it through as the working directory — on
+        // Windows that's baked into the terminal wrapper's `-d` arg rather
+        // than `Action.cwd`.
+        let android_str = d.join("android").to_string_lossy().into_owned();
+        assert!(acts
+            .iter()
+            .all(|a| a.cwd.as_deref() == Some(android_str.as_str())
+                || a.args.contains(&android_str)));
+
+        // A Flutter project with no android/ dir at all yields nothing (no
+        // panic, no crash) — the rule is self-gating.
+        let no_android = std::env::temp_dir().join(format!(
+            "dp-rules-flutter-bare-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&no_android).unwrap();
+        let bare = Project {
+            dir: no_android.clone(),
+            ..Default::default()
+        };
+        assert!(provider_actions(
+            "flutter-android",
+            &crate::config::Rule::default(),
+            &bare,
+            "Detected",
+            "root",
+            &cwd,
+            &r
+        )
+        .is_empty());
+
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::remove_dir_all(&no_android);
     }
 
     #[test]

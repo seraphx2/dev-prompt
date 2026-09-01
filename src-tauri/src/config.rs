@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
@@ -507,6 +508,20 @@ pub fn discovery_globs(cfg: &Config) -> Vec<String> {
     out.sort();
     out.dedup();
     out
+}
+
+/// Compile `globs` (as returned by [`discovery_globs`]) into a matcher.
+/// Case-folded to match — lowercase the candidate name before `is_match`.
+/// Shared by `scan.rs` (finding repos) and `inspect.rs` (finding sub-projects
+/// inside one), so both use exactly the same marker-and-rule glob set.
+pub fn compile_globset(globs: &[String]) -> GlobSet {
+    let mut builder = GlobSetBuilder::new();
+    for g in globs {
+        if let Ok(glob) = Glob::new(&g.to_lowercase()) {
+            builder.add(glob);
+        }
+    }
+    builder.build().unwrap_or_else(|_| GlobSet::empty())
 }
 
 // --- paths & expansion -------------------------------------------------

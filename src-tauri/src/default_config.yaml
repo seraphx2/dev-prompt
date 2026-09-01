@@ -245,6 +245,21 @@ rules:
     provider: gradle-modules
     requires: [gradle]
 
+  - id: flutter
+    match: pubspec.yaml
+    requires: [flutter]
+    actions:
+      - { name: "flutter pub get", run: "flutter pub get", terminal: true, icon: flutter }
+      - { name: "flutter run", run: "flutter run", terminal: true, icon: flutter }
+      - { name: "flutter build apk", run: "flutter build apk", terminal: true, icon: flutter }
+      - { name: "flutter test", run: "flutter test", terminal: true, icon: flutter }
+
+  # Flutter's Android build lives in android/, one level below the project —
+  # reaches in for it directly rather than through the generic per-project scan.
+  - id: flutter-android
+    match: pubspec.yaml
+    provider: flutter-android
+
   - id: cmake
     match: CMakeLists.txt
     requires: [cmake]
