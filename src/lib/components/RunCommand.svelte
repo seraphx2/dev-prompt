@@ -1,15 +1,18 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getConfig, listShells } from "../ipc";
+  import { middleTruncate } from "../text";
 
   let {
     repoName,
+    repoPath,
     /** `run:` template of the chosen prompt action; may contain `{{input}}`. */
     template,
     onrun,
     onback,
   }: {
     repoName: string;
+    repoPath: string;
     template: string;
     onrun: (command: string, shell: string) => void;
     onback: () => void;
@@ -104,8 +107,9 @@
       <span class="whitespace-pre text-white/40">{parts.after}</span>
     {/if}
   </div>
-  <div class="mt-1 truncate text-[11px] text-white/25">
-    {command.trim() ||
-      `opens ${shellSel || "a shell"} in a terminal at ${repoName}`}
+  <div class="mt-1 truncate font-mono text-[11px] text-white/25">
+    {command.trim()
+      ? `→ ${middleTruncate(repoPath, 64)}`
+      : `opens ${shellSel || "a shell"} in a terminal at ${middleTruncate(repoPath, 52)}`}
   </div>
 </div>

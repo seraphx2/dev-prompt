@@ -499,6 +499,7 @@
   {:else if mode === "run-command" && activeRepo}
     <RunCommand
       repoName={activeRepo.repo.name}
+      repoPath={activeRepo.repo.path}
       template={promptTemplate}
       onrun={(cmd, sh) =>
         activeRepo && runCommandAndHide(activeRepo.repo.path, cmd, sh)}
