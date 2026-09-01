@@ -401,9 +401,9 @@ fn provider_actions(
     cwd: &str,
     resolver: &Resolver,
 ) -> Vec<Action> {
-    let term = |id: String, label: String, argv: Vec<String>| -> Action {
+    let term_in = |id: String, label: String, argv: Vec<String>, at: &str| -> Action {
         let hint = argv.join(" ");
-        let (p, a, c) = terminalize(&argv, cwd, resolver);
+        let (p, a, c) = terminalize(&argv, at, resolver);
         Action {
             id,
             label,
@@ -417,14 +417,16 @@ fn provider_actions(
             client_side: false,
         }
     };
+    let term = |id: String, label: String, argv: Vec<String>| term_in(id, label, argv, cwd);
 
     let prov_icon = match name {
         "npm-scripts" => "npm",
         "cargo" => "rust",
-        "go" => "go",
+        "go" | "go-work" => "go",
         "python" => "python",
         "compose" => "docker",
         "dotnet" => "dotnet",
+        "maven-modules" => "java",
         _ => "run",
     };
 
@@ -551,6 +553,50 @@ fn provider_actions(
             }
             v
         }
+        // Workspace manifests that name modules living elsewhere: one build/test
+        // per module, run from *that* module's directory.
+        "go-work" => crate::gowork::modules(&proj.dir)
+            .into_iter()
+            .flat_map(|(m, dir)| {
+                let at = dir.to_string_lossy().into_owned();
+                let k = slug(&m);
+                [
+                    term_in(
+                        format!("gowork:{ns}:{k}:build"),
+                        format!("go build · {m}"),
+                        vec!["go".into(), "build".into(), "./...".into()],
+                        &at,
+                    ),
+                    term_in(
+                        format!("gowork:{ns}:{k}:test"),
+                        format!("go test · {m}"),
+                        vec!["go".into(), "test".into(), "./...".into()],
+                        &at,
+                    ),
+                ]
+            })
+            .collect(),
+        "maven-modules" => crate::maven::modules(&proj.dir)
+            .into_iter()
+            .flat_map(|(m, dir)| {
+                let at = dir.to_string_lossy().into_owned();
+                let k = slug(&m);
+                [
+                    term_in(
+                        format!("mvnmod:{ns}:{k}:compile"),
+                        format!("mvn compile · {m}"),
+                        vec!["mvn".into(), "-B".into(), "compile".into()],
+                        &at,
+                    ),
+                    term_in(
+                        format!("mvnmod:{ns}:{k}:test"),
+                        format!("mvn test · {m}"),
+                        vec!["mvn".into(), "-B".into(), "test".into()],
+                        &at,
+                    ),
+                ]
+            })
+            .collect(),
         _ => Vec::new(),
     };
 
@@ -1116,6 +1162,55 @@ mod tests {
         assert!(acts.iter().any(|a| a.label == "dotnet build · App"));
         assert!(acts.iter().any(|a| a.label == "dotnet test · App.Tests"));
         assert!(acts.iter().all(|a| a.icon.as_deref() == Some("dotnet")));
+
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn workspace_providers_emit_one_action_set_per_module() {
+        let d = std::env::temp_dir().join(format!(
+            "dp-rules-ws-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("go.work"), "go 1.22\nuse ./api\nuse ./worker\n").unwrap();
+        std::fs::write(
+            d.join("pom.xml"),
+            "<project><modules><module>svc-a</module><module>svc-b</module></modules></project>",
+        )
+        .unwrap();
+
+        let proj = Project {
+            dir: d.clone(),
+            ..Default::default()
+        };
+        let programs = std::collections::BTreeMap::new();
+        let r = Resolver::new(&programs);
+        let cwd = d.to_string_lossy().into_owned();
+        let call = |name: &str| {
+            provider_actions(
+                name,
+                &crate::config::Rule::default(),
+                &proj,
+                "Detected",
+                "root",
+                &cwd,
+                &r,
+            )
+        };
+
+        let go = call("go-work");
+        assert_eq!(go.len(), 4); // build + test for api and worker
+        assert!(go.iter().any(|a| a.label == "go build · api"));
+        assert!(go.iter().all(|a| a.icon.as_deref() == Some("go")));
+
+        let mvn = call("maven-modules");
+        assert_eq!(mvn.len(), 4);
+        assert!(mvn.iter().any(|a| a.label == "mvn test · svc-b"));
+        assert!(mvn.iter().all(|a| a.icon.as_deref() == Some("java")));
 
         let _ = std::fs::remove_dir_all(&d);
     }

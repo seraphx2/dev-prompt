@@ -201,6 +201,12 @@ rules:
     match: [go.mod, go.work]
     provider: go
 
+  # Per-module `go build` / `go test` for each `use` in a go.work workspace.
+  - id: go-work
+    match: go.work
+    provider: go-work
+    requires: [go]
+
   - id: python
     match: [pyproject.toml, requirements.txt]
     provider: python
@@ -218,6 +224,12 @@ rules:
       - { name: "mvn compile", run: "mvn -B compile", terminal: true, icon: java }
       - { name: "mvn test", run: "mvn -B test", terminal: true, icon: java }
       - { name: "mvn package", run: "mvn -B package", terminal: true, icon: java }
+
+  # Per-module compile/test for a reactor pom's <modules>.
+  - id: maven-modules
+    match: pom.xml
+    provider: maven-modules
+    requires: [mvn]
 
   - id: gradle
     match: [build.gradle, build.gradle.kts]

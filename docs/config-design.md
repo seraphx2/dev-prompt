@@ -112,6 +112,31 @@ knob), `default_config.yaml`.
 
 ---
 
+## 14. More workspace-manifest providers · _bigger passes_
+
+Same `manifest → [(name, dir)] → per-module terminal actions` shape as the
+`dotnet` / `go-work` / `maven-modules` providers, for the ecosystems that need
+more than a flat parse:
+
+- **Gradle** — `settings.gradle` / `.kts` `include('a', 'b:c')`: two DSL
+  syntaxes, multiline `include` blocks, `:`-nested project paths → dirs.
+  `gradle :a:build`. The fiddliest parser of the family.
+- **Cargo workspaces** — root `Cargo.toml` `[workspace] members = [...]` incl.
+  globs (`crates/*`). Needs a TOML parser (new dep) or a careful hand-parse.
+  `cargo build -p <member>` from the root. Largely redundant with `inspect`'s
+  `crates/` discovery — low ROI.
+- **Xcode** — `.xcworkspace/contents.xcworkspacedata` (XML FileRefs) →
+  `.xcodeproj`s, then `xcshareddata/xcschemes/*.xcscheme` per project.
+  `xcodebuild -workspace X -scheme Y`. macOS-only; untestable off a Mac.
+- **Nx / Turborepo / Bazel** — build graphs, not flat lists: `nx.json` +
+  scattered `project.json`, `turbo.json` + workspace globs, or `bazel query
+  //...`. Heavier; niche.
+
+Files: `rules.rs` (one provider arm each) + a small parser module per tool;
+`default_config.yaml`.
+
+---
+
 ## Done
 
 - **#1** Fatten `default_config.yaml` — 2026-08-31
@@ -121,10 +146,11 @@ knob), `default_config.yaml`.
 - **#5** `collapse_nested` toggle (`true` / `false` / `auto`) — 2026-09-01
 - **#8** per-repo rule trace in Settings ("Trace a repo") — 2026-09-01
 - **#7** `dotnet` provider — `.sln` / `.slnx` / lone `.??proj` → build/run/test — 2026-09-01
+- **go-work / maven-modules** providers (part of #14's cheap tier) — 2026-09-01
 
-Remaining, hardest-first: #6 task-targets provider, #9 `prompt:` action, #10
-Linux terminal picker, #11 fs watcher, #12 Wayland hotkey, #13 Eclipse
-provisioner.
+Remaining, hardest-first: #6 task-targets provider, #9 `prompt:` action, #14
+(Gradle / Cargo-workspace / Xcode / Nx-Turbo-Bazel), #10 Linux terminal picker,
+#11 fs watcher, #12 Wayland hotkey, #13 Eclipse provisioner.
 
 ## Not on this list (shipped alongside)
 

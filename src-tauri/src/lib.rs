@@ -3,9 +3,11 @@ mod commands;
 mod config;
 mod dotnet;
 mod error;
+mod gowork;
 mod index;
 mod inspect;
 mod launch;
+mod maven;
 mod rules;
 mod scan;
 
