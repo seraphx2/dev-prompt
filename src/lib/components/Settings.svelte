@@ -581,16 +581,21 @@
       </details>
     {/if}
 
-    {#if traceRepos.length}
-      <details class="rounded border border-hair">
-        <summary
-          class="cursor-pointer select-none px-3 py-2 text-[12px] text-white/60 hover:text-white/90"
-        >
-          Trace a repo
-          <span class="text-white/25">· why each rule does or doesn't fire</span>
-        </summary>
+    <details class="rounded border border-hair">
+      <summary
+        class="cursor-pointer select-none px-3 py-2 text-[12px] text-white/60 hover:text-white/90"
+      >
+        Trace a repo
+        <span class="text-white/25">· why each rule does or doesn't fire</span>
+      </summary>
 
-        <div class="space-y-3 border-t border-hair px-3 py-3 text-[11px]">
+      <div class="space-y-3 border-t border-hair px-3 py-3 text-[11px]">
+        {#if !traceRepos.length}
+          <p class="text-white/40">
+            No repos indexed yet — add roots above and rescan, then reopen
+            Settings.
+          </p>
+        {:else}
           <div class="flex items-center gap-3">
             <select
               bind:value={tracePath}
@@ -660,9 +665,9 @@
               {/each}
             </div>
           {/if}
-        </div>
-      </details>
-    {/if}
+        {/if}
+      </div>
+    </details>
 
     <details class="rounded border border-hair">
       <summary
