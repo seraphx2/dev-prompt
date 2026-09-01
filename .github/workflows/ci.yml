@@ -3,10 +3,8 @@ name: CI
 on:
   pull_request:
     branches: [main]
-  push:
-    branches-ignore: [main]
 
-# Newer pushes to the same branch/PR supersede in-flight runs.
+# Newer commits on the PR branch supersede an in-flight run.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
