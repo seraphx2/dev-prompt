@@ -473,7 +473,7 @@
   {/if}
 
   <footer
-    class="flex items-center justify-between border-t border-hair px-4 py-2
+    class="flex h-9 items-center justify-between border-t border-hair px-4
            text-[11px] text-white/30"
   >
     <span class="flex min-w-0 items-center gap-3">
@@ -516,8 +516,9 @@
           type="button"
           onclick={() => (mode = "settings")}
           title={`Update ${upd.info.version} available`}
-          class="shrink-0 rounded-[3px] border border-sky-400/50 bg-sky-400/10 px-1.5 py-0.5
-                 text-[10px] font-medium text-sky-200 hover:bg-sky-400/20"
+          class="inline-flex shrink-0 items-center rounded-[3px] border border-sky-400/50
+                 bg-sky-400/10 px-1 py-0.5 text-[10px] font-medium leading-none text-sky-200
+                 hover:bg-sky-400/20"
         >
           ↑ {upd.info.version}
         </button>

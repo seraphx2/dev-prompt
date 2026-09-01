@@ -379,7 +379,7 @@
               onclick={() => (confirmIdx = i)}
               aria-label="Remove from scan list"
               title="Remove from scan list"
-              class="shrink-0 rounded border border-hair px-2 text-white/40 hover:bg-white/10 hover:text-white/70"
+              class="shrink-0 rounded border border-hair px-2 py-1 text-[11px] text-white/40 hover:bg-white/10 hover:text-white/70"
             >
               ×
             </button>
@@ -432,7 +432,7 @@
       <select
         bind:value={collapseNested}
         title="What to do when a discovered repo sits inside another one"
-        class="w-72 rounded border border-hair bg-white/[0.04] px-2 py-1.5 text-white/90 focus:border-white/25 focus:outline-none [&>option]:text-black"
+        class="w-72 rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
       >
         <option value="true">Collapse into the parent (default)</option>
         <option value="false">List every one separately</option>
@@ -508,21 +508,52 @@
         </summary>
 
         <div class="space-y-3 border-t border-hair px-3 py-3 font-mono text-[11px]">
-          <div>
-            <div class="mb-1 font-semibold uppercase tracking-wide text-sky-300/80">
-              programs
+          <div class="grid grid-cols-2 gap-x-6 gap-y-3">
+            <div>
+              <div
+                class="mb-1 font-semibold uppercase tracking-wide text-sky-300/80"
+              >
+                programs
+              </div>
+              <div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+                {#each summary.programs as p (p.key)}
+                  <span class="text-white/70">{p.key}</span>
+                  {#if p.resolved}
+                    <span class="truncate text-emerald-300/70" title={p.resolved}
+                      >{base(p.resolved)}</span
+                    >
+                  {:else}
+                    <span class="text-amber-300/70">not found</span>
+                  {/if}
+                {/each}
+              </div>
             </div>
-            <div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-              {#each summary.programs as p (p.key)}
-                <span class="text-white/70">{p.key}</span>
-                {#if p.resolved}
-                  <span class="truncate text-emerald-300/70" title={p.resolved}
-                    >{base(p.resolved)}</span
-                  >
-                {:else}
-                  <span class="text-amber-300/70">not found</span>
-                {/if}
-              {/each}
+
+            <div>
+              <div
+                class="mb-1 font-semibold uppercase tracking-wide text-sky-300/80"
+              >
+                universal
+              </div>
+              <div class="space-y-0.5">
+                {#each summary.universal as u (u.id)}
+                  <div class="flex items-baseline gap-2">
+                    <span
+                      class={u.disabled
+                        ? "text-white/40"
+                        : u.available
+                          ? "text-white/70"
+                          : "text-white/30"}>{u.label}</span
+                    >
+                    {#if u.default}<span class="text-sky-300/70">default</span>{/if}
+                    {#if u.disabled}
+                      <span class="text-red-300/70">disabled</span>
+                    {:else if !u.available}
+                      <span class="text-amber-300/70">unavailable</span>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
             </div>
           </div>
 
@@ -552,31 +583,6 @@
               {/each}
             </div>
           </div>
-
-          <div>
-            <div class="mb-1 font-semibold uppercase tracking-wide text-sky-300/80">
-              universal
-            </div>
-            <div class="space-y-0.5">
-              {#each summary.universal as u (u.id)}
-                <div class="flex items-baseline gap-2">
-                  <span
-                    class={u.disabled
-                      ? "text-white/40"
-                      : u.available
-                        ? "text-white/70"
-                        : "text-white/30"}>{u.label}</span
-                  >
-                  {#if u.default}<span class="text-sky-300/70">default</span>{/if}
-                  {#if u.disabled}
-                    <span class="text-red-300/70">disabled</span>
-                  {:else if !u.available}
-                    <span class="text-amber-300/70">unavailable</span>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          </div>
         </div>
       </details>
     {/if}
@@ -600,7 +606,7 @@
             <select
               bind:value={tracePath}
               onchange={runTrace}
-              class="min-w-0 flex-1 rounded border border-hair bg-white/[0.04] px-2 py-1.5 text-white/90 focus:border-white/25 focus:outline-none [&>option]:text-black"
+              class="min-w-0 flex-1 rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
             >
               <option value="">Pick a repo…</option>
               {#each traceRepos as r (r.path)}
