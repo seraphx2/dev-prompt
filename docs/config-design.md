@@ -20,19 +20,6 @@ Files: `rules.rs` (or a `providers/` split if it grows), `default_config.yaml`.
 
 ---
 
-## 7. `dotnet` provider · _medium, one parser_
-
-Parse `.sln` `Project("{GUID}") = "Name", "rel\path.csproj", "{GUID}"` lines
-(skip solution folders — the ones whose path isn't a `.csproj`/`.vbproj`/`.fsproj`).
-Per project: `dotnet build <proj>`, `dotnet run --project <proj>` (terminal).
-
-Add a rule `{ match: "*.sln", provider: dotnet, requires: [dotnet] }` alongside
-the existing editor rule.
-
-Files: `rules.rs`, `default_config.yaml`.
-
----
-
 ## 9. `prompt: true` / "Run command…" · _medium-hard, new frontend mode_
 
 A dynamic action: prompt for a one-off command, run it in the terminal at the
@@ -133,10 +120,11 @@ knob), `default_config.yaml`.
 - **#4** Start at login — 2026-08-31 (PR #1)
 - **#5** `collapse_nested` toggle (`true` / `false` / `auto`) — 2026-09-01
 - **#8** per-repo rule trace in Settings ("Trace a repo") — 2026-09-01
+- **#7** `dotnet` provider — `.sln` / `.slnx` / lone `.??proj` → build/run/test — 2026-09-01
 
-Remaining, hardest-first: #6 task-targets provider, #7 dotnet provider, #9
-`prompt:` action, #10 Linux terminal picker, #11 fs watcher, #12 Wayland hotkey,
-#13 Eclipse provisioner.
+Remaining, hardest-first: #6 task-targets provider, #9 `prompt:` action, #10
+Linux terminal picker, #11 fs watcher, #12 Wayland hotkey, #13 Eclipse
+provisioner.
 
 ## Not on this list (shipped alongside)
 

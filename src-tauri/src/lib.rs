@@ -1,6 +1,7 @@
 mod cache;
 mod commands;
 mod config;
+mod dotnet;
 mod error;
 mod index;
 mod inspect;

@@ -45,6 +45,7 @@ const BRAND = {
   yarn: "yarn",
   bun: "bun",
   deno: "deno",
+  dotnet: "dotnet",
   java: "openjdk",
   kotlin: "kotlin",
   scala: "scala",

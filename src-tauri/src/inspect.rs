@@ -145,7 +145,9 @@ fn inspect_dir(dir: &Path, rel: &str) -> Project {
     let mut names: Vec<String> = Vec::new();
     for ent in entries.flatten() {
         if let Some(name) = ent.file_name().to_str() {
-            if has_ext_ignore_case(Path::new(name), "sln") {
+            if has_ext_ignore_case(Path::new(name), "sln")
+                || has_ext_ignore_case(Path::new(name), "slnx")
+            {
                 p.solutions.push(dir.join(name));
             }
             names.push(name.to_string());

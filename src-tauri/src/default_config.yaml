@@ -182,6 +182,13 @@ rules:
         needs: [rider]
         icon: rider
 
+  # Terminal build/run per project in a solution (or a lone project file),
+  # cross-platform. Sits alongside the editor rules above.
+  - id: dotnet
+    match: ["*.sln", "*.slnx", "*.csproj", "*.vbproj", "*.fsproj"]
+    provider: dotnet
+    requires: [dotnet]
+
   - id: node
     match: package.json
     provider: npm-scripts

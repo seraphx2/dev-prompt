@@ -424,6 +424,7 @@ fn provider_actions(
         "go" => "go",
         "python" => "python",
         "compose" => "docker",
+        "dotnet" => "dotnet",
         _ => "run",
     };
 
@@ -516,6 +517,40 @@ fn provider_actions(
                 )
             })
             .collect(),
+        "dotnet" => {
+            let mut used = std::collections::HashSet::new();
+            let mut v = Vec::new();
+            for u in crate::dotnet::units(&proj.dir, &proj.files) {
+                let p = u.path.to_string_lossy().into_owned();
+                let mut key = slug(&u.name);
+                while !used.insert(key.clone()) {
+                    key.push('_');
+                }
+                v.push(term(
+                    format!("dotnet:{ns}:build:{key}"),
+                    format!("dotnet build · {}", u.name),
+                    vec!["dotnet".into(), "build".into(), p.clone()],
+                ));
+                v.push(term(
+                    format!("dotnet:{ns}:run:{key}"),
+                    format!("dotnet run · {}", u.name),
+                    vec![
+                        "dotnet".into(),
+                        "run".into(),
+                        "--project".into(),
+                        p.clone(),
+                    ],
+                ));
+                if u.is_test {
+                    v.push(term(
+                        format!("dotnet:{ns}:test:{key}"),
+                        format!("dotnet test · {}", u.name),
+                        vec!["dotnet".into(), "test".into(), p],
+                    ));
+                }
+            }
+            v
+        }
         _ => Vec::new(),
     };
 
@@ -1022,6 +1057,67 @@ mod tests {
         for want in ["cargo:root:run", "cargo:root:build", "cargo:root:test"] {
             assert!(acts.iter().any(|a| a.id == want), "missing {want}");
         }
+    }
+
+    #[test]
+    fn dotnet_provider_emits_build_run_and_test_per_project() {
+        let d = std::env::temp_dir().join(format!(
+            "dp-rules-dotnet-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            d.join("App.sln"),
+            "Project(\"{X}\") = \"App\", \"App.csproj\", \"{Y}\"\n\
+             Project(\"{X}\") = \"App.Tests\", \"App.Tests.csproj\", \"{Z}\"\n",
+        )
+        .unwrap();
+
+        let proj = Project {
+            dir: d.clone(),
+            files: vec!["App.sln".into()],
+            ..Default::default()
+        };
+        let programs = std::collections::BTreeMap::new();
+        let r = Resolver::new(&programs);
+        let cwd = d.to_string_lossy().into_owned();
+        let acts = provider_actions(
+            "dotnet",
+            &crate::config::Rule::default(),
+            &proj,
+            "Detected",
+            "root",
+            &cwd,
+            &r,
+        );
+
+        assert_eq!(
+            acts.iter()
+                .filter(|a| a.id.starts_with("dotnet:root:build:"))
+                .count(),
+            2
+        );
+        assert_eq!(
+            acts.iter()
+                .filter(|a| a.id.starts_with("dotnet:root:run:"))
+                .count(),
+            2
+        );
+        // only the `.Tests` project gets a `dotnet test` action
+        assert_eq!(
+            acts.iter()
+                .filter(|a| a.id.starts_with("dotnet:root:test:"))
+                .count(),
+            1
+        );
+        assert!(acts.iter().any(|a| a.label == "dotnet build · App"));
+        assert!(acts.iter().any(|a| a.label == "dotnet test · App.Tests"));
+        assert!(acts.iter().all(|a| a.icon.as_deref() == Some("dotnet")));
+
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
