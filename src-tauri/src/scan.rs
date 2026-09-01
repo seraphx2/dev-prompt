@@ -83,8 +83,84 @@ fn dir_hits(dir: &Path, set: &GlobSet, globs: &[String]) -> Vec<String> {
     hits
 }
 
+/// Directory names that mark a subtree as dependency code rather than the user's
+/// own project — a repo under one of these stays collapsed even in `auto` mode.
+const VENDOR_DIRS: &[&str] = &[
+    "vendor",
+    "vendored",
+    "third_party",
+    "third-party",
+    "thirdparty",
+    "external",
+    "externals",
+    "deps",
+    "dependencies",
+    "submodules",
+    "subprojects",
+    "pods",
+    "carthage",
+    "bower_components",
+];
+
+/// Absolute paths of every submodule declared in `<repo>/.gitmodules`.
+fn declared_submodules(repo: &Path) -> Vec<PathBuf> {
+    let Ok(text) = std::fs::read_to_string(repo.join(".gitmodules")) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|line| {
+            let rest = line.trim().strip_prefix("path")?.trim_start();
+            let rel = rest.strip_prefix('=')?.trim();
+            (!rel.is_empty()).then(|| repo.join(rel))
+        })
+        .collect()
+}
+
+/// `collapse_nested: auto` — does this nested repo look like a checkout the user
+/// manages directly, rather than a submodule or a vendored copy?
+fn is_independent_nested(
+    path: &Path,
+    ancestors: &[&Path],
+    hits: Option<&Vec<String>>,
+    vcs: &HashMap<String, String>,
+) -> bool {
+    // A real VCS clone keeps its marker as a *directory*; a submodule or linked
+    // worktree leaves a `.git` file instead.
+    let is_vcs_clone = hits.is_some_and(|h| {
+        h.iter()
+            .any(|m| vcs.contains_key(m) && path.join(m).is_dir())
+    });
+    if !is_vcs_clone {
+        return false;
+    }
+
+    // Not a submodule any ancestor repo declares.
+    if ancestors
+        .iter()
+        .any(|a| declared_submodules(a).iter().any(|s| s.as_path() == path))
+    {
+        return false;
+    }
+
+    // No dependency directory anywhere between it and the shallowest repo above.
+    if let Some(base) = ancestors.iter().min_by_key(|p| p.as_os_str().len()) {
+        if let Ok(rel) = path.strip_prefix(*base) {
+            let vendored = rel.components().any(|c| {
+                let seg = c.as_os_str().to_string_lossy();
+                VENDOR_DIRS.iter().any(|v| seg.eq_ignore_ascii_case(v))
+            });
+            if vendored {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
 /// Walk every configured root and return the discovered repositories, sorted by
-/// name. Nested repos are collapsed to their outermost match.
+/// name. A repo nested inside another is handled per `scan.collapse_nested`
+/// (`true` drops it, `false` keeps it, `auto` keeps only independent checkouts).
 pub fn scan(roots: &[PathBuf], cfg: &Config) -> Vec<Repo> {
     let (set, globs) = build_globset(&config::discovery_globs(cfg));
     let vcs: HashMap<String, String> = config::vcs_markers(cfg).into_iter().collect();
@@ -118,15 +194,26 @@ pub fn scan(roots: &[PathBuf], cfg: &Config) -> Vec<Repo> {
         }
     }
 
-    // Collapse nested repos: drop any path whose ancestor is also a repo.
+    // Handle repos nested inside another repo per `scan.collapse_nested`.
     let all: Vec<PathBuf> = found.keys().cloned().collect();
     let mut repos: Vec<Repo> = Vec::new();
     for path in &all {
-        let nested = all
+        let ancestors: Vec<&Path> = all
             .iter()
-            .any(|other| other != path && path.starts_with(other));
-        if nested {
-            continue;
+            .filter(|o| o.as_path() != path.as_path() && path.starts_with(o.as_path()))
+            .map(|o| o.as_path())
+            .collect();
+        if !ancestors.is_empty() {
+            let keep = match cfg.scan.collapse_nested {
+                config::CollapseNested::Always => false,
+                config::CollapseNested::Never => true,
+                config::CollapseNested::Auto => {
+                    is_independent_nested(path, &ancestors, found.get(path), &vcs)
+                }
+            };
+            if !keep {
+                continue;
+            }
         }
         let name = path
             .file_name()
@@ -214,6 +301,47 @@ mod tests {
         assert!(!alpha.sentinels.iter().any(|s| s == ".git"));
         assert!(alpha.sentinels.iter().any(|s| s == "Cargo.toml"));
         assert_eq!(repos[1].vcs, None); // beta has only package.json
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn collapse_nested_auto_keeps_only_independent_checkouts() {
+        let tmp = std::env::temp_dir().join(format!("dp-scan-auto-{}", now_secs()));
+        let _ = fs::remove_dir_all(&tmp);
+        touch(&tmp.join("outer/.git/HEAD"));
+        touch(&tmp.join("outer/Cargo.toml"));
+        // vendored copy — real `.git` dir, but under `vendor/`
+        touch(&tmp.join("outer/vendor/lib/.git/HEAD"));
+        // declared submodule
+        touch(&tmp.join("outer/ext/sub/.git/HEAD"));
+        fs::write(
+            tmp.join("outer/.gitmodules"),
+            "[submodule \"ext/sub\"]\n\tpath = ext/sub\n\turl = https://example/x\n",
+        )
+        .unwrap();
+        // linked worktree / submodule checkout — `.git` is a *file*
+        touch(&tmp.join("outer/linked/.git"));
+        // a repo the user dropped inside another, nothing dependency-ish about it
+        touch(&tmp.join("outer/plugins/mine/.git/HEAD"));
+
+        let names = |cfg: &Config| {
+            let mut n: Vec<String> = scan(std::slice::from_ref(&tmp), cfg)
+                .into_iter()
+                .map(|r| r.name)
+                .collect();
+            n.sort();
+            n
+        };
+
+        let mut cfg = config::bundled_defaults();
+        assert_eq!(names(&cfg), vec!["outer"]); // default: collapse everything
+
+        cfg.scan.collapse_nested = config::CollapseNested::Never;
+        assert_eq!(names(&cfg), vec!["lib", "linked", "mine", "outer", "sub"]);
+
+        cfg.scan.collapse_nested = config::CollapseNested::Auto;
+        assert_eq!(names(&cfg), vec!["mine", "outer"]);
 
         let _ = fs::remove_dir_all(&tmp);
     }

@@ -23,6 +23,13 @@ hotkey: CmdOrCtrl+Shift+Space
 roots: []
 scan:
   max_depth: 4
+  # A repo found inside another repo:
+  #   true  (default) — drop it (hides submodules, vendored trees, workspace members)
+  #   false           — list every one separately
+  #   auto            — drop it unless it looks independent: a real `.git` dir
+  #                     (not a submodule/worktree `.git` file), not in the
+  #                     ancestor's .gitmodules, not under vendor/ third_party/ …
+  collapse_nested: true
 cache_ttl_secs: 900
 
 # --- discovery markers -------------------------------------------------------

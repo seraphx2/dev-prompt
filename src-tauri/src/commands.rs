@@ -280,9 +280,10 @@ pub fn save_config(
         user.cache_ttl_secs = Some(ttl);
     }
     if let Some(depth) = patch.scan_max_depth {
-        user.scan = Some(config::ScanConfig {
-            max_depth: depth.max(1),
-        });
+        // Preserve any hand-set `collapse_nested`; the UI only edits depth.
+        let mut scan = user.scan.clone().unwrap_or_default();
+        scan.max_depth = depth.max(1);
+        user.scan = Some(scan);
     }
 
     let new_hotkey = user.hotkey.clone().unwrap_or_else(|| old_hotkey.clone());

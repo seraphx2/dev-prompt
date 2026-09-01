@@ -69,11 +69,63 @@ impl Default for Config {
 #[serde(default, rename_all = "snake_case")]
 pub struct ScanConfig {
     pub max_depth: usize,
+    /// What to do when a discovered repo sits inside another discovered repo.
+    pub collapse_nested: CollapseNested,
 }
 
 impl Default for ScanConfig {
     fn default() -> Self {
-        ScanConfig { max_depth: 4 }
+        ScanConfig {
+            max_depth: 4,
+            collapse_nested: CollapseNested::default(),
+        }
+    }
+}
+
+/// `collapse_nested` in `config.yaml` — `true` / `false` / `"auto"`.
+///
+/// * `Always` (default, `true`): a repo whose ancestor is also a repo is
+///   dropped. Keeps submodules, vendored trees and workspace members out of the
+///   list.
+/// * `Never` (`false`): every marker-bearing directory is its own entry.
+/// * `Auto` (`"auto"`): drop nested repos *unless* they look like an independent
+///   checkout — a real VCS clone (a `.git` directory, not a submodule/worktree
+///   `.git` file), not declared in the ancestor's `.gitmodules`, and not under a
+///   vendor directory (`vendor/`, `third_party/`, `Pods/`, …).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CollapseNested {
+    #[default]
+    Always,
+    Never,
+    Auto,
+}
+
+impl Serialize for CollapseNested {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            CollapseNested::Always => s.serialize_bool(true),
+            CollapseNested::Never => s.serialize_bool(false),
+            CollapseNested::Auto => s.serialize_str("auto"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for CollapseNested {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Bool(bool),
+            Str(String),
+        }
+        match Raw::deserialize(d)? {
+            Raw::Bool(true) => Ok(CollapseNested::Always),
+            Raw::Bool(false) => Ok(CollapseNested::Never),
+            Raw::Str(s) if s.eq_ignore_ascii_case("auto") => Ok(CollapseNested::Auto),
+            Raw::Str(s) => Err(serde::de::Error::custom(format!(
+                r#"collapse_nested: expected true, false, or "auto", got {s:?}"#
+            ))),
+        }
     }
 }
 
@@ -597,6 +649,29 @@ mod tests {
         merge_settings(&mut cfg, user);
         assert_eq!(cfg.hotkey, "Alt+Space");
         assert_eq!(cfg.scan.max_depth, 7);
+    }
+
+    #[test]
+    fn collapse_nested_accepts_bool_and_auto() {
+        let parse = |s: &str| {
+            serde_yaml_ng::from_str::<ScanConfig>(s)
+                .unwrap()
+                .collapse_nested
+        };
+        assert_eq!(parse("max_depth: 4"), CollapseNested::Always); // default
+        assert_eq!(parse("collapse_nested: true"), CollapseNested::Always);
+        assert_eq!(parse("collapse_nested: false"), CollapseNested::Never);
+        assert_eq!(parse("collapse_nested: auto"), CollapseNested::Auto);
+        assert_eq!(parse("collapse_nested: AUTO"), CollapseNested::Auto);
+        assert!(serde_yaml_ng::from_str::<ScanConfig>("collapse_nested: sometimes").is_err());
+
+        // Round-trips back to the same YAML scalar.
+        let y = serde_yaml_ng::to_string(&ScanConfig {
+            max_depth: 4,
+            collapse_nested: CollapseNested::Auto,
+        })
+        .unwrap();
+        assert!(y.contains("collapse_nested: auto"), "{y}");
     }
 
     #[test]
