@@ -423,32 +423,12 @@ pub fn save_user(u: &UserConfig) -> AppResult<()> {
 fn first_run_user() -> UserConfig {
     UserConfig {
         hotkey: Some("CmdOrCtrl+Shift+Space".into()),
-        roots: default_roots(),
+        // No seeded roots — the first run shows the empty-state guidance and the
+        // user picks their own directory. Guessing `~/git`, `~/src`, … just
+        // added noise paths people had to hunt down and delete.
+        roots: Vec::new(),
         scan: Some(ScanConfig::default()),
         cache_ttl_secs: Some(900),
-    }
-}
-
-fn default_roots() -> Vec<String> {
-    // Harmless extras are filtered by `resolved_roots`.
-    #[cfg(windows)]
-    {
-        vec![
-            "%USERPROFILE%\\source\\repos".into(),
-            "~/git".into(),
-            "~/src".into(),
-            "~/code".into(),
-            "~/projects".into(),
-        ]
-    }
-    #[cfg(not(windows))]
-    {
-        vec![
-            "~/src".into(),
-            "~/git".into(),
-            "~/code".into(),
-            "~/projects".into(),
-        ]
     }
 }
 
