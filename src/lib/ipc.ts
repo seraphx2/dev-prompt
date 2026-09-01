@@ -75,9 +75,10 @@ export function saveConfig(patch: {
   cache_ttl_secs?: number;
   scan_max_depth?: number;
   collapse_nested?: boolean | "auto";
-  /** "" clears the pin / template back to auto. */
+  /** "" clears the pin / template / shell back to auto. */
   terminal?: string;
   terminal_template?: string;
+  shell?: string;
 }): Promise<AppConfig> {
   return invoke<AppConfig>("save_config", { patch });
 }
@@ -85,6 +86,20 @@ export function saveConfig(patch: {
 /** Installed terminal emulators dev-prompt knows how to drive. */
 export function listTerminals(): Promise<TerminalOption[]> {
   return invoke<TerminalOption[]>("list_terminals");
+}
+
+/** Shells found on PATH (`pwsh`, `bash`, `nu`, …). */
+export function listShells(): Promise<string[]> {
+  return invoke<string[]>("list_shells");
+}
+
+/** Run a free-form command in `path`'s terminal (blank = open the shell). */
+export function runCommand(
+  path: string,
+  command: string,
+  shell?: string,
+): Promise<void> {
+  return invoke<void>("run_command", { path, command, shell: shell || null });
 }
 
 /** Open rules.yaml (the hand-authored overrides file) in the default editor. */

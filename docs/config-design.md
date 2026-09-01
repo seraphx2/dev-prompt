@@ -20,26 +20,12 @@ Files: `rules.rs` (or a `providers/` split if it grows), `default_config.yaml`.
 
 ---
 
-## 9. `prompt: true` / "Run command…" · _medium-hard, new frontend mode_
-
-A dynamic action: prompt for a one-off command, run it in the terminal at the
-repo dir.
-
-- `RuleAction.prompt: bool`; `{{input}}` template var.
-- Frontend: a fourth overlay mode (or an inline input on the action row) that
-  captures the string, then calls `run_action` with it threaded through.
-- Backend: `run_action` needs an optional `input` arg that `expand()` picks up.
-
-Files: `config.rs`, `rules.rs`, `commands.rs`, `App.svelte`, a new component,
-`ipc.ts`.
-
----
-
-## 10. Terminal abstraction — non-Windows + `shell:` · _hard, mostly untestable here_
+## 10. Terminal abstraction — non-Windows · _hard, mostly untestable here_
 
 The Windows half shipped (see Done): `TermKind` table (`wt` / `alacritty` /
-`wezterm`), a `terminal:` pin and `terminal_template:` override in
-`config.yaml`, a `list_terminals` command, and the Settings dropdown. Left:
+`wezterm`), a `terminal:` pin and `terminal_template:` override, the `shell:`
+knob + per-shell `shell_wrap`, `list_terminals` / `list_shells`, and the
+Settings dropdowns. Left:
 
 - **Linux emulator table** — `terminalize()`'s `#[cfg(not(windows))]` branch
   still spawns the bare command with no window. Add the same table shape:
@@ -50,13 +36,10 @@ The Windows half shipped (see Done): `TermKind` table (`wt` / `alacritty` /
   - Wayland-only emulators + the `x-terminal-emulator` alias. Verify on WSLg / VM.
 - **macOS** — `open -a Terminal D` opens a window; running a *command* needs
   `osascript` (`tell app "Terminal" to do script …`) or a temp script.
-- **`shell:` knob** — which shell the command runs *inside* the emulator
-  (`pwsh` / `powershell` / `cmd` / `bash` / `zsh` / `nu`). Currently hardcoded
-  `pwsh` → `powershell` in `shell_wrap()`. A `config.yaml` scalar + a second
-  Settings dropdown (probe PATH for what's installed).
+- **`shell_wrap` on non-Windows** — currently the branch runs the command
+  bare; wire `config.shell` + the per-shell "run and hold" flags in there too.
 
-Files: `rules.rs` (`terminalize`, `shell_wrap`), `config.rs`, `commands.rs`
-(`list_terminals` shell variant), `Settings.svelte`, `default_config.yaml`.
+Files: `rules.rs` (`terminalize`, `shell_wrap`), `default_config.yaml`.
 
 ---
 
@@ -212,13 +195,17 @@ Files: `rules.rs` (`expand` + `build_action`), `config.rs` (schema),
   `manage.py`) so non-`requirements.txt` projects get detected. — 2026-09-01
 - **Terminal emulator selector (Windows)** — `TermKind` table (`wt` /
   `alacritty` / `wezterm`), `terminal:` pin + `terminal_template:` override in
-  `config.yaml`, `list_terminals` command, Settings dropdown. Non-Windows +
-  `shell:` knob remain (#10). — 2026-09-01
+  `config.yaml`, `list_terminals` command, Settings dropdown. — 2026-09-01
+- **#9 "Run command…" + shell default (Windows)** — `prompt: true` actions +
+  `{{input}}`; a 4th overlay mode (`RunCommand.svelte`) with a per-run shell
+  picker; `run_command` / `list_shells`; `config.shell` + per-shell `shell_wrap`
+  ("run and hold" for pwsh / cmd / bash / nu / …) + a Settings **Shell**
+  dropdown. — 2026-09-01
 
 Remaining, hardest-first: #6 task-targets provider, #15 conditional template
-expansion, #9 `prompt:` action, #14 (Cargo-workspace / Xcode / Nx-Turbo-Bazel),
-#10 terminal abstraction (non-Windows + `shell:`), #11 fs watcher, #12 Wayland
-hotkey, #13 Eclipse provisioner.
+expansion, #14 (Cargo-workspace / Xcode / Nx-Turbo-Bazel), #10 terminal
+abstraction (non-Windows), #11 fs watcher, #12 Wayland hotkey, #13 Eclipse
+provisioner.
 
 ## Not on this list (shipped alongside)
 

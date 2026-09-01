@@ -31,9 +31,9 @@ The rest of this document is about `rules.yaml`.
 | `rules` | Your rules are **prepended** — they run first and show first. `rules_disable: [id]` sets a built-in aside. |
 | `universal` | `universal.disable: [id]` removes built-ins, `universal.add: [...]` appends yours, `universal.default: id` sets which action Enter runs on a repo in the main list. |
 
-(`hotkey`, `roots`, `scan`, `cache_ttl_secs`, `terminal`, `terminal_template`
-are **settings**, not overrides — they live in `config.yaml` and are edited in
-the Settings screen. Putting them in `rules.yaml` has no effect. See
+(`hotkey`, `roots`, `scan`, `cache_ttl_secs`, `terminal`, `terminal_template`,
+`shell` are **settings**, not overrides — they live in `config.yaml` and are
+edited in the Settings screen. Putting them in `rules.yaml` has no effect. See
 [Terminal](#terminal).)
 
 A disabled built-in isn't deleted — it still appears in the Settings
@@ -127,6 +127,12 @@ actions:
     run: "make"
     terminal: true
     icon: run                 # glyph for the menu row — see Settings > Icons
+
+  - name: "npm run…"
+    run: "npm run {{input}}"  # prompt: opens the "Run command…" input;
+    prompt: true              #   {{input}} = what you type, the rest is fixed.
+    terminal: true            #   A bare `prompt: true` (no `run:`) takes a
+                              #   whole command line. Blank + a shell = open it.
 ```
 
 **`{{vs}}` and `needs: [vs]` refer to the same thing** — `vs` is a key in the
@@ -141,6 +147,10 @@ or when the action has no program at all (a gated `terminal: true`).
 - `program` + `args`, **or** `run` — not both.
 - `terminal: true` runs it inside the resolved terminal at the working
   directory. Without it, the process is spawned detached with no window.
+- `prompt: true` doesn't run anything — it opens the **Run command…** input in
+  the action menu, seeded with `run:` as a template (`{{input}}` is where the
+  typed text goes). The input has its own shell picker; leave it blank and pick
+  a shell to just open that shell in the repo.
 - `needs:` gates just this action. `needs:` / `requires:` on the *rule* gate the
   whole rule — and `requires:` is rule-only, taking bare executable names checked
   on `PATH` rather than `programs` keys.
@@ -206,9 +216,11 @@ choose *Custom…* and give a `terminal_template`: it's run verbatim with `{{dir
 and `{{cmd}}` substituted (put `{{cmd}}` after `--` or in quotes so its arguments
 stay together).
 
-The command is wrapped in PowerShell (`pwsh`, else Windows PowerShell) so the
-window stays open and keeps a real console — ANSI colour and a live TTY, which
-tools like Claude Code need.
+A one-shot command is wrapped in a shell so the window stays open and keeps a
+real console (ANSI colour, a live TTY — tools like Claude Code need it). The
+shell is `pwsh` (else Windows PowerShell) unless you set **Settings ▸ Shell** /
+`shell:` — `cmd`, `bash`, `nu`, … are recognised for their "run and hold" flags.
+The **Run command…** action picks a shell per-run, defaulting to that setting.
 
 ---
 

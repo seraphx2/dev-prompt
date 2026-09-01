@@ -3,6 +3,7 @@
   import SearchInput from "./lib/components/SearchInput.svelte";
   import ResultList from "./lib/components/ResultList.svelte";
   import ActionMenu from "./lib/components/ActionMenu.svelte";
+  import RunCommand from "./lib/components/RunCommand.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import {
     buildActions,
@@ -17,6 +18,7 @@
     refreshRepoContext,
     rescanRepos,
     runAction,
+    runCommand,
     searchRepos,
     setDismissOnBlur,
   } from "./lib/ipc";
@@ -26,7 +28,7 @@
 
   const DAY_MS = 24 * 60 * 60 * 1000;
 
-  type Mode = "repo-list" | "action-menu" | "settings";
+  type Mode = "repo-list" | "action-menu" | "settings" | "run-command";
 
   let query = $state("");
   let results = $state<ScoredRepo[]>([]);
@@ -39,6 +41,8 @@
   let activeRepo = $state<ScoredRepo | null>(null);
   /** When set, the action menu is drilled into this `Detected · <x>` group. */
   let subGroup = $state<string | null>(null);
+  /** `run:` template of the prompt action that opened the "Run command…" mode. */
+  let promptTemplate = $state("");
 
   const SUB_PREFIX = "Detected · ";
 
@@ -116,6 +120,9 @@
       subGroup = it.target;
       actionQuery = "";
       actionSel = 0;
+    } else if (it.action.prompt) {
+      promptTemplate = it.action.hint ?? "";
+      mode = "run-command";
     } else if (activeRepo) {
       execute(it.action, activeRepo.repo.path);
     }
@@ -131,9 +138,9 @@
     }
   }
 
-  // The settings screen is a form — don't let a click-away dismiss it.
+  // Settings + the run-command input are forms — a click-away mustn't nuke them.
   $effect(() => {
-    void setDismissOnBlur(mode !== "settings");
+    void setDismissOnBlur(mode !== "settings" && mode !== "run-command");
   });
 
   // Footer key hints, per screen. `[key, description]`.
@@ -147,11 +154,16 @@
         ]
       : mode === "settings"
         ? [["Esc", "back"]]
-        : [
-            ["Up/Down", "move"],
-            ["Enter", "run"],
-            ["Esc", "back"],
-          ],
+        : mode === "run-command"
+          ? [
+              ["Enter", "run"],
+              ["Esc", "back"],
+            ]
+          : [
+              ["Up/Down", "move"],
+              ["Enter", "run"],
+              ["Esc", "back"],
+            ],
   );
 
   let scanning = $state(false);
@@ -231,6 +243,7 @@
     actions = [];
     actionQuery = "";
     subGroup = null;
+    promptTemplate = "";
   }
 
   // Keep the search box focused whenever the repo list is showing, so typing
@@ -257,6 +270,19 @@
       await hideOverlay();
     } catch (e) {
       status = `Launch failed: ${e}`;
+    } finally {
+      running = false;
+    }
+  }
+
+  async function runCommandAndHide(path: string, cmd: string, shell: string) {
+    if (running) return;
+    running = true;
+    try {
+      await runCommand(path, cmd, shell);
+      await hideOverlay();
+    } catch (e) {
+      status = `Run failed: ${e}`;
     } finally {
       running = false;
     }
@@ -339,6 +365,8 @@
   function onWindowKeydown(e: KeyboardEvent) {
     if (mode === "action-menu") {
       onMenuKeydown(e);
+    } else if (mode === "run-command") {
+      // The RunCommand component owns its keys (Enter / Esc).
     } else if (mode === "settings") {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -467,6 +495,14 @@
       onselect={(i) => (actionSel = i)}
       onrun={(i) => activateMenuItem(i)}
       onback={menuBack}
+    />
+  {:else if mode === "run-command" && activeRepo}
+    <RunCommand
+      repoName={activeRepo.repo.name}
+      template={promptTemplate}
+      onrun={(cmd, sh) =>
+        activeRepo && runCommandAndHide(activeRepo.repo.path, cmd, sh)}
+      onback={() => (mode = "action-menu")}
     />
   {:else if mode === "settings"}
     <Settings onback={backToList} onsaved={() => rescan()} />

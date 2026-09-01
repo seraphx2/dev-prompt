@@ -5,6 +5,7 @@
     getAutostart,
     getConfig,
     listRepos,
+    listShells,
     listTerminals,
     openRulesFile,
     pickDirectories,
@@ -36,6 +37,9 @@
   let terminalSel = $state("");
   let terminalTemplate = $state("");
   let terminals = $state<TerminalOption[]>([]);
+  // "" = default shell (pwsh -> powershell), else a shell name.
+  let shellSel = $state("");
+  let shells = $state<string[]>([]);
   let autostart = $state(false);
   let loaded = $state(false);
   let busy = $state(false);
@@ -116,6 +120,11 @@
       terminals = await listTerminals();
     } catch {
       terminals = [];
+    }
+    try {
+      shells = await listShells();
+    } catch {
+      shells = [];
     }
     void pollUpdates(true);
   });
@@ -227,6 +236,7 @@
     cache_ttl_secs: number;
     terminal?: string | null;
     terminal_template?: string | null;
+    shell?: string | null;
   }) {
     hotkey = c.hotkey;
     roots = c.roots.length ? [...c.roots] : [""];
@@ -238,6 +248,7 @@
         : (String(c.scan.collapse_nested) as "true" | "false" | "auto");
     terminalTemplate = c.terminal_template ?? "";
     terminalSel = terminalTemplate ? "__custom__" : (c.terminal ?? "");
+    shellSel = c.shell ?? "";
   }
 
   async function reload() {
@@ -279,6 +290,7 @@
         terminal: terminalSel === "__custom__" ? "" : terminalSel,
         terminal_template:
           terminalSel === "__custom__" ? terminalTemplate.trim() : "",
+        shell: shellSel,
       });
       note("Saved.");
       onsaved();
@@ -485,6 +497,23 @@
           <span class="font-mono">{"{{cmd}}"}</span> = the command to run.
         </span>
       {/if}
+    </label>
+
+    <label class="block space-y-1.5">
+      <span class="text-orange-400">Shell</span>
+      <select
+        bind:value={shellSel}
+        title="Shell a one-shot terminal command runs inside"
+        class="w-56 rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+      >
+        <option value="">Default (PowerShell)</option>
+        {#each shells as s (s)}
+          <option value={s}>{s}</option>
+        {/each}
+        {#if shellSel && !shells.includes(shellSel)}
+          <option value={shellSel}>{shellSel}</option>
+        {/if}
+      </select>
     </label>
 
     <label class="flex items-center gap-2">

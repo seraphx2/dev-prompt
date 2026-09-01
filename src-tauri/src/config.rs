@@ -41,6 +41,10 @@ pub struct Config {
     /// `{{dir}}` = working directory, `{{cmd}}` = the command to run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal_template: Option<String>,
+    /// Shell a one-shot terminal command runs inside (`pwsh` / `cmd` / `bash`
+    /// / …). `None` = `pwsh`, falling back to Windows PowerShell.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell: Option<String>,
     /// Discovery markers — "this folder is a project". Every `rules[].match`
     /// also counts, so a rule implies a marker.
     pub markers: Vec<Marker>,
@@ -67,6 +71,7 @@ impl Default for Config {
             cache_ttl_secs: 900,
             terminal: None,
             terminal_template: None,
+            shell: None,
             markers: Vec::new(),
             programs: BTreeMap::new(),
             rules: Vec::new(),
@@ -281,6 +286,9 @@ pub struct RuleAction {
     pub args: Vec<String>,
     /// Run inside the resolved terminal at the working dir.
     pub terminal: bool,
+    /// Opens the "Run command…" input instead of spawning; `run:` (if any) is
+    /// the template, `{{input}}` the typed value.
+    pub prompt: bool,
     /// Handled in the frontend (e.g. copy path). No process spawned.
     pub client: bool,
     /// Icon key for the menu row (see `src/lib/icons.ts` / Settings ▸ Icons).
@@ -327,6 +335,8 @@ pub struct UserConfig {
     pub terminal: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal_template: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell: Option<String>,
 }
 
 /// `rules.yaml` — hand-authored overrides layered over the bundled defaults.
@@ -385,6 +395,9 @@ fn merge_settings(cfg: &mut Config, u: UserConfig) {
     }
     if let Some(t) = u.terminal_template {
         cfg.terminal_template = Some(t);
+    }
+    if let Some(s) = u.shell {
+        cfg.shell = Some(s);
     }
 }
 
@@ -504,6 +517,7 @@ fn first_run_user() -> UserConfig {
         cache_ttl_secs: Some(900),
         terminal: None,
         terminal_template: None,
+        shell: None,
     }
 }
 
@@ -712,15 +726,16 @@ mod tests {
     }
 
     #[test]
-    fn settings_file_carries_terminal_pin_and_template() {
+    fn settings_file_carries_terminal_and_shell() {
         let mut cfg = bundled_defaults();
         let user: UserConfig = serde_yaml_ng::from_str(
-            "terminal: wezterm\nterminal_template: \"x --cd {{dir}}\"\n",
+            "terminal: wezterm\nterminal_template: \"x --cd {{dir}}\"\nshell: bash\n",
         )
         .unwrap();
         merge_settings(&mut cfg, user);
         assert_eq!(cfg.terminal.as_deref(), Some("wezterm"));
         assert_eq!(cfg.terminal_template.as_deref(), Some("x --cd {{dir}}"));
+        assert_eq!(cfg.shell.as_deref(), Some("bash"));
     }
 
     #[test]

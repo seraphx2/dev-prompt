@@ -11,7 +11,9 @@ use crate::error::{AppError, AppResult};
 use crate::index::{self, ScoredRepo};
 use crate::inspect::{self, RepoContext};
 use crate::launch;
-use crate::rules::{build_actions as build_actions_impl, find_action, Action};
+use crate::rules::{
+    build_actions as build_actions_impl, find_action, terminal_command, Action, Resolver,
+};
 use crate::scan::{self, Repo};
 
 /// In-memory app state shared across commands.
@@ -273,9 +275,10 @@ pub struct ConfigPatch {
     pub cache_ttl_secs: Option<u64>,
     pub scan_max_depth: Option<usize>,
     pub collapse_nested: Option<config::CollapseNested>,
-    /// `Some("")` clears the pin / template back to auto.
+    /// `Some("")` clears the pin / template / shell back to auto.
     pub terminal: Option<String>,
     pub terminal_template: Option<String>,
+    pub shell: Option<String>,
 }
 
 /// Apply an editable subset of settings: write `config.yaml`, update the live
@@ -323,6 +326,10 @@ pub fn save_config(
         let t = t.trim();
         user.terminal_template = (!t.is_empty()).then(|| t.to_string());
     }
+    if let Some(s) = patch.shell {
+        let s = s.trim();
+        user.shell = (!s.is_empty()).then(|| s.to_string());
+    }
 
     let new_hotkey = user.hotkey.clone().unwrap_or_else(|| old_hotkey.clone());
     if new_hotkey != old_hotkey {
@@ -358,6 +365,82 @@ pub fn list_terminals(state: State<'_, AppState>) -> Vec<TerminalOption> {
         .into_iter()
         .map(|(id, label)| TerminalOption { id, label })
         .collect()
+}
+
+/// Shells found on PATH — feeds the Settings "Shell" dropdown and the
+/// "Run command…" picker.
+#[tauri::command]
+pub fn list_shells() -> Vec<String> {
+    let mut out: Vec<String> = ["pwsh", "powershell", "cmd", "bash", "zsh", "fish", "nu"]
+        .into_iter()
+        .filter(|name| crate::rules::which(name).is_some())
+        .map(String::from)
+        .collect();
+
+    // Git-for-Windows bash usually isn't on PATH.
+    #[cfg(windows)]
+    if !out.iter().any(|s| s == "bash") {
+        let git_bash = ["ProgramFiles", "ProgramFiles(x86)"]
+            .into_iter()
+            .filter_map(|b| std::env::var(b).ok())
+            .flat_map(|pf| {
+                ["Git\\bin\\bash.exe", "Git\\usr\\bin\\bash.exe"]
+                    .map(|rel| Path::new(&pf).join(rel))
+            })
+            .any(|p| p.is_file());
+        if git_bash {
+            out.push("bash".to_string());
+        }
+    }
+    out
+}
+
+/// Run a free-form command in `path`'s terminal. Blank `command` opens the
+/// chosen shell interactively. Feeds the "Run command…" action.
+#[tauri::command]
+pub fn run_command(
+    state: State<'_, AppState>,
+    path: String,
+    command: String,
+    shell: Option<String>,
+) -> AppResult<()> {
+    let repo = repo_for_path(&state, &path);
+    let cfg = state.config.lock().unwrap();
+    let shell = shell
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| cfg.shell.clone());
+    let resolver = Resolver::new(&cfg.programs)
+        .with_terminal(cfg.terminal.as_deref(), cfg.terminal_template.as_deref())
+        .with_shell(shell.as_deref());
+
+    let command = command.trim();
+    let (program, args, cwd) = if command.is_empty() {
+        let sh = shell.clone().unwrap_or_else(|| {
+            if crate::rules::which("pwsh").is_some() {
+                "pwsh".into()
+            } else {
+                "powershell".into()
+            }
+        });
+        terminal_command(&sh, &repo.path, &resolver, false)
+    } else {
+        terminal_command(command, &repo.path, &resolver, true)
+    };
+
+    let action = Action {
+        id: "run-command".into(),
+        label: command.to_string(),
+        hint: command.to_string(),
+        group: String::new(),
+        default: false,
+        icon: None,
+        program,
+        args,
+        cwd,
+        client_side: false,
+        prompt: false,
+    };
+    launch::launch(&action, &repo)
 }
 
 /// Toggle whether focus loss dismisses the overlay (frontend turns this off for

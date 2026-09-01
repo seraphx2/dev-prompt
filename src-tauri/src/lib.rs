@@ -284,6 +284,8 @@ pub fn run() {
             commands::reload_config,
             commands::save_config,
             commands::list_terminals,
+            commands::list_shells,
+            commands::run_command,
             commands::open_rules_file,
             commands::set_dismiss_on_blur,
             commands::set_update_hint,

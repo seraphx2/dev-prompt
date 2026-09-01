@@ -350,6 +350,7 @@ universal:
     - { id: terminal, name: "Open in terminal", terminal: true, icon: terminal }
     - { id: filemanager, name: "Reveal in file manager", program: "{{filemanager}}", args: ["{{path}}"], icon: folder }
     - { id: copy-path, name: "Copy path", client: true, icon: copy }
+    - { id: run-command, name: "Run command…", prompt: true, terminal: true, icon: run }
 
     - { id: claude-code, name: "Launch Claude Code", terminal: true, run: "claude", needs: [claude], icon: claude }
     - { id: vscode, name: "Open in VS Code", program: "{{code}}", args: ["{{path}}"], needs: [code], icon: vscode }

@@ -30,6 +30,8 @@ export interface Action {
   icon?: string | null;
   /** True when this action is handled purely in the frontend (e.g. copy path). */
   clientSide: boolean;
+  /** Opens the "Run command…" input instead of running; `hint` is the template. */
+  prompt?: boolean;
 }
 
 /** A row in the action menu — a runnable action, or a drill-in to a
@@ -55,6 +57,8 @@ export interface AppConfig {
   terminal?: string | null;
   /** Raw `{{dir}}` / `{{cmd}}` invocation for an unknown terminal. */
   terminal_template?: string | null;
+  /** Shell a one-shot terminal command runs inside; absent = pwsh/powershell. */
+  shell?: string | null;
 }
 
 /** An installed terminal emulator dev-prompt can drive — for the Settings dropdown. */
