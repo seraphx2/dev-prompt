@@ -52,7 +52,7 @@
   onDestroy(() => clearTimeout(msgTimer));
   let summary = $state<ConfigSummary | null>(null);
 
-  // "Trace a repo" — pick a repo, see rule-by-rule why it does / doesn't fire.
+  // "Trace a repo" — pick a repo, see rule-by-rule why it does / doesn't resolve.
   let traceRepos = $state<{ name: string; path: string }[]>([]);
   let tracePath = $state("");
   let repoTrace = $state<RepoTrace | null>(null);
@@ -586,7 +586,7 @@
         class="cursor-pointer select-none px-3 py-2 text-[12px] text-white/60 hover:text-white/90"
       >
         Trace a repo
-        <span class="text-white/25">· why each rule does or doesn't fire</span>
+        <span class="text-white/25">· why each rule does or doesn't resolve</span>
       </summary>
 
       <div class="space-y-3 border-t border-hair px-3 py-3 text-[11px]">
@@ -645,7 +645,7 @@
                     {#if r.gate}
                       <span class="text-amber-300/70">{r.gate}</span>
                     {:else}
-                      <span class="text-emerald-300/70">✓ fired</span>
+                      <span class="text-emerald-300/70">✓ resolved</span>
                     {/if}
                   </div>
                   {#each r.hits as h (h.project)}
@@ -660,7 +660,8 @@
                 </div>
               {:else}
                 <p class="text-white/40">
-                  No rules fired for this repo — only the general actions above.
+                  No rules resolved for this repo — only the general actions
+                  above.
                 </p>
               {/each}
             </div>

@@ -87,7 +87,7 @@ export interface RepoTrace {
 export interface RuleTrace {
   id: string;
   globs: string[];
-  /** "" when the rule fired; otherwise why it produced nothing. */
+  /** "" when the rule resolved; otherwise why it produced nothing. */
   gate: string;
   /** Per-project results, populated only when `gate` is "". */
   hits: ProjectHit[];

@@ -712,7 +712,7 @@ pub struct RuleTrace {
     pub id: String,
     /// The glob(s) the rule matches on.
     pub globs: Vec<String>,
-    /// "" when the rule fired; otherwise why it produced nothing — a machine
+    /// "" when the rule resolved; otherwise why it produced nothing — a machine
     /// gate ("disabled", "needs `x` — unresolved", …) or "no matching files".
     pub gate: String,
     /// Per-project results — populated only when `gate` is "".
