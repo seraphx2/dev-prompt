@@ -47,6 +47,7 @@ const BRAND = {
   deno: "deno",
   dotnet: "dotnet",
   java: "openjdk",
+  gradle: "gradle",
   kotlin: "kotlin",
   scala: "scala",
   swift: "swift",

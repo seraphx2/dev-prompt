@@ -427,6 +427,7 @@ fn provider_actions(
         "compose" => "docker",
         "dotnet" => "dotnet",
         "maven-modules" => "java",
+        "gradle-modules" => "gradle",
         _ => "run",
     };
 
@@ -593,6 +594,25 @@ fn provider_actions(
                         format!("mvn test · {m}"),
                         vec!["mvn".into(), "-B".into(), "test".into()],
                         &at,
+                    ),
+                ]
+            })
+            .collect(),
+        // Gradle is root-centric: `gradle :path:proj:task` from the settings dir.
+        "gradle-modules" => crate::gradle::projects(&proj.dir)
+            .into_iter()
+            .flat_map(|(m, gpath)| {
+                let k = slug(&m);
+                [
+                    term(
+                        format!("gradlemod:{ns}:{k}:build"),
+                        format!("gradle {gpath}:build"),
+                        vec!["gradle".into(), format!("{gpath}:build")],
+                    ),
+                    term(
+                        format!("gradlemod:{ns}:{k}:test"),
+                        format!("gradle {gpath}:test"),
+                        vec!["gradle".into(), format!("{gpath}:test")],
                     ),
                 ]
             })
@@ -1182,6 +1202,11 @@ mod tests {
             "<project><modules><module>svc-a</module><module>svc-b</module></modules></project>",
         )
         .unwrap();
+        std::fs::write(
+            d.join("settings.gradle"),
+            "include ':app', 'core:data'\n",
+        )
+        .unwrap();
 
         let proj = Project {
             dir: d.clone(),
@@ -1211,6 +1236,11 @@ mod tests {
         assert_eq!(mvn.len(), 4);
         assert!(mvn.iter().any(|a| a.label == "mvn test · svc-b"));
         assert!(mvn.iter().all(|a| a.icon.as_deref() == Some("java")));
+
+        let gr = call("gradle-modules");
+        assert_eq!(gr.len(), 4); // build + test for :app and :core:data
+        assert!(gr.iter().any(|a| a.label == "gradle :core:data:build"));
+        assert!(gr.iter().all(|a| a.icon.as_deref() == Some("gradle")));
 
         let _ = std::fs::remove_dir_all(&d);
     }

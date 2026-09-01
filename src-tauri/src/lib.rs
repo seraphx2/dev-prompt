@@ -4,6 +4,7 @@ mod config;
 mod dotnet;
 mod error;
 mod gowork;
+mod gradle;
 mod index;
 mod inspect;
 mod launch;

@@ -239,6 +239,12 @@ rules:
       - { name: "gradle test", run: "gradle test", terminal: true, icon: gradle }
       - { name: "gradle clean", run: "gradle clean", terminal: true, icon: gradle }
 
+  # Per-project `gradle :path:build` for each project a settings file includes.
+  - id: gradle-modules
+    match: [settings.gradle, settings.gradle.kts]
+    provider: gradle-modules
+    requires: [gradle]
+
   - id: cmake
     match: CMakeLists.txt
     requires: [cmake]
