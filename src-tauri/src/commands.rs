@@ -250,6 +250,7 @@ pub struct ConfigPatch {
     pub roots: Option<Vec<String>>,
     pub cache_ttl_secs: Option<u64>,
     pub scan_max_depth: Option<usize>,
+    pub collapse_nested: Option<config::CollapseNested>,
 }
 
 /// Apply an editable subset of settings: write `config.yaml`, update the live
@@ -279,10 +280,14 @@ pub fn save_config(
     if let Some(ttl) = patch.cache_ttl_secs {
         user.cache_ttl_secs = Some(ttl);
     }
-    if let Some(depth) = patch.scan_max_depth {
-        // Preserve any hand-set `collapse_nested`; the UI only edits depth.
+    if patch.scan_max_depth.is_some() || patch.collapse_nested.is_some() {
         let mut scan = user.scan.clone().unwrap_or_default();
-        scan.max_depth = depth.max(1);
+        if let Some(depth) = patch.scan_max_depth {
+            scan.max_depth = depth.max(1);
+        }
+        if let Some(cn) = patch.collapse_nested {
+            scan.collapse_nested = cn;
+        }
         user.scan = Some(scan);
     }
 

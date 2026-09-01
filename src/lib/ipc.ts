@@ -67,6 +67,7 @@ export function saveConfig(patch: {
   roots?: string[];
   cache_ttl_secs?: number;
   scan_max_depth?: number;
+  collapse_nested?: boolean | "auto";
 }): Promise<AppConfig> {
   return invoke<AppConfig>("save_config", { patch });
 }

@@ -48,7 +48,8 @@ export type MenuItem =
 export interface AppConfig {
   hotkey: string;
   roots: string[];
-  scan: { max_depth: number };
+  /** `collapse_nested`: `true` collapse, `false` list all, `"auto"` keep independent. */
+  scan: { max_depth: number; collapse_nested: boolean | "auto" };
   cache_ttl_secs: number;
 }
 

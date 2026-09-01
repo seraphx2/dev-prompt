@@ -27,6 +27,8 @@
   let roots = $state<string[]>([]);
   let ttlMin = $state(15);
   let scanDepth = $state(4);
+  // Bound to the <select>; serialises to `true` / `false` / `"auto"` on save.
+  let collapseNested = $state<"true" | "false" | "auto">("true");
   let autostart = $state(false);
   let loaded = $state(false);
   let busy = $state(false);
@@ -178,13 +180,17 @@
   function applyConfig(c: {
     hotkey: string;
     roots: string[];
-    scan: { max_depth: number };
+    scan: { max_depth: number; collapse_nested?: boolean | "auto" };
     cache_ttl_secs: number;
   }) {
     hotkey = c.hotkey;
     roots = c.roots.length ? [...c.roots] : [""];
     ttlMin = Math.max(1, Math.round(c.cache_ttl_secs / 60));
     scanDepth = Math.max(1, c.scan?.max_depth ?? 4);
+    collapseNested =
+      c.scan?.collapse_nested === undefined
+        ? "true"
+        : (String(c.scan.collapse_nested) as "true" | "false" | "auto");
   }
 
   async function reload() {
@@ -222,6 +228,7 @@
         roots: roots.map((r) => r.trim()).filter(Boolean),
         cache_ttl_secs: Math.max(60, Math.round(ttlMin * 60)),
         scan_max_depth: Math.max(1, Math.round(scanDepth)),
+        collapse_nested: collapseNested === "auto" ? "auto" : collapseNested === "true",
       });
       note("Saved.");
       onsaved();
@@ -386,6 +393,19 @@
         />
       </label>
     </div>
+
+    <label class="block space-y-1.5">
+      <span class="text-orange-400">Repo inside another repo</span>
+      <select
+        bind:value={collapseNested}
+        title="What to do when a discovered repo sits inside another one"
+        class="w-72 rounded border border-hair bg-white/[0.04] px-2 py-1.5 text-white/90 focus:border-white/25 focus:outline-none [&>option]:text-black"
+      >
+        <option value="true">Collapse into the parent (default)</option>
+        <option value="false">List every one separately</option>
+        <option value="auto">Auto — keep independent checkouts only</option>
+      </select>
+    </label>
 
     <label class="flex items-center gap-2">
       <input
