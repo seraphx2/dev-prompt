@@ -23,6 +23,13 @@ hotkey: CmdOrCtrl+Shift+Space
 roots: []
 scan:
   max_depth: 4
+  # A repo found inside another repo:
+  #   true  (default) — drop it (hides submodules, vendored trees, workspace members)
+  #   false           — list every one separately
+  #   auto            — drop it unless it looks independent: a real `.git` dir
+  #                     (not a submodule/worktree `.git` file), not in the
+  #                     ancestor's .gitmodules, not under vendor/ third_party/ …
+  collapse_nested: true
 cache_ttl_secs: 900
 
 # --- discovery markers -------------------------------------------------------
@@ -175,6 +182,13 @@ rules:
         needs: [rider]
         icon: rider
 
+  # Terminal build/run per project in a solution (or a lone project file),
+  # cross-platform. Sits alongside the editor rules above.
+  - id: dotnet
+    match: ["*.sln", "*.slnx", "*.csproj", "*.vbproj", "*.fsproj"]
+    provider: dotnet
+    requires: [dotnet]
+
   - id: node
     match: package.json
     provider: npm-scripts
@@ -187,8 +201,14 @@ rules:
     match: [go.mod, go.work]
     provider: go
 
+  # Per-module `go build` / `go test` for each `use` in a go.work workspace.
+  - id: go-work
+    match: go.work
+    provider: go-work
+    requires: [go]
+
   - id: python
-    match: [pyproject.toml, requirements.txt]
+    match: [pyproject.toml, requirements.txt, setup.py, setup.cfg, Pipfile, manage.py]
     provider: python
 
   - id: compose
@@ -205,6 +225,12 @@ rules:
       - { name: "mvn test", run: "mvn -B test", terminal: true, icon: java }
       - { name: "mvn package", run: "mvn -B package", terminal: true, icon: java }
 
+  # Per-module compile/test for a reactor pom's <modules>.
+  - id: maven-modules
+    match: pom.xml
+    provider: maven-modules
+    requires: [mvn]
+
   - id: gradle
     match: [build.gradle, build.gradle.kts]
     requires: [gradle]
@@ -212,6 +238,27 @@ rules:
       - { name: "gradle build", run: "gradle build", terminal: true, icon: gradle }
       - { name: "gradle test", run: "gradle test", terminal: true, icon: gradle }
       - { name: "gradle clean", run: "gradle clean", terminal: true, icon: gradle }
+
+  # Per-project `gradle :path:build` for each project a settings file includes.
+  - id: gradle-modules
+    match: [settings.gradle, settings.gradle.kts]
+    provider: gradle-modules
+    requires: [gradle]
+
+  - id: flutter
+    match: pubspec.yaml
+    requires: [flutter]
+    actions:
+      - { name: "flutter pub get", run: "flutter pub get", terminal: true, icon: flutter }
+      - { name: "flutter run", run: "flutter run", terminal: true, icon: flutter }
+      - { name: "flutter build apk", run: "flutter build apk", terminal: true, icon: flutter }
+      - { name: "flutter test", run: "flutter test", terminal: true, icon: flutter }
+
+  # Flutter's Android build lives in android/, one level below the project —
+  # reaches in for it directly rather than through the generic per-project scan.
+  - id: flutter-android
+    match: pubspec.yaml
+    provider: flutter-android
 
   - id: cmake
     match: CMakeLists.txt

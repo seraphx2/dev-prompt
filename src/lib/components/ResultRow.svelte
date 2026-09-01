@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ScoredRepo } from "../types";
+  import { middleTruncate } from "../text";
   import Highlight from "./Highlight.svelte";
 
   let {
@@ -28,8 +29,11 @@
     <div class="truncate text-[13px] leading-tight text-white/90">
       <Highlight text={entry.repo.name} indices={entry.matchIndices} />
     </div>
-    <div class="truncate font-mono text-[11px] leading-tight text-white/35">
-      {entry.repo.path}
+    <div
+      class="overflow-hidden whitespace-nowrap font-mono text-[11px] leading-tight text-white/35"
+      title={entry.repo.path}
+    >
+      {middleTruncate(entry.repo.path, 72)}
     </div>
   </div>
   <div class="flex shrink-0 items-center gap-1">

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -7,7 +9,7 @@ use crate::cache;
 use crate::config::{self, resolved_roots, Config};
 use crate::error::{AppError, AppResult};
 use crate::index::{self, ScoredRepo};
-use crate::inspect;
+use crate::inspect::{self, RepoContext};
 use crate::launch;
 use crate::rules::{build_actions as build_actions_impl, find_action, Action};
 use crate::scan::{self, Repo};
@@ -16,6 +18,9 @@ use crate::scan::{self, Repo};
 pub struct AppState {
     pub config: Mutex<Config>,
     pub repos: Mutex<Vec<Repo>>,
+    /// Per-repo project inspection keyed by repo path — captured during the scan
+    /// so opening the action menu never walks the disk. See `cache::CacheFile`.
+    pub contexts: Mutex<HashMap<String, RepoContext>>,
     /// Age (secs) of the list currently in `repos`; -1 when never cached.
     pub age_secs: Mutex<i64>,
     /// Whether losing focus dismisses the overlay. Off while the settings
@@ -31,16 +36,30 @@ impl AppState {
         let config = config::load().unwrap_or_default();
         let loaded = cache::load().unwrap_or(cache::LoadedCache {
             repos: Vec::new(),
+            contexts: HashMap::new(),
             age_secs: -1,
         });
         AppState {
             config: Mutex::new(config),
             repos: Mutex::new(loaded.repos),
+            contexts: Mutex::new(loaded.contexts),
             age_secs: Mutex::new(loaded.age_secs),
             dismiss_on_blur: Mutex::new(true),
             first_run,
         }
     }
+}
+
+/// The cached inspection for `repo`, or a fresh live walk when the cache predates
+/// this feature (or the repo was added since the last scan). The cache hit is the
+/// common path and touches no disk.
+fn context_for(state: &AppState, repo: &Repo) -> RepoContext {
+    if let Some(ctx) = state.contexts.lock().unwrap().get(&repo.path).cloned() {
+        return ctx;
+    }
+    let cfg = state.config.lock().unwrap();
+    let discovery = config::compile_globset(&config::discovery_globs(&cfg));
+    inspect::inspect(Path::new(&repo.path), &discovery)
 }
 
 #[derive(Debug, Serialize)]
@@ -80,18 +99,24 @@ pub async fn rescan_repos(
     *state.config.lock().unwrap() = cfg.clone();
     let previous = state.repos.lock().unwrap().clone();
 
-    // Filesystem walk off the main thread.
-    let fresh = tauri::async_runtime::spawn_blocking(move || {
+    // Filesystem walk + per-repo inspection off the main thread. Doing the
+    // inspection here (while the walk's dir entries are still cache-warm) is far
+    // cheaper than a cold walk later when the action menu is opened.
+    let (fresh, contexts) = tauri::async_runtime::spawn_blocking(move || {
         let roots = resolved_roots(&cfg);
-        scan::scan(&roots, &cfg)
+        let repos = scan::scan(&roots, &cfg);
+        let discovery = config::compile_globset(&config::discovery_globs(&cfg));
+        let contexts = inspect::inspect_all(repos.iter().map(|r| r.path.as_str()), &discovery);
+        (repos, contexts)
     })
     .await
     .map_err(|e| AppError::msg(format!("scan task failed: {e}")))?;
 
     let merged = cache::merge(&previous, fresh);
-    cache::save(&merged)?;
+    cache::save(&merged, &contexts)?;
 
     *state.repos.lock().unwrap() = merged;
+    *state.contexts.lock().unwrap() = contexts;
     *state.age_secs.lock().unwrap() = 0;
 
     let out = payload(&state);
@@ -130,9 +155,62 @@ fn repo_for_path(state: &AppState, path: &str) -> Repo {
 #[tauri::command]
 pub fn build_actions(state: State<'_, AppState>, path: String) -> Vec<Action> {
     let repo = repo_for_path(&state, &path);
-    let ctx = inspect::inspect(std::path::Path::new(&repo.path));
+    let ctx = context_for(&state, &repo);
     let cfg = state.config.lock().unwrap();
     build_actions_impl(&repo, &ctx, &cfg)
+}
+
+/// Rule-by-rule explanation of what a single repo produces and why — feeds the
+/// settings "trace a repo" view. Uses the scan-time cached context like
+/// `build_actions`.
+#[tauri::command]
+pub fn repo_rule_trace(
+    state: State<'_, AppState>,
+    path: String,
+) -> crate::rules::RepoTrace {
+    let repo = repo_for_path(&state, &path);
+    let ctx = context_for(&state, &repo);
+    let cfg = state.config.lock().unwrap();
+    crate::rules::trace(&cfg, &ctx, &repo)
+}
+
+/// Re-inspect a single repo off the UI thread. The action menu renders instantly
+/// from the cached context, then calls this; if the repo changed on disk since
+/// the last scan (new npm script, added `Cargo.toml`, …) the cache is updated
+/// and `repo:context-updated` fires so the open menu rebuilds itself.
+#[tauri::command]
+pub async fn refresh_repo_context(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<()> {
+    let walk_path = path.clone();
+    let discovery = config::compile_globset(&config::discovery_globs(
+        &state.config.lock().unwrap(),
+    ));
+    let fresh = tauri::async_runtime::spawn_blocking(move || {
+        inspect::inspect(Path::new(&walk_path), &discovery)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("inspect task failed: {e}")))?;
+
+    let changed = {
+        let mut map = state.contexts.lock().unwrap();
+        if map.get(&path) == Some(&fresh) {
+            false
+        } else {
+            map.insert(path.clone(), fresh);
+            true
+        }
+    };
+
+    if changed {
+        let repos = state.repos.lock().unwrap().clone();
+        let contexts = state.contexts.lock().unwrap().clone();
+        let _ = cache::save(&repos, &contexts);
+        let _ = app.emit("repo:context-updated", path);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -142,7 +220,7 @@ pub fn run_action(
     path: String,
 ) -> AppResult<()> {
     let repo = repo_for_path(&state, &path);
-    let ctx = inspect::inspect(std::path::Path::new(&repo.path));
+    let ctx = context_for(&state, &repo);
     let action = {
         let cfg = state.config.lock().unwrap();
         find_action(&repo, &ctx, &cfg, &action_id)
@@ -153,6 +231,9 @@ pub fn run_action(
 
 #[tauri::command]
 pub fn hide_overlay(window: tauri::WebviewWindow) -> AppResult<()> {
+    // Mirror the backend hide paths: reset the frontend to the repo list while
+    // the window is off-screen so the next show has no visible snap-back.
+    let _ = window.emit("overlay:hidden", ());
     window
         .hide()
         .map_err(|e| AppError::msg(format!("hide failed: {e}")))
@@ -191,6 +272,7 @@ pub struct ConfigPatch {
     pub roots: Option<Vec<String>>,
     pub cache_ttl_secs: Option<u64>,
     pub scan_max_depth: Option<usize>,
+    pub collapse_nested: Option<config::CollapseNested>,
 }
 
 /// Apply an editable subset of settings: write `config.yaml`, update the live
@@ -220,10 +302,15 @@ pub fn save_config(
     if let Some(ttl) = patch.cache_ttl_secs {
         user.cache_ttl_secs = Some(ttl);
     }
-    if let Some(depth) = patch.scan_max_depth {
-        user.scan = Some(config::ScanConfig {
-            max_depth: depth.max(1),
-        });
+    if patch.scan_max_depth.is_some() || patch.collapse_nested.is_some() {
+        let mut scan = user.scan.clone().unwrap_or_default();
+        if let Some(depth) = patch.scan_max_depth {
+            scan.max_depth = depth.max(1);
+        }
+        if let Some(cn) = patch.collapse_nested {
+            scan.collapse_nested = cn;
+        }
+        user.scan = Some(scan);
     }
 
     let new_hotkey = user.hotkey.clone().unwrap_or_else(|| old_hotkey.clone());

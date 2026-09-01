@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
@@ -69,11 +70,63 @@ impl Default for Config {
 #[serde(default, rename_all = "snake_case")]
 pub struct ScanConfig {
     pub max_depth: usize,
+    /// What to do when a discovered repo sits inside another discovered repo.
+    pub collapse_nested: CollapseNested,
 }
 
 impl Default for ScanConfig {
     fn default() -> Self {
-        ScanConfig { max_depth: 4 }
+        ScanConfig {
+            max_depth: 4,
+            collapse_nested: CollapseNested::default(),
+        }
+    }
+}
+
+/// `collapse_nested` in `config.yaml` — `true` / `false` / `"auto"`.
+///
+/// * `Always` (default, `true`): a repo whose ancestor is also a repo is
+///   dropped. Keeps submodules, vendored trees and workspace members out of the
+///   list.
+/// * `Never` (`false`): every marker-bearing directory is its own entry.
+/// * `Auto` (`"auto"`): drop nested repos *unless* they look like an independent
+///   checkout — a real VCS clone (a `.git` directory, not a submodule/worktree
+///   `.git` file), not declared in the ancestor's `.gitmodules`, and not under a
+///   vendor directory (`vendor/`, `third_party/`, `Pods/`, …).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CollapseNested {
+    #[default]
+    Always,
+    Never,
+    Auto,
+}
+
+impl Serialize for CollapseNested {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            CollapseNested::Always => s.serialize_bool(true),
+            CollapseNested::Never => s.serialize_bool(false),
+            CollapseNested::Auto => s.serialize_str("auto"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for CollapseNested {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Bool(bool),
+            Str(String),
+        }
+        match Raw::deserialize(d)? {
+            Raw::Bool(true) => Ok(CollapseNested::Always),
+            Raw::Bool(false) => Ok(CollapseNested::Never),
+            Raw::Str(s) if s.eq_ignore_ascii_case("auto") => Ok(CollapseNested::Auto),
+            Raw::Str(s) => Err(serde::de::Error::custom(format!(
+                r#"collapse_nested: expected true, false, or "auto", got {s:?}"#
+            ))),
+        }
     }
 }
 
@@ -423,32 +476,12 @@ pub fn save_user(u: &UserConfig) -> AppResult<()> {
 fn first_run_user() -> UserConfig {
     UserConfig {
         hotkey: Some("CmdOrCtrl+Shift+Space".into()),
-        roots: default_roots(),
+        // No seeded roots — the first run shows the empty-state guidance and the
+        // user picks their own directory. Guessing `~/git`, `~/src`, … just
+        // added noise paths people had to hunt down and delete.
+        roots: Vec::new(),
         scan: Some(ScanConfig::default()),
         cache_ttl_secs: Some(900),
-    }
-}
-
-fn default_roots() -> Vec<String> {
-    // Harmless extras are filtered by `resolved_roots`.
-    #[cfg(windows)]
-    {
-        vec![
-            "%USERPROFILE%\\source\\repos".into(),
-            "~/git".into(),
-            "~/src".into(),
-            "~/code".into(),
-            "~/projects".into(),
-        ]
-    }
-    #[cfg(not(windows))]
-    {
-        vec![
-            "~/src".into(),
-            "~/git".into(),
-            "~/code".into(),
-            "~/projects".into(),
-        ]
     }
 }
 
@@ -475,6 +508,20 @@ pub fn discovery_globs(cfg: &Config) -> Vec<String> {
     out.sort();
     out.dedup();
     out
+}
+
+/// Compile `globs` (as returned by [`discovery_globs`]) into a matcher.
+/// Case-folded to match — lowercase the candidate name before `is_match`.
+/// Shared by `scan.rs` (finding repos) and `inspect.rs` (finding sub-projects
+/// inside one), so both use exactly the same marker-and-rule glob set.
+pub fn compile_globset(globs: &[String]) -> GlobSet {
+    let mut builder = GlobSetBuilder::new();
+    for g in globs {
+        if let Ok(glob) = Glob::new(&g.to_lowercase()) {
+            builder.add(glob);
+        }
+    }
+    builder.build().unwrap_or_else(|_| GlobSet::empty())
 }
 
 // --- paths & expansion -------------------------------------------------
@@ -617,6 +664,29 @@ mod tests {
         merge_settings(&mut cfg, user);
         assert_eq!(cfg.hotkey, "Alt+Space");
         assert_eq!(cfg.scan.max_depth, 7);
+    }
+
+    #[test]
+    fn collapse_nested_accepts_bool_and_auto() {
+        let parse = |s: &str| {
+            serde_yaml_ng::from_str::<ScanConfig>(s)
+                .unwrap()
+                .collapse_nested
+        };
+        assert_eq!(parse("max_depth: 4"), CollapseNested::Always); // default
+        assert_eq!(parse("collapse_nested: true"), CollapseNested::Always);
+        assert_eq!(parse("collapse_nested: false"), CollapseNested::Never);
+        assert_eq!(parse("collapse_nested: auto"), CollapseNested::Auto);
+        assert_eq!(parse("collapse_nested: AUTO"), CollapseNested::Auto);
+        assert!(serde_yaml_ng::from_str::<ScanConfig>("collapse_nested: sometimes").is_err());
+
+        // Round-trips back to the same YAML scalar.
+        let y = serde_yaml_ng::to_string(&ScanConfig {
+            max_depth: 4,
+            collapse_nested: CollapseNested::Auto,
+        })
+        .unwrap();
+        assert!(y.contains("collapse_nested: auto"), "{y}");
     }
 
     #[test]

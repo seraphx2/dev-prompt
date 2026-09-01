@@ -401,9 +401,9 @@ fn provider_actions(
     cwd: &str,
     resolver: &Resolver,
 ) -> Vec<Action> {
-    let term = |id: String, label: String, argv: Vec<String>| -> Action {
+    let term_in = |id: String, label: String, argv: Vec<String>, at: &str| -> Action {
         let hint = argv.join(" ");
-        let (p, a, c) = terminalize(&argv, cwd, resolver);
+        let (p, a, c) = terminalize(&argv, at, resolver);
         Action {
             id,
             label,
@@ -417,13 +417,17 @@ fn provider_actions(
             client_side: false,
         }
     };
+    let term = |id: String, label: String, argv: Vec<String>| term_in(id, label, argv, cwd);
 
     let prov_icon = match name {
         "npm-scripts" => "npm",
         "cargo" => "rust",
-        "go" => "go",
+        "go" | "go-work" => "go",
         "python" => "python",
         "compose" => "docker",
+        "dotnet" => "dotnet",
+        "maven-modules" => "java",
+        "gradle-modules" | "flutter-android" => "gradle",
         _ => "run",
     };
 
@@ -476,19 +480,25 @@ fn provider_actions(
             let Some(py) = &proj.python else {
                 return Vec::new();
             };
+
+            // Prefer the project's own venv interpreter (absolute, so it works
+            // whatever the terminal's cwd/shell), else a bare `python`.
+            let python: String = py
+                .venv
+                .as_deref()
+                .map(|v| {
+                    let rel = if cfg!(windows) {
+                        "Scripts/python.exe"
+                    } else {
+                        "bin/python"
+                    };
+                    proj.dir.join(v).join(rel).to_string_lossy().into_owned()
+                })
+                .unwrap_or_else(|| "python".to_string());
+
             let mut v = Vec::new();
-            if py.requirements {
-                v.push(term(
-                    format!("py:{ns}:pip"),
-                    "pip install -r requirements.txt".into(),
-                    vec![
-                        "pip".into(),
-                        "install".into(),
-                        "-r".into(),
-                        "requirements.txt".into(),
-                    ],
-                ));
-            }
+
+            // Install / sync dependencies.
             match py.runner.as_deref() {
                 Some("uv") => v.push(term(
                     format!("py:{ns}:uv"),
@@ -500,8 +510,60 @@ fn provider_actions(
                     "poetry install".into(),
                     vec!["poetry".into(), "install".into()],
                 )),
+                Some("pipenv") => v.push(term(
+                    format!("py:{ns}:pipenv"),
+                    "pipenv install".into(),
+                    vec!["pipenv".into(), "install".into()],
+                )),
+                Some("pdm") => v.push(term(
+                    format!("py:{ns}:pdm"),
+                    "pdm install".into(),
+                    vec!["pdm".into(), "install".into()],
+                )),
+                _ if py.requirements => v.push(term(
+                    format!("py:{ns}:pip"),
+                    "pip install -r requirements.txt".into(),
+                    vec![
+                        python.clone(),
+                        "-m".into(),
+                        "pip".into(),
+                        "install".into(),
+                        "-r".into(),
+                        "requirements.txt".into(),
+                    ],
+                )),
                 _ => {}
             }
+
+            // Django.
+            if py.manage_py {
+                for sub in ["runserver", "migrate", "test"] {
+                    v.push(term(
+                        format!("py:{ns}:manage:{sub}"),
+                        format!("python manage.py {sub}"),
+                        vec![python.clone(), "manage.py".into(), sub.into()],
+                    ));
+                }
+            }
+
+            // pytest.
+            if py.pytest {
+                v.push(term(
+                    format!("py:{ns}:pytest"),
+                    "pytest".into(),
+                    vec![python.clone(), "-m".into(), "pytest".into()],
+                ));
+            }
+
+            // Run the obvious entry point.
+            if let Some(entry) = &py.entry {
+                v.push(term(
+                    format!("py:{ns}:run"),
+                    format!("python {entry}"),
+                    vec![python.clone(), entry.clone()],
+                ));
+            }
+
             v
         }
         "compose" => ["up", "up -d", "down", "logs -f"]
@@ -516,6 +578,140 @@ fn provider_actions(
                 )
             })
             .collect(),
+        "dotnet" => {
+            let mut used = std::collections::HashSet::new();
+            let mut v = Vec::new();
+            for u in crate::dotnet::units(&proj.dir, &proj.files) {
+                let p = u.path.to_string_lossy().into_owned();
+                let mut key = slug(&u.name);
+                while !used.insert(key.clone()) {
+                    key.push('_');
+                }
+                v.push(term(
+                    format!("dotnet:{ns}:build:{key}"),
+                    format!("dotnet build · {}", u.name),
+                    vec!["dotnet".into(), "build".into(), p.clone()],
+                ));
+                v.push(term(
+                    format!("dotnet:{ns}:run:{key}"),
+                    format!("dotnet run · {}", u.name),
+                    vec![
+                        "dotnet".into(),
+                        "run".into(),
+                        "--project".into(),
+                        p.clone(),
+                    ],
+                ));
+                if u.is_test {
+                    v.push(term(
+                        format!("dotnet:{ns}:test:{key}"),
+                        format!("dotnet test · {}", u.name),
+                        vec!["dotnet".into(), "test".into(), p],
+                    ));
+                }
+            }
+            v
+        }
+        // Workspace manifests that name modules living elsewhere: one build/test
+        // per module, run from *that* module's directory.
+        "go-work" => crate::gowork::modules(&proj.dir)
+            .into_iter()
+            .flat_map(|(m, dir)| {
+                let at = dir.to_string_lossy().into_owned();
+                let k = slug(&m);
+                [
+                    term_in(
+                        format!("gowork:{ns}:{k}:build"),
+                        format!("go build · {m}"),
+                        vec!["go".into(), "build".into(), "./...".into()],
+                        &at,
+                    ),
+                    term_in(
+                        format!("gowork:{ns}:{k}:test"),
+                        format!("go test · {m}"),
+                        vec!["go".into(), "test".into(), "./...".into()],
+                        &at,
+                    ),
+                ]
+            })
+            .collect(),
+        "maven-modules" => crate::maven::modules(&proj.dir)
+            .into_iter()
+            .flat_map(|(m, dir)| {
+                let at = dir.to_string_lossy().into_owned();
+                let k = slug(&m);
+                [
+                    term_in(
+                        format!("mvnmod:{ns}:{k}:compile"),
+                        format!("mvn compile · {m}"),
+                        vec!["mvn".into(), "-B".into(), "compile".into()],
+                        &at,
+                    ),
+                    term_in(
+                        format!("mvnmod:{ns}:{k}:test"),
+                        format!("mvn test · {m}"),
+                        vec!["mvn".into(), "-B".into(), "test".into()],
+                        &at,
+                    ),
+                ]
+            })
+            .collect(),
+        // Gradle is root-centric: `gradle :path:proj:task` from the settings dir.
+        "gradle-modules" => crate::gradle::projects(&proj.dir)
+            .into_iter()
+            .flat_map(|(m, gpath)| {
+                let k = slug(&m);
+                [
+                    term(
+                        format!("gradlemod:{ns}:{k}:build"),
+                        format!("gradle {gpath}:build"),
+                        vec!["gradle".into(), format!("{gpath}:build")],
+                    ),
+                    term(
+                        format!("gradlemod:{ns}:{k}:test"),
+                        format!("gradle {gpath}:test"),
+                        vec!["gradle".into(), format!("{gpath}:test")],
+                    ),
+                ]
+            })
+            .collect(),
+        // A Flutter app's Gradle project lives one level down, in `android/` —
+        // invisible to `gradle-modules` (which only checks the project's own
+        // top-level files). Point the same parser at that subdir instead. Uses
+        // the bundled `gradlew` wrapper when present (the common case for
+        // Flutter, which rarely has a global `gradle` on PATH), else falls
+        // back to PATH. Silently empty when there's no `android/` — nothing to
+        // gate on beyond that.
+        "flutter-android" => {
+            let android_dir = proj.dir.join("android");
+            let wrapper_name = if cfg!(windows) { "gradlew.bat" } else { "gradlew" };
+            let gradle_cmd = if android_dir.join(wrapper_name).is_file() {
+                android_dir.join(wrapper_name).to_string_lossy().into_owned()
+            } else {
+                "gradle".to_string()
+            };
+            let at = android_dir.to_string_lossy().into_owned();
+            crate::gradle::projects(&android_dir)
+                .into_iter()
+                .flat_map(|(m, gpath)| {
+                    let k = slug(&m);
+                    [
+                        term_in(
+                            format!("flutterandroid:{ns}:{k}:build"),
+                            format!("gradle {gpath}:build (android)"),
+                            vec![gradle_cmd.clone(), format!("{gpath}:build")],
+                            &at,
+                        ),
+                        term_in(
+                            format!("flutterandroid:{ns}:{k}:test"),
+                            format!("gradle {gpath}:test (android)"),
+                            vec![gradle_cmd.clone(), format!("{gpath}:test")],
+                            &at,
+                        ),
+                    ]
+                })
+                .collect()
+        }
         _ => Vec::new(),
     };
 
@@ -555,112 +751,134 @@ fn matched_files(m: &MatchSpec, files: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// `None` = the rule passes its machine-level gates; `Some(reason)` = it can't
+/// fire anywhere on this machine/config (disabled, wrong OS, a missing
+/// `requires:` binary, or an unresolved `needs:` program).
+fn rule_gate(rule: &Rule, resolver: &Resolver) -> Option<String> {
+    if rule.disable.is_some() {
+        return Some("disabled".into());
+    }
+    if !os_matches(rule.when.as_deref()) {
+        return Some(format!("os ≠ {}", rule.when.clone().unwrap_or_default()));
+    }
+    if let Some(b) = rule.requires.iter().find(|b| which(b).is_none()) {
+        return Some(format!("requires `{b}` — not on PATH"));
+    }
+    if let Some(k) = rule.needs.iter().find(|k| resolver.resolve(k).is_none()) {
+        return Some(format!("needs `{k}` — unresolved"));
+    }
+    None
+}
+
+/// Actions produced by one rule against one project, assuming [`rule_gate`] has
+/// already passed. Empty when the rule's globs hit nothing in the project.
+fn rule_project_actions(
+    rule: &Rule,
+    proj: &Project,
+    repo: &Repo,
+    resolver: &Resolver,
+) -> Vec<Action> {
+    let matched = matched_files(&rule.match_, &proj.files);
+    if matched.is_empty() {
+        return Vec::new();
+    }
+
+    let group = if proj.rel.is_empty() {
+        "Detected".to_string()
+    } else {
+        format!("Detected · {}", proj.rel)
+    };
+    let ns = if proj.rel.is_empty() {
+        "root".to_string()
+    } else {
+        proj.rel.replace(['/', '\\'], "-")
+    };
+    let proj_dir = proj.dir.to_string_lossy().into_owned();
+    let proj_name = if proj.rel.is_empty() {
+        repo.name.clone()
+    } else {
+        proj.rel
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(&proj.rel)
+            .to_string()
+    };
+    let cwd = match rule.scope {
+        Scope::Repo => repo.path.clone(),
+        Scope::Project => proj_dir.clone(),
+    };
+
+    if let Some(provider) = &rule.provider {
+        return provider_actions(provider, rule, proj, &group, &ns, &cwd, resolver);
+    }
+
+    let mut out = Vec::new();
+    let targets: Vec<Option<PathBuf>> = if rule.per_file {
+        matched.iter().map(|f| Some(proj.dir.join(f))).collect()
+    } else {
+        vec![None]
+    };
+    for file in targets {
+        let fref = file.as_deref();
+        let t = Tmpl {
+            repo: &repo.path,
+            path: &cwd,
+            rel: &proj.rel,
+            name: &proj_name,
+            file: fref,
+            resolver,
+        };
+        for (ai, ra) in rule.actions.iter().enumerate() {
+            let base = ra.id.clone().unwrap_or_else(|| {
+                format!("{}-{ai}", rule.id.clone().unwrap_or_else(|| slug(&ra.name)))
+            });
+            let id = match fref.and_then(|f| f.file_stem()).and_then(|s| s.to_str()) {
+                Some(stem) => format!("{ns}:{base}:{stem}"),
+                None => format!("{ns}:{base}"),
+            };
+            if let Some(a) = build_action(ra, id, &group, &cwd, &t, resolver) {
+                out.push(a);
+            }
+        }
+    }
+    out
+}
+
+fn universal_actions(config: &Config, repo: &Repo, resolver: &Resolver) -> Vec<Action> {
+    config
+        .universal
+        .actions
+        .iter()
+        .filter_map(|ra| {
+            let id = ra.action_id();
+            let mut ra = ra.clone();
+            ra.default = ra.default || config.universal.default.as_deref() == Some(&id);
+            let t = Tmpl {
+                repo: &repo.path,
+                path: &repo.path,
+                rel: "",
+                name: &repo.name,
+                file: None,
+                resolver,
+            };
+            build_action(&ra, id, "General", &repo.path, &t, resolver)
+        })
+        .collect()
+}
+
 pub fn evaluate(config: &Config, ctx: &RepoContext, repo: &Repo) -> Vec<Action> {
     let resolver = Resolver::new(&config.programs);
-    let mut out: Vec<Action> = Vec::new();
 
     // Universal actions first — "open in terminal / editor / file manager" is the
     // common case; the detected per-ecosystem stuff sits below it.
-    for ra in &config.universal.actions {
-        let id = ra.action_id();
-        let is_default = ra.default || config.universal.default.as_deref() == Some(&id);
-        let mut ra = ra.clone();
-        ra.default = is_default;
-        let t = Tmpl {
-            repo: &repo.path,
-            path: &repo.path,
-            rel: "",
-            name: &repo.name,
-            file: None,
-            resolver: &resolver,
-        };
-        if let Some(a) = build_action(&ra, id, "General", &repo.path, &t, &resolver) {
-            out.push(a);
-        }
-    }
+    let mut out = universal_actions(config, repo, &resolver);
 
     for proj in &ctx.projects {
-        let group = if proj.rel.is_empty() {
-            "Detected".to_string()
-        } else {
-            format!("Detected · {}", proj.rel)
-        };
-        let ns = if proj.rel.is_empty() {
-            "root".to_string()
-        } else {
-            proj.rel.replace(['/', '\\'], "-")
-        };
-        let proj_dir = proj.dir.to_string_lossy().into_owned();
-        let proj_name = if proj.rel.is_empty() {
-            repo.name.clone()
-        } else {
-            proj.rel
-                .rsplit(['/', '\\'])
-                .next()
-                .unwrap_or(&proj.rel)
-                .to_string()
-        };
-
         for rule in &config.rules {
-            if rule.disable.is_some() || !os_matches(rule.when.as_deref()) {
+            if rule_gate(rule, &resolver).is_some() {
                 continue;
             }
-            if rule.requires.iter().any(|b| which(b).is_none()) {
-                continue;
-            }
-            if rule.needs.iter().any(|k| resolver.resolve(k).is_none()) {
-                continue;
-            }
-
-            let matched = matched_files(&rule.match_, &proj.files);
-            if matched.is_empty() {
-                continue;
-            }
-
-            let cwd = match rule.scope {
-                Scope::Repo => repo.path.clone(),
-                Scope::Project => proj_dir.clone(),
-            };
-
-            if let Some(provider) = &rule.provider {
-                out.extend(provider_actions(
-                    provider, rule, proj, &group, &ns, &cwd, &resolver,
-                ));
-                continue;
-            }
-
-            let targets: Vec<Option<PathBuf>> = if rule.per_file {
-                matched.iter().map(|f| Some(proj.dir.join(f))).collect()
-            } else {
-                vec![None]
-            };
-
-            for file in targets {
-                let fref = file.as_deref();
-                let t = Tmpl {
-                    repo: &repo.path,
-                    path: &cwd,
-                    rel: &proj.rel,
-                    name: &proj_name,
-                    file: fref,
-                    resolver: &resolver,
-                };
-                for (ai, ra) in rule.actions.iter().enumerate() {
-                    let base = ra.id.clone().unwrap_or_else(|| {
-                        format!(
-                            "{}-{ai}",
-                            rule.id.clone().unwrap_or_else(|| slug(&ra.name))
-                        )
-                    });
-                    let id = match fref.and_then(|f| f.file_stem()).and_then(|s| s.to_str()) {
-                        Some(stem) => format!("{ns}:{base}:{stem}"),
-                        None => format!("{ns}:{base}"),
-                    };
-                    if let Some(a) = build_action(ra, id, &group, &cwd, &t, &resolver) {
-                        out.push(a);
-                    }
-                }
-            }
+            out.extend(rule_project_actions(rule, proj, repo, &resolver));
         }
     }
 
@@ -669,6 +887,112 @@ pub fn evaluate(config: &Config, ctx: &RepoContext, repo: &Repo) -> Vec<Action> 
 
 pub fn build_actions(repo: &Repo, ctx: &RepoContext, config: &Config) -> Vec<Action> {
     evaluate(config, ctx, repo)
+}
+
+// --- per-repo rule trace (settings "trace a repo" view) ------------------
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoTrace {
+    pub repo_name: String,
+    pub repo_path: String,
+    /// Universal action ids that resolve for this repo.
+    pub universal: Vec<String>,
+    /// One entry per configured rule, in config order.
+    pub rules: Vec<RuleTrace>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleTrace {
+    pub id: String,
+    /// The glob(s) the rule matches on.
+    pub globs: Vec<String>,
+    /// "" when the rule resolved; otherwise why it produced nothing — a machine
+    /// gate ("disabled", "needs `x` — unresolved", …) or "no matching files".
+    pub gate: String,
+    /// Per-project results — populated only when `gate` is "".
+    pub hits: Vec<ProjectHit>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectHit {
+    /// "" = repo root, else the sub-project's relative path.
+    pub project: String,
+    /// Files in that project the rule's globs matched.
+    pub matched: Vec<String>,
+    /// Action ids the rule produced there.
+    pub produced: Vec<String>,
+}
+
+/// Explain, rule by rule, what one repo produces and why — the data behind the
+/// settings "trace a repo" view. Shares [`rule_gate`] and [`rule_project_actions`]
+/// with [`evaluate`], so its verdicts match what the action menu actually shows.
+pub fn trace(config: &Config, ctx: &RepoContext, repo: &Repo) -> RepoTrace {
+    let resolver = Resolver::new(&config.programs);
+
+    let universal = universal_actions(config, repo, &resolver)
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+
+    let rules = config
+        .rules
+        .iter()
+        .map(|rule| {
+            let id = rule.id.clone().unwrap_or_else(|| "(unnamed)".into());
+            let globs = rule.match_.globs().iter().map(|s| s.to_string()).collect();
+
+            if let Some(reason) = rule_gate(rule, &resolver) {
+                return RuleTrace {
+                    id,
+                    globs,
+                    gate: reason,
+                    hits: Vec::new(),
+                };
+            }
+
+            let hits: Vec<ProjectHit> = ctx
+                .projects
+                .iter()
+                .filter_map(|proj| {
+                    let matched = matched_files(&rule.match_, &proj.files);
+                    if matched.is_empty() {
+                        return None;
+                    }
+                    let produced = rule_project_actions(rule, proj, repo, &resolver)
+                        .into_iter()
+                        .map(|a| a.id)
+                        .collect();
+                    Some(ProjectHit {
+                        project: proj.rel.clone(),
+                        matched,
+                        produced,
+                    })
+                })
+                .collect();
+
+            let gate = if hits.is_empty() {
+                "no matching files in this repo".to_string()
+            } else {
+                String::new()
+            };
+            RuleTrace {
+                id,
+                globs,
+                gate,
+                hits,
+            }
+        })
+        .collect();
+
+    RepoTrace {
+        repo_name: repo.name.clone(),
+        repo_path: repo.path.clone(),
+        universal,
+        rules,
+    }
 }
 
 // --- read-only summary (settings "what's active" view) --------------------
@@ -894,5 +1218,277 @@ mod tests {
         for want in ["cargo:root:run", "cargo:root:build", "cargo:root:test"] {
             assert!(acts.iter().any(|a| a.id == want), "missing {want}");
         }
+    }
+
+    #[test]
+    fn dotnet_provider_emits_build_run_and_test_per_project() {
+        let d = std::env::temp_dir().join(format!(
+            "dp-rules-dotnet-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            d.join("App.sln"),
+            "Project(\"{X}\") = \"App\", \"App.csproj\", \"{Y}\"\n\
+             Project(\"{X}\") = \"App.Tests\", \"App.Tests.csproj\", \"{Z}\"\n",
+        )
+        .unwrap();
+
+        let proj = Project {
+            dir: d.clone(),
+            files: vec!["App.sln".into()],
+            ..Default::default()
+        };
+        let programs = std::collections::BTreeMap::new();
+        let r = Resolver::new(&programs);
+        let cwd = d.to_string_lossy().into_owned();
+        let acts = provider_actions(
+            "dotnet",
+            &crate::config::Rule::default(),
+            &proj,
+            "Detected",
+            "root",
+            &cwd,
+            &r,
+        );
+
+        assert_eq!(
+            acts.iter()
+                .filter(|a| a.id.starts_with("dotnet:root:build:"))
+                .count(),
+            2
+        );
+        assert_eq!(
+            acts.iter()
+                .filter(|a| a.id.starts_with("dotnet:root:run:"))
+                .count(),
+            2
+        );
+        // only the `.Tests` project gets a `dotnet test` action
+        assert_eq!(
+            acts.iter()
+                .filter(|a| a.id.starts_with("dotnet:root:test:"))
+                .count(),
+            1
+        );
+        assert!(acts.iter().any(|a| a.label == "dotnet build · App"));
+        assert!(acts.iter().any(|a| a.label == "dotnet test · App.Tests"));
+        assert!(acts.iter().all(|a| a.icon.as_deref() == Some("dotnet")));
+
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn workspace_providers_emit_one_action_set_per_module() {
+        let d = std::env::temp_dir().join(format!(
+            "dp-rules-ws-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("go.work"), "go 1.22\nuse ./api\nuse ./worker\n").unwrap();
+        std::fs::write(
+            d.join("pom.xml"),
+            "<project><modules><module>svc-a</module><module>svc-b</module></modules></project>",
+        )
+        .unwrap();
+        std::fs::write(
+            d.join("settings.gradle"),
+            "include ':app', 'core:data'\n",
+        )
+        .unwrap();
+
+        let proj = Project {
+            dir: d.clone(),
+            ..Default::default()
+        };
+        let programs = std::collections::BTreeMap::new();
+        let r = Resolver::new(&programs);
+        let cwd = d.to_string_lossy().into_owned();
+        let call = |name: &str| {
+            provider_actions(
+                name,
+                &crate::config::Rule::default(),
+                &proj,
+                "Detected",
+                "root",
+                &cwd,
+                &r,
+            )
+        };
+
+        let go = call("go-work");
+        assert_eq!(go.len(), 4); // build + test for api and worker
+        assert!(go.iter().any(|a| a.label == "go build · api"));
+        assert!(go.iter().all(|a| a.icon.as_deref() == Some("go")));
+
+        let mvn = call("maven-modules");
+        assert_eq!(mvn.len(), 4);
+        assert!(mvn.iter().any(|a| a.label == "mvn test · svc-b"));
+        assert!(mvn.iter().all(|a| a.icon.as_deref() == Some("java")));
+
+        let gr = call("gradle-modules");
+        assert_eq!(gr.len(), 4); // build + test for :app and :core:data
+        assert!(gr.iter().any(|a| a.label == "gradle :core:data:build"));
+        assert!(gr.iter().all(|a| a.icon.as_deref() == Some("gradle")));
+
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn python_provider_uses_venv_interpreter_and_django_pytest_run() {
+        use crate::inspect::PythonInfo;
+        let cfg = bundled_defaults();
+        let proj = Project {
+            rel: String::new(),
+            dir: if cfg!(windows) {
+                std::path::PathBuf::from("C:\\svc")
+            } else {
+                std::path::PathBuf::from("/svc")
+            },
+            files: vec!["requirements.txt".into(), "manage.py".into()],
+            python: Some(PythonInfo {
+                requirements: true,
+                venv: Some(".venv".into()),
+                manage_py: true,
+                entry: Some("main.py".into()),
+                pytest: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let acts = build_actions(&repo(), &ctx_one(proj), &cfg);
+
+        let py_hint = acts
+            .iter()
+            .find(|a| a.id == "py:root:pip")
+            .expect("pip install action")
+            .hint
+            .clone();
+        // The venv interpreter, not a bare `python`.
+        assert!(py_hint.contains(".venv"), "{py_hint}");
+        assert!(py_hint.ends_with("-m pip install -r requirements.txt"), "{py_hint}");
+
+        for want in ["py:root:manage:runserver", "py:root:manage:migrate", "py:root:pytest", "py:root:run"] {
+            assert!(acts.iter().any(|a| a.id == want), "missing {want}");
+        }
+        assert!(acts
+            .iter()
+            .filter(|a| a.id.starts_with("py:root:"))
+            .all(|a| a.icon.as_deref() == Some("python")));
+    }
+
+    #[test]
+    fn flutter_android_reaches_into_the_android_subdir() {
+        let d = std::env::temp_dir().join(format!(
+            "dp-rules-flutter-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(d.join("android")).unwrap();
+        std::fs::write(d.join("pubspec.yaml"), "name: child_flutter\n").unwrap();
+        std::fs::write(
+            d.join("android").join("settings.gradle.kts"),
+            "include(\":app\")\n",
+        )
+        .unwrap();
+
+        let proj = Project {
+            dir: d.clone(),
+            ..Default::default()
+        };
+        let programs = std::collections::BTreeMap::new();
+        let r = Resolver::new(&programs);
+        let cwd = d.to_string_lossy().into_owned();
+        let acts = provider_actions(
+            "flutter-android",
+            &crate::config::Rule::default(),
+            &proj,
+            "Detected",
+            "root",
+            &cwd,
+            &r,
+        );
+
+        assert_eq!(acts.len(), 2); // build + test for :app
+        assert!(acts.iter().all(|a| a.icon.as_deref() == Some("gradle")));
+        // no bundled wrapper in this fixture -> falls back to plain "gradle".
+        // `hint` is the pre-terminalize argv, so it's the same on every OS.
+        assert!(acts.iter().any(|a| a.hint == "gradle :app:build"));
+        assert!(acts.iter().any(|a| a.hint == "gradle :app:test"));
+        // The android/ dir made it through as the working directory — on
+        // Windows that's baked into the terminal wrapper's `-d` arg rather
+        // than `Action.cwd`.
+        let android_str = d.join("android").to_string_lossy().into_owned();
+        assert!(acts
+            .iter()
+            .all(|a| a.cwd.as_deref() == Some(android_str.as_str())
+                || a.args.contains(&android_str)));
+
+        // A Flutter project with no android/ dir at all yields nothing (no
+        // panic, no crash) — the rule is self-gating.
+        let no_android = std::env::temp_dir().join(format!(
+            "dp-rules-flutter-bare-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&no_android).unwrap();
+        let bare = Project {
+            dir: no_android.clone(),
+            ..Default::default()
+        };
+        assert!(provider_actions(
+            "flutter-android",
+            &crate::config::Rule::default(),
+            &bare,
+            "Detected",
+            "root",
+            &cwd,
+            &r
+        )
+        .is_empty());
+
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::remove_dir_all(&no_android);
+    }
+
+    #[test]
+    fn trace_explains_fired_and_idle_rules() {
+        let cfg = bundled_defaults();
+        let proj = Project {
+            files: vec!["Cargo.toml".into()],
+            has_cargo: true,
+            ..Default::default()
+        };
+        let t = trace(&cfg, &ctx_one(proj), &repo());
+
+        assert_eq!(t.repo_name, "demo");
+        assert!(t.universal.iter().any(|id| id == "terminal"));
+
+        // The Cargo rule fires against the root and lists its action ids.
+        let cargo = t
+            .rules
+            .iter()
+            .find(|r| r.globs.iter().any(|g| g.eq_ignore_ascii_case("Cargo.toml")))
+            .expect("defaults carry a Cargo.toml rule");
+        assert_eq!(cargo.gate, "");
+        assert!(cargo
+            .hits
+            .iter()
+            .any(|h| h.produced.iter().any(|id| id.starts_with("cargo:root:"))));
+
+        // …and a bare Rust repo leaves plenty of rules idle, each with a reason.
+        let idle = t.rules.iter().find(|r| !r.gate.is_empty()).unwrap();
+        assert!(idle.hits.is_empty());
+        assert!(!idle.gate.is_empty());
     }
 }

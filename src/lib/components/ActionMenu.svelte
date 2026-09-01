@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import type { Action, MenuItem } from "../types";
   import { icons, type Glyph } from "../icons";
+  import { middleTruncate } from "../text";
   import Highlight from "./Highlight.svelte";
   import ClearButton from "./ClearButton.svelte";
 
@@ -160,8 +161,9 @@
           <span class="flex-1 truncate text-[13px] text-white/90">
             <Highlight text={item.action.label} indices={item.positions} />
           </span>
-          <span class="shrink-0 truncate font-mono text-[11px] text-white/35"
-            >{item.action.hint}</span
+          <span
+            class="shrink-0 overflow-hidden whitespace-nowrap font-mono text-[11px] text-white/35"
+            title={item.action.hint}>{middleTruncate(item.action.hint, 46)}</span
           >
         {/if}
       </button>

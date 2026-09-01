@@ -28,6 +28,24 @@
     outline: none;
     border: none;
   }
+
+  /* Dropdowns: dark-themed to match the panel instead of the OS-native white.
+     The closed control gets a custom chevron; the open list is styled per
+     <option> (background/colour is the only reliably stylable part). */
+  select {
+    color-scheme: dark;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%23ffffff' stroke-opacity='0.45' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.55rem center;
+    background-size: 12px;
+  }
+
+  select option,
+  select optgroup {
+    background-color: rgb(28 28 34);
+    color: rgb(255 255 255 / 0.9);
+  }
 }
 
 /* Thin, unobtrusive scrollbar for the results list. */

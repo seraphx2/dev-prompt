@@ -4,13 +4,15 @@
     configSummary,
     getAutostart,
     getConfig,
+    listRepos,
     openRulesFile,
     pickDirectories,
     reloadConfig,
+    repoRuleTrace,
     saveConfig,
     setAutostart,
   } from "../ipc";
-  import type { ConfigSummary } from "../types";
+  import type { ConfigSummary, RepoTrace } from "../types";
   import { icons, iconKeys } from "../icons";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { currentVersion, installUpdate } from "../updater";
@@ -27,6 +29,8 @@
   let roots = $state<string[]>([]);
   let ttlMin = $state(15);
   let scanDepth = $state(4);
+  // Bound to the <select>; serialises to `true` / `false` / `"auto"` on save.
+  let collapseNested = $state<"true" | "false" | "auto">("true");
   let autostart = $state(false);
   let loaded = $state(false);
   let busy = $state(false);
@@ -47,6 +51,29 @@
 
   onDestroy(() => clearTimeout(msgTimer));
   let summary = $state<ConfigSummary | null>(null);
+
+  // "Trace a repo" — pick a repo, see rule-by-rule why it does / doesn't resolve.
+  let traceRepos = $state<{ name: string; path: string }[]>([]);
+  let tracePath = $state("");
+  let repoTrace = $state<RepoTrace | null>(null);
+  let traceBusy = $state(false);
+  let traceAll = $state(false);
+
+  async function runTrace() {
+    if (!tracePath) {
+      repoTrace = null;
+      return;
+    }
+    traceBusy = true;
+    try {
+      repoTrace = await repoRuleTrace(tracePath);
+    } catch (e) {
+      repoTrace = null;
+      note(`${e}`, true);
+    } finally {
+      traceBusy = false;
+    }
+  }
 
   const base = (p: string) => p.split(/[\\/]/).pop() || p;
 
@@ -71,6 +98,14 @@
       appVersion = await currentVersion();
     } catch {
       appVersion = "";
+    }
+    try {
+      traceRepos = (await listRepos()).repos.map((r) => ({
+        name: r.name,
+        path: r.path,
+      }));
+    } catch {
+      traceRepos = [];
     }
     void pollUpdates(true);
   });
@@ -178,13 +213,17 @@
   function applyConfig(c: {
     hotkey: string;
     roots: string[];
-    scan: { max_depth: number };
+    scan: { max_depth: number; collapse_nested?: boolean | "auto" };
     cache_ttl_secs: number;
   }) {
     hotkey = c.hotkey;
     roots = c.roots.length ? [...c.roots] : [""];
     ttlMin = Math.max(1, Math.round(c.cache_ttl_secs / 60));
     scanDepth = Math.max(1, c.scan?.max_depth ?? 4);
+    collapseNested =
+      c.scan?.collapse_nested === undefined
+        ? "true"
+        : (String(c.scan.collapse_nested) as "true" | "false" | "auto");
   }
 
   async function reload() {
@@ -222,6 +261,7 @@
         roots: roots.map((r) => r.trim()).filter(Boolean),
         cache_ttl_secs: Math.max(60, Math.round(ttlMin * 60)),
         scan_max_depth: Math.max(1, Math.round(scanDepth)),
+        collapse_nested: collapseNested === "auto" ? "auto" : collapseNested === "true",
       });
       note("Saved.");
       onsaved();
@@ -339,7 +379,7 @@
               onclick={() => (confirmIdx = i)}
               aria-label="Remove from scan list"
               title="Remove from scan list"
-              class="shrink-0 rounded border border-hair px-2 text-white/40 hover:bg-white/10 hover:text-white/70"
+              class="shrink-0 rounded border border-hair px-2 py-1 text-[11px] text-white/40 hover:bg-white/10 hover:text-white/70"
             >
               ×
             </button>
@@ -386,6 +426,19 @@
         />
       </label>
     </div>
+
+    <label class="block space-y-1.5">
+      <span class="text-orange-400">Repo inside another repo</span>
+      <select
+        bind:value={collapseNested}
+        title="What to do when a discovered repo sits inside another one"
+        class="w-72 rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+      >
+        <option value="true">Collapse into the parent (default)</option>
+        <option value="false">List every one separately</option>
+        <option value="auto">Auto — keep independent checkouts only</option>
+      </select>
+    </label>
 
     <label class="flex items-center gap-2">
       <input
@@ -455,21 +508,52 @@
         </summary>
 
         <div class="space-y-3 border-t border-hair px-3 py-3 font-mono text-[11px]">
-          <div>
-            <div class="mb-1 font-semibold uppercase tracking-wide text-sky-300/80">
-              programs
+          <div class="grid grid-cols-2 gap-x-6 gap-y-3">
+            <div>
+              <div
+                class="mb-1 font-semibold uppercase tracking-wide text-sky-300/80"
+              >
+                programs
+              </div>
+              <div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+                {#each summary.programs as p (p.key)}
+                  <span class="text-white/70">{p.key}</span>
+                  {#if p.resolved}
+                    <span class="truncate text-emerald-300/70" title={p.resolved}
+                      >{base(p.resolved)}</span
+                    >
+                  {:else}
+                    <span class="text-amber-300/70">not found</span>
+                  {/if}
+                {/each}
+              </div>
             </div>
-            <div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-              {#each summary.programs as p (p.key)}
-                <span class="text-white/70">{p.key}</span>
-                {#if p.resolved}
-                  <span class="truncate text-emerald-300/70" title={p.resolved}
-                    >{base(p.resolved)}</span
-                  >
-                {:else}
-                  <span class="text-amber-300/70">not found</span>
-                {/if}
-              {/each}
+
+            <div>
+              <div
+                class="mb-1 font-semibold uppercase tracking-wide text-sky-300/80"
+              >
+                universal
+              </div>
+              <div class="space-y-0.5">
+                {#each summary.universal as u (u.id)}
+                  <div class="flex items-baseline gap-2">
+                    <span
+                      class={u.disabled
+                        ? "text-white/40"
+                        : u.available
+                          ? "text-white/70"
+                          : "text-white/30"}>{u.label}</span
+                    >
+                    {#if u.default}<span class="text-sky-300/70">default</span>{/if}
+                    {#if u.disabled}
+                      <span class="text-red-300/70">disabled</span>
+                    {:else if !u.available}
+                      <span class="text-amber-300/70">unavailable</span>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
             </div>
           </div>
 
@@ -499,34 +583,98 @@
               {/each}
             </div>
           </div>
-
-          <div>
-            <div class="mb-1 font-semibold uppercase tracking-wide text-sky-300/80">
-              universal
-            </div>
-            <div class="space-y-0.5">
-              {#each summary.universal as u (u.id)}
-                <div class="flex items-baseline gap-2">
-                  <span
-                    class={u.disabled
-                      ? "text-white/40"
-                      : u.available
-                        ? "text-white/70"
-                        : "text-white/30"}>{u.label}</span
-                  >
-                  {#if u.default}<span class="text-sky-300/70">default</span>{/if}
-                  {#if u.disabled}
-                    <span class="text-red-300/70">disabled</span>
-                  {:else if !u.available}
-                    <span class="text-amber-300/70">unavailable</span>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          </div>
         </div>
       </details>
     {/if}
+
+    <details class="rounded border border-hair">
+      <summary
+        class="cursor-pointer select-none px-3 py-2 text-[12px] text-white/60 hover:text-white/90"
+      >
+        Trace a repo
+        <span class="text-white/25">· why each rule does or doesn't resolve</span>
+      </summary>
+
+      <div class="space-y-3 border-t border-hair px-3 py-3 text-[11px]">
+        {#if !traceRepos.length}
+          <p class="text-white/40">
+            No repos indexed yet — add roots above and rescan, then reopen
+            Settings.
+          </p>
+        {:else}
+          <div class="flex items-center gap-3">
+            <select
+              bind:value={tracePath}
+              onchange={runTrace}
+              class="min-w-0 flex-1 rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+            >
+              <option value="">Pick a repo…</option>
+              {#each traceRepos as r (r.path)}
+                <option value={r.path}>{r.name}</option>
+              {/each}
+            </select>
+            <label class="flex shrink-0 items-center gap-1.5 text-white/50">
+              <input
+                type="checkbox"
+                bind:checked={traceAll}
+                class="h-3.5 w-3.5 accent-sky-500"
+              />
+              show idle rules
+            </label>
+          </div>
+
+          {#if traceBusy}
+            <p class="text-white/40">Evaluating…</p>
+          {:else if repoTrace}
+            {@const shown = traceAll
+              ? repoTrace.rules
+              : repoTrace.rules.filter((r) => r.gate === "")}
+            {#if repoTrace.universal.length}
+              <div class="font-mono">
+                <span
+                  class="font-semibold uppercase tracking-wide text-sky-300/80"
+                  >general</span
+                >
+                <span class="text-white/50"
+                  >{repoTrace.universal.join(", ")}</span
+                >
+              </div>
+            {/if}
+            <div class="space-y-1.5 font-mono">
+              {#each shown as r (r.id)}
+                <div>
+                  <div class="flex flex-wrap items-baseline gap-x-2">
+                    <span class={r.gate === "" ? "text-white/70" : "text-white/30"}
+                      >{r.id}</span
+                    >
+                    <span class="text-white/25">{r.globs.join(", ")}</span>
+                    {#if r.gate}
+                      <span class="text-amber-300/70">{r.gate}</span>
+                    {:else}
+                      <span class="text-emerald-300/70">✓ resolved</span>
+                    {/if}
+                  </div>
+                  {#each r.hits as h (h.project)}
+                    <div class="ml-3 text-white/45">
+                      {h.project || "root"}:
+                      <span class="text-white/30">{h.matched.join(", ")}</span>
+                      → {h.produced.length
+                        ? h.produced.join(", ")
+                        : "(no actions)"}
+                    </div>
+                  {/each}
+                </div>
+              {:else}
+                <p class="text-white/40">
+                  No rules resolved for this repo — only the general actions
+                  above.
+                </p>
+              {/each}
+            </div>
+          {/if}
+        {/if}
+      </div>
+    </details>
 
     <details class="rounded border border-hair">
       <summary
