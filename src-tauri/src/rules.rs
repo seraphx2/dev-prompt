@@ -555,112 +555,134 @@ fn matched_files(m: &MatchSpec, files: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// `None` = the rule passes its machine-level gates; `Some(reason)` = it can't
+/// fire anywhere on this machine/config (disabled, wrong OS, a missing
+/// `requires:` binary, or an unresolved `needs:` program).
+fn rule_gate(rule: &Rule, resolver: &Resolver) -> Option<String> {
+    if rule.disable.is_some() {
+        return Some("disabled".into());
+    }
+    if !os_matches(rule.when.as_deref()) {
+        return Some(format!("os ≠ {}", rule.when.clone().unwrap_or_default()));
+    }
+    if let Some(b) = rule.requires.iter().find(|b| which(b).is_none()) {
+        return Some(format!("requires `{b}` — not on PATH"));
+    }
+    if let Some(k) = rule.needs.iter().find(|k| resolver.resolve(k).is_none()) {
+        return Some(format!("needs `{k}` — unresolved"));
+    }
+    None
+}
+
+/// Actions produced by one rule against one project, assuming [`rule_gate`] has
+/// already passed. Empty when the rule's globs hit nothing in the project.
+fn rule_project_actions(
+    rule: &Rule,
+    proj: &Project,
+    repo: &Repo,
+    resolver: &Resolver,
+) -> Vec<Action> {
+    let matched = matched_files(&rule.match_, &proj.files);
+    if matched.is_empty() {
+        return Vec::new();
+    }
+
+    let group = if proj.rel.is_empty() {
+        "Detected".to_string()
+    } else {
+        format!("Detected · {}", proj.rel)
+    };
+    let ns = if proj.rel.is_empty() {
+        "root".to_string()
+    } else {
+        proj.rel.replace(['/', '\\'], "-")
+    };
+    let proj_dir = proj.dir.to_string_lossy().into_owned();
+    let proj_name = if proj.rel.is_empty() {
+        repo.name.clone()
+    } else {
+        proj.rel
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(&proj.rel)
+            .to_string()
+    };
+    let cwd = match rule.scope {
+        Scope::Repo => repo.path.clone(),
+        Scope::Project => proj_dir.clone(),
+    };
+
+    if let Some(provider) = &rule.provider {
+        return provider_actions(provider, rule, proj, &group, &ns, &cwd, resolver);
+    }
+
+    let mut out = Vec::new();
+    let targets: Vec<Option<PathBuf>> = if rule.per_file {
+        matched.iter().map(|f| Some(proj.dir.join(f))).collect()
+    } else {
+        vec![None]
+    };
+    for file in targets {
+        let fref = file.as_deref();
+        let t = Tmpl {
+            repo: &repo.path,
+            path: &cwd,
+            rel: &proj.rel,
+            name: &proj_name,
+            file: fref,
+            resolver,
+        };
+        for (ai, ra) in rule.actions.iter().enumerate() {
+            let base = ra.id.clone().unwrap_or_else(|| {
+                format!("{}-{ai}", rule.id.clone().unwrap_or_else(|| slug(&ra.name)))
+            });
+            let id = match fref.and_then(|f| f.file_stem()).and_then(|s| s.to_str()) {
+                Some(stem) => format!("{ns}:{base}:{stem}"),
+                None => format!("{ns}:{base}"),
+            };
+            if let Some(a) = build_action(ra, id, &group, &cwd, &t, resolver) {
+                out.push(a);
+            }
+        }
+    }
+    out
+}
+
+fn universal_actions(config: &Config, repo: &Repo, resolver: &Resolver) -> Vec<Action> {
+    config
+        .universal
+        .actions
+        .iter()
+        .filter_map(|ra| {
+            let id = ra.action_id();
+            let mut ra = ra.clone();
+            ra.default = ra.default || config.universal.default.as_deref() == Some(&id);
+            let t = Tmpl {
+                repo: &repo.path,
+                path: &repo.path,
+                rel: "",
+                name: &repo.name,
+                file: None,
+                resolver,
+            };
+            build_action(&ra, id, "General", &repo.path, &t, resolver)
+        })
+        .collect()
+}
+
 pub fn evaluate(config: &Config, ctx: &RepoContext, repo: &Repo) -> Vec<Action> {
     let resolver = Resolver::new(&config.programs);
-    let mut out: Vec<Action> = Vec::new();
 
     // Universal actions first — "open in terminal / editor / file manager" is the
     // common case; the detected per-ecosystem stuff sits below it.
-    for ra in &config.universal.actions {
-        let id = ra.action_id();
-        let is_default = ra.default || config.universal.default.as_deref() == Some(&id);
-        let mut ra = ra.clone();
-        ra.default = is_default;
-        let t = Tmpl {
-            repo: &repo.path,
-            path: &repo.path,
-            rel: "",
-            name: &repo.name,
-            file: None,
-            resolver: &resolver,
-        };
-        if let Some(a) = build_action(&ra, id, "General", &repo.path, &t, &resolver) {
-            out.push(a);
-        }
-    }
+    let mut out = universal_actions(config, repo, &resolver);
 
     for proj in &ctx.projects {
-        let group = if proj.rel.is_empty() {
-            "Detected".to_string()
-        } else {
-            format!("Detected · {}", proj.rel)
-        };
-        let ns = if proj.rel.is_empty() {
-            "root".to_string()
-        } else {
-            proj.rel.replace(['/', '\\'], "-")
-        };
-        let proj_dir = proj.dir.to_string_lossy().into_owned();
-        let proj_name = if proj.rel.is_empty() {
-            repo.name.clone()
-        } else {
-            proj.rel
-                .rsplit(['/', '\\'])
-                .next()
-                .unwrap_or(&proj.rel)
-                .to_string()
-        };
-
         for rule in &config.rules {
-            if rule.disable.is_some() || !os_matches(rule.when.as_deref()) {
+            if rule_gate(rule, &resolver).is_some() {
                 continue;
             }
-            if rule.requires.iter().any(|b| which(b).is_none()) {
-                continue;
-            }
-            if rule.needs.iter().any(|k| resolver.resolve(k).is_none()) {
-                continue;
-            }
-
-            let matched = matched_files(&rule.match_, &proj.files);
-            if matched.is_empty() {
-                continue;
-            }
-
-            let cwd = match rule.scope {
-                Scope::Repo => repo.path.clone(),
-                Scope::Project => proj_dir.clone(),
-            };
-
-            if let Some(provider) = &rule.provider {
-                out.extend(provider_actions(
-                    provider, rule, proj, &group, &ns, &cwd, &resolver,
-                ));
-                continue;
-            }
-
-            let targets: Vec<Option<PathBuf>> = if rule.per_file {
-                matched.iter().map(|f| Some(proj.dir.join(f))).collect()
-            } else {
-                vec![None]
-            };
-
-            for file in targets {
-                let fref = file.as_deref();
-                let t = Tmpl {
-                    repo: &repo.path,
-                    path: &cwd,
-                    rel: &proj.rel,
-                    name: &proj_name,
-                    file: fref,
-                    resolver: &resolver,
-                };
-                for (ai, ra) in rule.actions.iter().enumerate() {
-                    let base = ra.id.clone().unwrap_or_else(|| {
-                        format!(
-                            "{}-{ai}",
-                            rule.id.clone().unwrap_or_else(|| slug(&ra.name))
-                        )
-                    });
-                    let id = match fref.and_then(|f| f.file_stem()).and_then(|s| s.to_str()) {
-                        Some(stem) => format!("{ns}:{base}:{stem}"),
-                        None => format!("{ns}:{base}"),
-                    };
-                    if let Some(a) = build_action(ra, id, &group, &cwd, &t, &resolver) {
-                        out.push(a);
-                    }
-                }
-            }
+            out.extend(rule_project_actions(rule, proj, repo, &resolver));
         }
     }
 
@@ -669,6 +691,112 @@ pub fn evaluate(config: &Config, ctx: &RepoContext, repo: &Repo) -> Vec<Action> 
 
 pub fn build_actions(repo: &Repo, ctx: &RepoContext, config: &Config) -> Vec<Action> {
     evaluate(config, ctx, repo)
+}
+
+// --- per-repo rule trace (settings "trace a repo" view) ------------------
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoTrace {
+    pub repo_name: String,
+    pub repo_path: String,
+    /// Universal action ids that resolve for this repo.
+    pub universal: Vec<String>,
+    /// One entry per configured rule, in config order.
+    pub rules: Vec<RuleTrace>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleTrace {
+    pub id: String,
+    /// The glob(s) the rule matches on.
+    pub globs: Vec<String>,
+    /// "" when the rule fired; otherwise why it produced nothing — a machine
+    /// gate ("disabled", "needs `x` — unresolved", …) or "no matching files".
+    pub gate: String,
+    /// Per-project results — populated only when `gate` is "".
+    pub hits: Vec<ProjectHit>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectHit {
+    /// "" = repo root, else the sub-project's relative path.
+    pub project: String,
+    /// Files in that project the rule's globs matched.
+    pub matched: Vec<String>,
+    /// Action ids the rule produced there.
+    pub produced: Vec<String>,
+}
+
+/// Explain, rule by rule, what one repo produces and why — the data behind the
+/// settings "trace a repo" view. Shares [`rule_gate`] and [`rule_project_actions`]
+/// with [`evaluate`], so its verdicts match what the action menu actually shows.
+pub fn trace(config: &Config, ctx: &RepoContext, repo: &Repo) -> RepoTrace {
+    let resolver = Resolver::new(&config.programs);
+
+    let universal = universal_actions(config, repo, &resolver)
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+
+    let rules = config
+        .rules
+        .iter()
+        .map(|rule| {
+            let id = rule.id.clone().unwrap_or_else(|| "(unnamed)".into());
+            let globs = rule.match_.globs().iter().map(|s| s.to_string()).collect();
+
+            if let Some(reason) = rule_gate(rule, &resolver) {
+                return RuleTrace {
+                    id,
+                    globs,
+                    gate: reason,
+                    hits: Vec::new(),
+                };
+            }
+
+            let hits: Vec<ProjectHit> = ctx
+                .projects
+                .iter()
+                .filter_map(|proj| {
+                    let matched = matched_files(&rule.match_, &proj.files);
+                    if matched.is_empty() {
+                        return None;
+                    }
+                    let produced = rule_project_actions(rule, proj, repo, &resolver)
+                        .into_iter()
+                        .map(|a| a.id)
+                        .collect();
+                    Some(ProjectHit {
+                        project: proj.rel.clone(),
+                        matched,
+                        produced,
+                    })
+                })
+                .collect();
+
+            let gate = if hits.is_empty() {
+                "no matching files in this repo".to_string()
+            } else {
+                String::new()
+            };
+            RuleTrace {
+                id,
+                globs,
+                gate,
+                hits,
+            }
+        })
+        .collect();
+
+    RepoTrace {
+        repo_name: repo.name.clone(),
+        repo_path: repo.path.clone(),
+        universal,
+        rules,
+    }
 }
 
 // --- read-only summary (settings "what's active" view) --------------------
@@ -894,5 +1022,36 @@ mod tests {
         for want in ["cargo:root:run", "cargo:root:build", "cargo:root:test"] {
             assert!(acts.iter().any(|a| a.id == want), "missing {want}");
         }
+    }
+
+    #[test]
+    fn trace_explains_fired_and_idle_rules() {
+        let cfg = bundled_defaults();
+        let proj = Project {
+            files: vec!["Cargo.toml".into()],
+            has_cargo: true,
+            ..Default::default()
+        };
+        let t = trace(&cfg, &ctx_one(proj), &repo());
+
+        assert_eq!(t.repo_name, "demo");
+        assert!(t.universal.iter().any(|id| id == "terminal"));
+
+        // The Cargo rule fires against the root and lists its action ids.
+        let cargo = t
+            .rules
+            .iter()
+            .find(|r| r.globs.iter().any(|g| g.eq_ignore_ascii_case("Cargo.toml")))
+            .expect("defaults carry a Cargo.toml rule");
+        assert_eq!(cargo.gate, "");
+        assert!(cargo
+            .hits
+            .iter()
+            .any(|h| h.produced.iter().any(|id| id.starts_with("cargo:root:"))));
+
+        // …and a bare Rust repo leaves plenty of rules idle, each with a reason.
+        let idle = t.rules.iter().find(|r| !r.gate.is_empty()).unwrap();
+        assert!(idle.hits.is_empty());
+        assert!(!idle.gate.is_empty());
     }
 }

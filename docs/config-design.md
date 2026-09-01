@@ -33,16 +33,6 @@ Files: `rules.rs`, `default_config.yaml`.
 
 ---
 
-## 8. Per-repo "what matched" in the rules viewer · _medium, lower value_
-
-The action menu already shows what a repo produces. A settings-side version
-would need a repo dropdown + calling `build_actions` for the chosen repo and
-listing rule → action outcomes. Nice for debugging config, not essential.
-
-Files: `commands.rs`, `rules.rs`, `types.ts`, `Settings.svelte`.
-
----
-
 ## 9. `prompt: true` / "Run command…" · _medium-hard, new frontend mode_
 
 A dynamic action: prompt for a one-off command, run it in the terminal at the
@@ -142,10 +132,11 @@ knob), `default_config.yaml`.
 - **#3** Folder picker for roots — 2026-08-31 (PR #1)
 - **#4** Start at login — 2026-08-31 (PR #1)
 - **#5** `collapse_nested` toggle (`true` / `false` / `auto`) — 2026-09-01
+- **#8** per-repo rule trace in Settings ("Trace a repo") — 2026-09-01
 
-Remaining, hardest-first: #6 task-targets provider, #7 dotnet provider, #8
-per-repo "what matched", #9 `prompt:` action, #10 Linux terminal picker, #11 fs
-watcher, #12 Wayland hotkey, #13 Eclipse provisioner.
+Remaining, hardest-first: #6 task-targets provider, #7 dotnet provider, #9
+`prompt:` action, #10 Linux terminal picker, #11 fs watcher, #12 Wayland hotkey,
+#13 Eclipse provisioner.
 
 ## Not on this list (shipped alongside)
 

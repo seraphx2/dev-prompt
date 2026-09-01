@@ -7,6 +7,7 @@ import type {
   AppConfig,
   ConfigSummary,
   RepoListPayload,
+  RepoTrace,
   ScoredRepo,
 } from "./types";
 
@@ -54,6 +55,11 @@ export function getConfig(): Promise<AppConfig> {
 /** Read-only view of the merged config (program resolution + rule availability). */
 export function configSummary(): Promise<ConfigSummary> {
   return invoke<ConfigSummary>("config_summary");
+}
+
+/** Rule-by-rule trace of what one repo produces and why (settings debug view). */
+export function repoRuleTrace(path: string): Promise<RepoTrace> {
+  return invoke<RepoTrace>("repo_rule_trace", { path });
 }
 
 /** Re-read config.yaml + rules.yaml from disk and drop cached program lookups. */

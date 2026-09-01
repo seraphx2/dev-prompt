@@ -75,6 +75,31 @@ export interface ConfigSummary {
   }[];
 }
 
+/** Rule-by-rule explanation of what one repo produces — settings "trace a repo". */
+export interface RepoTrace {
+  repoName: string;
+  repoPath: string;
+  /** Universal action ids that resolve for this repo. */
+  universal: string[];
+  rules: RuleTrace[];
+}
+
+export interface RuleTrace {
+  id: string;
+  globs: string[];
+  /** "" when the rule fired; otherwise why it produced nothing. */
+  gate: string;
+  /** Per-project results, populated only when `gate` is "". */
+  hits: ProjectHit[];
+}
+
+export interface ProjectHit {
+  /** "" = repo root, else the sub-project's relative path. */
+  project: string;
+  matched: string[];
+  produced: string[];
+}
+
 export interface RepoListPayload {
   repos: Repo[];
   /** Age of the cache in seconds; -1 when there was no cache. */

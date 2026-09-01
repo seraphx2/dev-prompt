@@ -157,6 +157,20 @@ pub fn build_actions(state: State<'_, AppState>, path: String) -> Vec<Action> {
     build_actions_impl(&repo, &ctx, &cfg)
 }
 
+/// Rule-by-rule explanation of what a single repo produces and why — feeds the
+/// settings "trace a repo" view. Uses the scan-time cached context like
+/// `build_actions`.
+#[tauri::command]
+pub fn repo_rule_trace(
+    state: State<'_, AppState>,
+    path: String,
+) -> crate::rules::RepoTrace {
+    let repo = repo_for_path(&state, &path);
+    let ctx = context_for(&state, &repo);
+    let cfg = state.config.lock().unwrap();
+    crate::rules::trace(&cfg, &ctx, &repo)
+}
+
 /// Re-inspect a single repo off the UI thread. The action menu renders instantly
 /// from the cached context, then calls this; if the repo changed on disk since
 /// the last scan (new npm script, added `Cargo.toml`, …) the cache is updated
