@@ -35,22 +35,28 @@ Files: `config.rs`, `rules.rs`, `commands.rs`, `App.svelte`, a new component,
 
 ---
 
-## 10. Linux terminal picker · _hard — and untestable without a GUI Linux_
+## 10. Terminal abstraction — non-Windows + `shell:` · _hard, mostly untestable here_
 
-`terminalize()` on non-Windows just spawns the bare command (no window). Needs:
+The Windows half shipped (see Done): `TermKind` table (`wt` / `alacritty` /
+`wezterm`), a `terminal:` pin and `terminal_template:` override in
+`config.yaml`, a `list_terminals` command, and the Settings dropdown. Left:
 
-- a per-emulator table: working-dir flag + command-exec syntax
-  - `alacritty --working-directory D -e CMD`
-  - `kitty --directory D CMD`
-  - `wezterm start --cwd D -- CMD`
-  - `gnome-terminal --working-directory=D -- CMD`
-  - `konsole --workdir D -e CMD`
-  - `foot --working-directory=D CMD`
+- **Linux emulator table** — `terminalize()`'s `#[cfg(not(windows))]` branch
+  still spawns the bare command with no window. Add the same table shape:
+  - `alacritty --working-directory D -e CMD` · `kitty --directory D CMD`
+  - `wezterm start --cwd D -- CMD` · `gnome-terminal --working-directory=D -- CMD`
+  - `konsole --workdir D -e CMD` · `foot --working-directory=D CMD`
   - `xterm -e sh -c 'cd D; CMD; exec $SHELL'`
-- "first of `programs.terminal.linux` that resolves" → pick its table entry.
-- `terminal:` in `config.yaml` to pin one; raw-template override for exotic setups.
+  - Wayland-only emulators + the `x-terminal-emulator` alias. Verify on WSLg / VM.
+- **macOS** — `open -a Terminal D` opens a window; running a *command* needs
+  `osascript` (`tell app "Terminal" to do script …`) or a temp script.
+- **`shell:` knob** — which shell the command runs *inside* the emulator
+  (`pwsh` / `powershell` / `cmd` / `bash` / `zsh` / `nu`). Currently hardcoded
+  `pwsh` → `powershell` in `shell_wrap()`. A `config.yaml` scalar + a second
+  Settings dropdown (probe PATH for what's installed).
 
-Files: `rules.rs`, `default_config.yaml`. Verify on WSLg / a VM.
+Files: `rules.rs` (`terminalize`, `shell_wrap`), `config.rs`, `commands.rs`
+(`list_terminals` shell variant), `Settings.svelte`, `default_config.yaml`.
 
 ---
 
@@ -204,11 +210,15 @@ Files: `rules.rs` (`expand` + `build_action`), `config.rs` (schema),
   `tox.ini`/`tests/`), run entry (`main.py`/`app.py`/`__main__.py`), pipenv +
   pdm runners, and more markers (`setup.py`, `setup.cfg`, `Pipfile`,
   `manage.py`) so non-`requirements.txt` projects get detected. — 2026-09-01
+- **Terminal emulator selector (Windows)** — `TermKind` table (`wt` /
+  `alacritty` / `wezterm`), `terminal:` pin + `terminal_template:` override in
+  `config.yaml`, `list_terminals` command, Settings dropdown. Non-Windows +
+  `shell:` knob remain (#10). — 2026-09-01
 
 Remaining, hardest-first: #6 task-targets provider, #15 conditional template
 expansion, #9 `prompt:` action, #14 (Cargo-workspace / Xcode / Nx-Turbo-Bazel),
-#10 Linux terminal picker, #11 fs watcher, #12 Wayland hotkey, #13 Eclipse
-provisioner.
+#10 terminal abstraction (non-Windows + `shell:`), #11 fs watcher, #12 Wayland
+hotkey, #13 Eclipse provisioner.
 
 ## Not on this list (shipped alongside)
 

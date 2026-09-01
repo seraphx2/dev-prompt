@@ -59,11 +59,26 @@ pub fn clear_program_cache() {
 
 pub struct Resolver<'a> {
     programs: &'a std::collections::BTreeMap<String, ProgramSpec>,
+    /// `config.terminal` — a pinned emulator (key / bare name / absolute path).
+    terminal: Option<&'a str>,
+    /// `config.terminal_template` — raw `{{dir}}` / `{{cmd}}` invocation.
+    terminal_template: Option<&'a str>,
 }
 
 impl<'a> Resolver<'a> {
     pub fn new(programs: &'a std::collections::BTreeMap<String, ProgramSpec>) -> Self {
-        Self { programs }
+        Self {
+            programs,
+            terminal: None,
+            terminal_template: None,
+        }
+    }
+
+    /// Attach the terminal settings from `config.yaml`.
+    pub fn with_terminal(mut self, terminal: Option<&'a str>, template: Option<&'a str>) -> Self {
+        self.terminal = terminal;
+        self.terminal_template = template;
+        self
     }
 
     /// Resolve a program key to an absolute path, memoized for the process.
@@ -262,39 +277,155 @@ fn basename(p: &str) -> String {
 
 // --- terminal wrapping -------------------------------------------------
 
+/// Terminal emulators whose command-line dev-prompt knows how to build.
+/// Anything else needs a `terminal_template`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TermKind {
+    WindowsTerminal,
+    Alacritty,
+    WezTerm,
+    Unknown,
+}
+
+fn term_kind(binary: &str) -> TermKind {
+    match basename(binary)
+        .to_lowercase()
+        .trim_end_matches(".exe")
+    {
+        "wt" | "windowsterminal" => TermKind::WindowsTerminal,
+        "alacritty" => TermKind::Alacritty,
+        "wezterm" | "wezterm-gui" => TermKind::WezTerm,
+        _ => TermKind::Unknown,
+    }
+}
+
+/// `(id, label)` for every configured terminal candidate that resolves on this
+/// machine *and* has a known invocation. Feeds the Settings dropdown.
+pub fn terminal_options(config: &Config) -> Vec<(String, String)> {
+    let Some(spec) = config.programs.get("terminal") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for c in spec.candidates() {
+        let ProgramCandidate::Path(raw) = c else {
+            continue;
+        };
+        let Some(resolved) = resolve_path_candidate(raw) else {
+            continue;
+        };
+        if term_kind(&resolved) == TermKind::Unknown {
+            continue;
+        }
+        // A plain name / absolute path round-trips as-is; a glob stores the hit.
+        let id = if raw.contains(['*', '?', '[']) {
+            resolved.clone()
+        } else {
+            raw.clone()
+        };
+        let label = basename(&resolved);
+        if !out.iter().any(|(_, l): &(String, String)| *l == label) {
+            out.push((id, label));
+        }
+    }
+    out
+}
+
+/// Wrap `argv` in a shell that keeps the window open and gives a real console
+/// (ANSI colour, a live TTY — tools like Claude Code render monochrome
+/// otherwise). `pwsh` when present, else Windows PowerShell.
+#[cfg(windows)]
+fn shell_wrap(argv: &[String]) -> Vec<String> {
+    let shell = if which("pwsh").is_some() {
+        "pwsh"
+    } else {
+        "powershell"
+    };
+    let mut v = vec![
+        shell.to_string(),
+        "-NoLogo".to_string(),
+        "-NoExit".to_string(),
+        "-Command".to_string(),
+    ];
+    v.extend(argv.iter().cloned());
+    v
+}
+
 /// `(program, args, cwd)` to run `argv` in a terminal at `cwd`. Empty `argv`
 /// means "just open a terminal there".
-fn terminalize(argv: &[String], cwd: &str, resolver: &Resolver) -> (String, Vec<String>, Option<String>) {
+fn terminalize(
+    argv: &[String],
+    cwd: &str,
+    resolver: &Resolver,
+) -> (String, Vec<String>, Option<String>) {
     #[cfg(windows)]
     {
+        // 1. Which binary — a pinned `terminal:`, else the first resolving
+        //    `programs.terminal` candidate, else Windows Terminal.
         let term = resolver
-            .resolve("terminal")
+            .terminal
+            .and_then(|t| {
+                if t.contains(['/', '\\']) {
+                    Some(t.to_string()) // absolute / relative path, use as-is
+                } else {
+                    which(t) // bare name → PATH
+                }
+            })
+            .or_else(|| resolver.resolve("terminal"))
             .unwrap_or_else(|| "wt.exe".to_string());
-        let mut args = vec!["-d".to_string(), cwd.to_string()];
-        if !argv.is_empty() {
-            // Run the command *inside* a shell so it keeps a real console — ANSI
-            // colour, a live TTY, and the tab stays open after it exits (WT
-            // otherwise closes a bare `wt <cmd>` tab on exit, and the command's
-            // stdout isn't a tty so tools like Claude Code render monochrome).
-            let shell = if which("pwsh").is_some() {
-                "pwsh"
-            } else {
-                "powershell"
-            };
-            args.extend([
-                shell.to_string(),
-                "-NoLogo".to_string(),
-                "-NoExit".to_string(),
-                "-Command".to_string(),
-            ]);
+
+        // 2. Raw template override.
+        if let Some(tmpl) = resolver.terminal_template {
+            let line = tmpl
+                .replace("{{dir}}", cwd)
+                .replace("{{cmd}}", &argv.join(" "));
+            let parts = shell_split(&line);
+            return (
+                parts.first().cloned().unwrap_or_else(|| term.clone()),
+                parts.into_iter().skip(1).collect(),
+                None,
+            );
         }
-        args.extend(argv.iter().cloned());
-        (term, args, None)
+
+        // 3. Known-emulator table.
+        match term_kind(&term) {
+            TermKind::Alacritty => {
+                let mut args = vec!["--working-directory".to_string(), cwd.to_string()];
+                if !argv.is_empty() {
+                    args.push("-e".to_string());
+                    args.extend(shell_wrap(argv));
+                }
+                (term, args, None)
+            }
+            TermKind::WezTerm => {
+                let mut args = vec![
+                    "start".to_string(),
+                    "--cwd".to_string(),
+                    cwd.to_string(),
+                    "--".to_string(),
+                ];
+                if !argv.is_empty() {
+                    args.extend(shell_wrap(argv));
+                }
+                (term, args, None)
+            }
+            TermKind::WindowsTerminal => {
+                let mut args = vec!["-d".to_string(), cwd.to_string()];
+                if !argv.is_empty() {
+                    args.extend(shell_wrap(argv));
+                }
+                (term, args, None)
+            }
+            TermKind::Unknown => {
+                // No table entry and no template: best effort — hand the
+                // command straight to the binary with a working directory.
+                (term, argv.to_vec(), Some(cwd.to_string()))
+            }
+        }
     }
     #[cfg(not(windows))]
     {
-        // No per-emulator working-dir flag knowledge yet (its own milestone):
-        // run the command directly in `cwd`.
+        // Per-emulator handling on non-Windows is its own milestone
+        // (docs/config-design.md #10); run the command directly in `cwd`.
         if argv.is_empty() {
             let term = resolver
                 .resolve("terminal")
@@ -867,7 +998,8 @@ fn universal_actions(config: &Config, repo: &Repo, resolver: &Resolver) -> Vec<A
 }
 
 pub fn evaluate(config: &Config, ctx: &RepoContext, repo: &Repo) -> Vec<Action> {
-    let resolver = Resolver::new(&config.programs);
+    let resolver = Resolver::new(&config.programs)
+        .with_terminal(config.terminal.as_deref(), config.terminal_template.as_deref());
 
     // Universal actions first — "open in terminal / editor / file manager" is the
     // common case; the detected per-ecosystem stuff sits below it.
@@ -930,7 +1062,8 @@ pub struct ProjectHit {
 /// settings "trace a repo" view. Shares [`rule_gate`] and [`rule_project_actions`]
 /// with [`evaluate`], so its verdicts match what the action menu actually shows.
 pub fn trace(config: &Config, ctx: &RepoContext, repo: &Repo) -> RepoTrace {
-    let resolver = Resolver::new(&config.programs);
+    let resolver = Resolver::new(&config.programs)
+        .with_terminal(config.terminal.as_deref(), config.terminal_template.as_deref());
 
     let universal = universal_actions(config, repo, &resolver)
         .into_iter()
@@ -1162,6 +1295,52 @@ mod tests {
             ["code", "my dir"]
         );
         assert!(shell_split("").is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn terminalize_drives_known_emulators_and_templates() {
+        let programs = std::collections::BTreeMap::new();
+        let argv = vec!["cargo".to_string(), "test".to_string()];
+        let cwd = "C:\\repo";
+        // Absolute-path pins bypass the PATH lookup so the branch is deterministic.
+        let pin = |p: &'static str, t: Option<&'static str>| {
+            Resolver::new(&programs).with_terminal(Some(p), t)
+        };
+
+        let (p, a, c) = terminalize(&argv, cwd, &pin("C:/x/wt.exe", None));
+        assert_eq!(p, "C:/x/wt.exe");
+        assert_eq!(&a[..2], &["-d", cwd]);
+        assert!(a.contains(&"-Command".to_string()));
+        assert_eq!(a.last().unwrap(), "test");
+        assert_eq!(c, None);
+
+        let (_, a, _) = terminalize(&argv, cwd, &pin("C:/x/alacritty.exe", None));
+        assert_eq!(&a[..2], &["--working-directory", cwd]);
+        assert!(a.contains(&"-e".to_string()));
+
+        let (_, a, _) = terminalize(&argv, cwd, &pin("C:/x/wezterm.exe", None));
+        assert_eq!(&a[..4], &["start", "--cwd", cwd, "--"]);
+
+        // Empty argv = "just open a terminal here" — no shell wrap.
+        let (_, a, _) = terminalize(&[], cwd, &pin("C:/x/alacritty.exe", None));
+        assert_eq!(a, vec!["--working-directory", cwd]);
+
+        // Unknown emulator, no template -> command handed to the binary + cwd.
+        let (p, a, c) = terminalize(&argv, cwd, &pin("C:/x/kitty.exe", None));
+        assert_eq!(p, "C:/x/kitty.exe");
+        assert_eq!(a, argv);
+        assert_eq!(c, Some(cwd.to_string()));
+
+        // Template override wins over the table.
+        let (p, a, c) = terminalize(
+            &argv,
+            cwd,
+            &pin("C:/x/kitty.exe", Some("kitty --directory {{dir}} -- {{cmd}}")),
+        );
+        assert_eq!(p, "kitty");
+        assert_eq!(a, vec!["--directory", cwd, "--", "cargo", "test"]);
+        assert_eq!(c, None);
     }
 
     #[test]

@@ -283,6 +283,7 @@ pub fn run() {
             commands::config_summary,
             commands::reload_config,
             commands::save_config,
+            commands::list_terminals,
             commands::open_rules_file,
             commands::set_dismiss_on_blur,
             commands::set_update_hint,

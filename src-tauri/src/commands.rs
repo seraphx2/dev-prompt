@@ -273,6 +273,9 @@ pub struct ConfigPatch {
     pub cache_ttl_secs: Option<u64>,
     pub scan_max_depth: Option<usize>,
     pub collapse_nested: Option<config::CollapseNested>,
+    /// `Some("")` clears the pin / template back to auto.
+    pub terminal: Option<String>,
+    pub terminal_template: Option<String>,
 }
 
 /// Apply an editable subset of settings: write `config.yaml`, update the live
@@ -312,6 +315,14 @@ pub fn save_config(
         }
         user.scan = Some(scan);
     }
+    if let Some(t) = patch.terminal {
+        let t = t.trim();
+        user.terminal = (!t.is_empty()).then(|| t.to_string());
+    }
+    if let Some(t) = patch.terminal_template {
+        let t = t.trim();
+        user.terminal_template = (!t.is_empty()).then(|| t.to_string());
+    }
 
     let new_hotkey = user.hotkey.clone().unwrap_or_else(|| old_hotkey.clone());
     if new_hotkey != old_hotkey {
@@ -321,10 +332,32 @@ pub fn save_config(
         let _ = gs.unregister(old_hotkey.as_str());
     }
 
+    // A changed `terminal` pin must not lose to a memoized `terminal` lookup.
+    crate::rules::clear_program_cache();
     config::save_user(&user)?;
     let merged = config::load()?;
     *state.config.lock().unwrap() = merged.clone();
     Ok(merged)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalOption {
+    /// Value to store in `config.terminal` (bare name / path).
+    pub id: String,
+    /// Display name (the binary's basename).
+    pub label: String,
+}
+
+/// Installed terminal emulators dev-prompt knows how to drive — feeds the
+/// Settings dropdown.
+#[tauri::command]
+pub fn list_terminals(state: State<'_, AppState>) -> Vec<TerminalOption> {
+    let cfg = state.config.lock().unwrap();
+    crate::rules::terminal_options(&cfg)
+        .into_iter()
+        .map(|(id, label)| TerminalOption { id, label })
+        .collect()
 }
 
 /// Toggle whether focus loss dismisses the overlay (frontend turns this off for

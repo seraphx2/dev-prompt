@@ -31,9 +31,10 @@ The rest of this document is about `rules.yaml`.
 | `rules` | Your rules are **prepended** — they run first and show first. `rules_disable: [id]` sets a built-in aside. |
 | `universal` | `universal.disable: [id]` removes built-ins, `universal.add: [...]` appends yours, `universal.default: id` sets which action Enter runs on a repo in the main list. |
 
-(`hotkey`, `roots`, `scan`, `cache_ttl_secs` are **settings**, not overrides —
-they live in `config.yaml` and are edited in the Settings screen. Putting them in
-`rules.yaml` has no effect.)
+(`hotkey`, `roots`, `scan`, `cache_ttl_secs`, `terminal`, `terminal_template`
+are **settings**, not overrides — they live in `config.yaml` and are edited in
+the Settings screen. Putting them in `rules.yaml` has no effect. See
+[Terminal](#terminal).)
 
 A disabled built-in isn't deleted — it still appears in the Settings
 "Active configuration" viewer marked *disabled*, it's just never evaluated. This
@@ -179,6 +180,35 @@ Usable in `name`, `program`, `args`, and `run`:
 | `{{file}}` `{{file.name}}` `{{file.stem}}` | the matched file (only with `per_file: true`) |
 | `{{env:VAR}}` | an environment variable |
 | `{{<program-key>}}` | a resolved program path |
+
+---
+
+## Terminal
+
+Which terminal emulator "Open in terminal" and every `terminal: true` action
+open. Set from **Settings ▸ Terminal**; stored in `config.yaml`, not
+`rules.yaml`. **Windows only** for now — other platforms run the command
+directly.
+
+```yaml
+# config.yaml
+terminal: wezterm                         # a programs.terminal key, a PATH
+                                          #   name, or an absolute path.
+                                          #   Absent = first one that resolves.
+terminal_template: >                      # only for a terminal not in the
+  wezterm start --cwd {{dir}} -- {{cmd}}   #   table below. {{dir}} = cwd,
+                                          #   {{cmd}} = the command.
+```
+
+dev-prompt knows how to drive **Windows Terminal** (`wt`), **Alacritty**, and
+**WezTerm** — pick any that's installed from the dropdown. For anything else,
+choose *Custom…* and give a `terminal_template`: it's run verbatim with `{{dir}}`
+and `{{cmd}}` substituted (put `{{cmd}}` after `--` or in quotes so its arguments
+stay together).
+
+The command is wrapped in PowerShell (`pwsh`, else Windows PowerShell) so the
+window stays open and keeps a real console — ANSI colour and a live TTY, which
+tools like Claude Code need.
 
 ---
 

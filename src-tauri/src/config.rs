@@ -33,6 +33,14 @@ pub struct Config {
     pub scan: ScanConfig,
     /// How long a cached repo list stays fresh.
     pub cache_ttl_secs: u64,
+    /// Terminal emulator to open (`programs.terminal` key, a bare name, or an
+    /// absolute path). `None` = first `programs.terminal` candidate that resolves.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<String>,
+    /// Raw invocation override for a terminal the built-in table doesn't know.
+    /// `{{dir}}` = working directory, `{{cmd}}` = the command to run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_template: Option<String>,
     /// Discovery markers — "this folder is a project". Every `rules[].match`
     /// also counts, so a rule implies a marker.
     pub markers: Vec<Marker>,
@@ -57,6 +65,8 @@ impl Default for Config {
             roots: Vec::new(),
             scan: ScanConfig::default(),
             cache_ttl_secs: 900,
+            terminal: None,
+            terminal_template: None,
             markers: Vec::new(),
             programs: BTreeMap::new(),
             rules: Vec::new(),
@@ -313,6 +323,10 @@ pub struct UserConfig {
     pub scan: Option<ScanConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_ttl_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_template: Option<String>,
 }
 
 /// `rules.yaml` — hand-authored overrides layered over the bundled defaults.
@@ -365,6 +379,12 @@ fn merge_settings(cfg: &mut Config, u: UserConfig) {
     }
     if let Some(t) = u.cache_ttl_secs {
         cfg.cache_ttl_secs = t;
+    }
+    if let Some(t) = u.terminal {
+        cfg.terminal = Some(t);
+    }
+    if let Some(t) = u.terminal_template {
+        cfg.terminal_template = Some(t);
     }
 }
 
@@ -482,6 +502,8 @@ fn first_run_user() -> UserConfig {
         roots: Vec::new(),
         scan: Some(ScanConfig::default()),
         cache_ttl_secs: Some(900),
+        terminal: None,
+        terminal_template: None,
     }
 }
 
@@ -687,6 +709,18 @@ mod tests {
         })
         .unwrap();
         assert!(y.contains("collapse_nested: auto"), "{y}");
+    }
+
+    #[test]
+    fn settings_file_carries_terminal_pin_and_template() {
+        let mut cfg = bundled_defaults();
+        let user: UserConfig = serde_yaml_ng::from_str(
+            "terminal: wezterm\nterminal_template: \"x --cd {{dir}}\"\n",
+        )
+        .unwrap();
+        merge_settings(&mut cfg, user);
+        assert_eq!(cfg.terminal.as_deref(), Some("wezterm"));
+        assert_eq!(cfg.terminal_template.as_deref(), Some("x --cd {{dir}}"));
     }
 
     #[test]

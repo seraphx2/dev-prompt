@@ -139,7 +139,7 @@ programs:
       - "%USERPROFILE%/springtoolsuite4/SpringToolSuite4.exe"
 
   terminal:
-    windows: [wt.exe]
+    windows: [wt.exe, alacritty, wezterm]
     linux:
       [alacritty, kitty, wezterm, foot, gnome-terminal, konsole, xfce4-terminal, x-terminal-emulator, xterm]
     macos: [open]

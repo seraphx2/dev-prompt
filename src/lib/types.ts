@@ -51,6 +51,16 @@ export interface AppConfig {
   /** `collapse_nested`: `true` collapse, `false` list all, `"auto"` keep independent. */
   scan: { max_depth: number; collapse_nested: boolean | "auto" };
   cache_ttl_secs: number;
+  /** Pinned terminal emulator (name / path); absent = auto-probe. */
+  terminal?: string | null;
+  /** Raw `{{dir}}` / `{{cmd}}` invocation for an unknown terminal. */
+  terminal_template?: string | null;
+}
+
+/** An installed terminal emulator dev-prompt can drive — for the Settings dropdown. */
+export interface TerminalOption {
+  id: string;
+  label: string;
 }
 
 export interface ConfigSummary {

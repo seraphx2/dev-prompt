@@ -9,6 +9,7 @@ import type {
   RepoListPayload,
   RepoTrace,
   ScoredRepo,
+  TerminalOption,
 } from "./types";
 
 /** Cache-first repo list; returns instantly from the on-disk cache when present. */
@@ -74,8 +75,16 @@ export function saveConfig(patch: {
   cache_ttl_secs?: number;
   scan_max_depth?: number;
   collapse_nested?: boolean | "auto";
+  /** "" clears the pin / template back to auto. */
+  terminal?: string;
+  terminal_template?: string;
 }): Promise<AppConfig> {
   return invoke<AppConfig>("save_config", { patch });
+}
+
+/** Installed terminal emulators dev-prompt knows how to drive. */
+export function listTerminals(): Promise<TerminalOption[]> {
+  return invoke<TerminalOption[]>("list_terminals");
 }
 
 /** Open rules.yaml (the hand-authored overrides file) in the default editor. */

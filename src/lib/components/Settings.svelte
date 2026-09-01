@@ -5,6 +5,7 @@
     getAutostart,
     getConfig,
     listRepos,
+    listTerminals,
     openRulesFile,
     pickDirectories,
     reloadConfig,
@@ -12,7 +13,7 @@
     saveConfig,
     setAutostart,
   } from "../ipc";
-  import type { ConfigSummary, RepoTrace } from "../types";
+  import type { ConfigSummary, RepoTrace, TerminalOption } from "../types";
   import { icons, iconKeys } from "../icons";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { currentVersion, installUpdate } from "../updater";
@@ -31,6 +32,10 @@
   let scanDepth = $state(4);
   // Bound to the <select>; serialises to `true` / `false` / `"auto"` on save.
   let collapseNested = $state<"true" | "false" | "auto">("true");
+  // "" = auto, "__custom__" = raw template, else a terminal id.
+  let terminalSel = $state("");
+  let terminalTemplate = $state("");
+  let terminals = $state<TerminalOption[]>([]);
   let autostart = $state(false);
   let loaded = $state(false);
   let busy = $state(false);
@@ -106,6 +111,11 @@
       }));
     } catch {
       traceRepos = [];
+    }
+    try {
+      terminals = await listTerminals();
+    } catch {
+      terminals = [];
     }
     void pollUpdates(true);
   });
@@ -215,6 +225,8 @@
     roots: string[];
     scan: { max_depth: number; collapse_nested?: boolean | "auto" };
     cache_ttl_secs: number;
+    terminal?: string | null;
+    terminal_template?: string | null;
   }) {
     hotkey = c.hotkey;
     roots = c.roots.length ? [...c.roots] : [""];
@@ -224,6 +236,8 @@
       c.scan?.collapse_nested === undefined
         ? "true"
         : (String(c.scan.collapse_nested) as "true" | "false" | "auto");
+    terminalTemplate = c.terminal_template ?? "";
+    terminalSel = terminalTemplate ? "__custom__" : (c.terminal ?? "");
   }
 
   async function reload() {
@@ -262,6 +276,9 @@
         cache_ttl_secs: Math.max(60, Math.round(ttlMin * 60)),
         scan_max_depth: Math.max(1, Math.round(scanDepth)),
         collapse_nested: collapseNested === "auto" ? "auto" : collapseNested === "true",
+        terminal: terminalSel === "__custom__" ? "" : terminalSel,
+        terminal_template:
+          terminalSel === "__custom__" ? terminalTemplate.trim() : "",
       });
       note("Saved.");
       onsaved();
@@ -438,6 +455,36 @@
         <option value="false">List every one separately</option>
         <option value="auto">Auto — keep independent checkouts only</option>
       </select>
+    </label>
+
+    <label class="block space-y-1.5">
+      <span class="text-orange-400">Terminal</span>
+      <select
+        bind:value={terminalSel}
+        title="Which terminal emulator dev-prompt opens for terminal actions"
+        class="w-72 rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+      >
+        <option value="">Auto (first available)</option>
+        {#each terminals as t (t.id)}
+          <option value={t.id}>{t.label}</option>
+        {/each}
+        {#if terminalSel && terminalSel !== "__custom__" && !terminals.some((t) => t.id === terminalSel)}
+          <option value={terminalSel}>{terminalSel}</option>
+        {/if}
+        <option value="__custom__">Custom…</option>
+      </select>
+      {#if terminalSel === "__custom__"}
+        <input
+          bind:value={terminalTemplate}
+          spellcheck="false"
+          placeholder="wezterm start --cwd {'{{dir}}'} -- {'{{cmd}}'}"
+          class="w-full rounded border border-hair bg-white/[0.04] px-2 py-1.5 font-mono text-[12px] text-white/90 focus:border-white/25 focus:outline-none"
+        />
+        <span class="block text-[11px] text-white/25">
+          <span class="font-mono">{"{{dir}}"}</span> = working directory,
+          <span class="font-mono">{"{{cmd}}"}</span> = the command to run.
+        </span>
+      {/if}
     </label>
 
     <label class="flex items-center gap-2">
