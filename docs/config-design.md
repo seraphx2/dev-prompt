@@ -155,6 +155,12 @@ Files: `rules.rs` (one provider arm each) + a small parser module per tool;
   `flutter-android` reaching into `android/` for the Gradle project Flutter
   generates there (one level below the project root, invisible to
   `gradle-modules`); uses the bundled `gradlew` wrapper when present. — 2026-09-01
+- **Python provider fleshed out** — was just pip/uv/poetry install. Now:
+  venv-aware interpreter (`.venv`/`venv` → `Scripts/python.exe`), Django
+  (`manage.py` → runserver/migrate/test), pytest (`conftest.py`/`pytest.ini`/
+  `tox.ini`/`tests/`), run entry (`main.py`/`app.py`/`__main__.py`), pipenv +
+  pdm runners, and more markers (`setup.py`, `setup.cfg`, `Pipfile`,
+  `manage.py`) so non-`requirements.txt` projects get detected. — 2026-09-01
 
 Remaining, hardest-first: #6 task-targets provider, #9 `prompt:` action, #14
 (Cargo-workspace / Xcode / Nx-Turbo-Bazel), #10 Linux terminal picker, #11 fs

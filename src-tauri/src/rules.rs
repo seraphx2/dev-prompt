@@ -480,19 +480,25 @@ fn provider_actions(
             let Some(py) = &proj.python else {
                 return Vec::new();
             };
+
+            // Prefer the project's own venv interpreter (absolute, so it works
+            // whatever the terminal's cwd/shell), else a bare `python`.
+            let python: String = py
+                .venv
+                .as_deref()
+                .map(|v| {
+                    let rel = if cfg!(windows) {
+                        "Scripts/python.exe"
+                    } else {
+                        "bin/python"
+                    };
+                    proj.dir.join(v).join(rel).to_string_lossy().into_owned()
+                })
+                .unwrap_or_else(|| "python".to_string());
+
             let mut v = Vec::new();
-            if py.requirements {
-                v.push(term(
-                    format!("py:{ns}:pip"),
-                    "pip install -r requirements.txt".into(),
-                    vec![
-                        "pip".into(),
-                        "install".into(),
-                        "-r".into(),
-                        "requirements.txt".into(),
-                    ],
-                ));
-            }
+
+            // Install / sync dependencies.
             match py.runner.as_deref() {
                 Some("uv") => v.push(term(
                     format!("py:{ns}:uv"),
@@ -504,8 +510,60 @@ fn provider_actions(
                     "poetry install".into(),
                     vec!["poetry".into(), "install".into()],
                 )),
+                Some("pipenv") => v.push(term(
+                    format!("py:{ns}:pipenv"),
+                    "pipenv install".into(),
+                    vec!["pipenv".into(), "install".into()],
+                )),
+                Some("pdm") => v.push(term(
+                    format!("py:{ns}:pdm"),
+                    "pdm install".into(),
+                    vec!["pdm".into(), "install".into()],
+                )),
+                _ if py.requirements => v.push(term(
+                    format!("py:{ns}:pip"),
+                    "pip install -r requirements.txt".into(),
+                    vec![
+                        python.clone(),
+                        "-m".into(),
+                        "pip".into(),
+                        "install".into(),
+                        "-r".into(),
+                        "requirements.txt".into(),
+                    ],
+                )),
                 _ => {}
             }
+
+            // Django.
+            if py.manage_py {
+                for sub in ["runserver", "migrate", "test"] {
+                    v.push(term(
+                        format!("py:{ns}:manage:{sub}"),
+                        format!("python manage.py {sub}"),
+                        vec![python.clone(), "manage.py".into(), sub.into()],
+                    ));
+                }
+            }
+
+            // pytest.
+            if py.pytest {
+                v.push(term(
+                    format!("py:{ns}:pytest"),
+                    "pytest".into(),
+                    vec![python.clone(), "-m".into(), "pytest".into()],
+                ));
+            }
+
+            // Run the obvious entry point.
+            if let Some(entry) = &py.entry {
+                v.push(term(
+                    format!("py:{ns}:run"),
+                    format!("python {entry}"),
+                    vec![python.clone(), entry.clone()],
+                ));
+            }
+
             v
         }
         "compose" => ["up", "up -d", "down", "logs -f"]
@@ -1280,6 +1338,49 @@ mod tests {
         assert!(gr.iter().all(|a| a.icon.as_deref() == Some("gradle")));
 
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn python_provider_uses_venv_interpreter_and_django_pytest_run() {
+        use crate::inspect::PythonInfo;
+        let cfg = bundled_defaults();
+        let proj = Project {
+            rel: String::new(),
+            dir: if cfg!(windows) {
+                std::path::PathBuf::from("C:\\svc")
+            } else {
+                std::path::PathBuf::from("/svc")
+            },
+            files: vec!["requirements.txt".into(), "manage.py".into()],
+            python: Some(PythonInfo {
+                requirements: true,
+                venv: Some(".venv".into()),
+                manage_py: true,
+                entry: Some("main.py".into()),
+                pytest: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let acts = build_actions(&repo(), &ctx_one(proj), &cfg);
+
+        let py_hint = acts
+            .iter()
+            .find(|a| a.id == "py:root:pip")
+            .expect("pip install action")
+            .hint
+            .clone();
+        // The venv interpreter, not a bare `python`.
+        assert!(py_hint.contains(".venv"), "{py_hint}");
+        assert!(py_hint.ends_with("-m pip install -r requirements.txt"), "{py_hint}");
+
+        for want in ["py:root:manage:runserver", "py:root:manage:migrate", "py:root:pytest", "py:root:run"] {
+            assert!(acts.iter().any(|a| a.id == want), "missing {want}");
+        }
+        assert!(acts
+            .iter()
+            .filter(|a| a.id.starts_with("py:root:"))
+            .all(|a| a.icon.as_deref() == Some("python")));
     }
 
     #[test]

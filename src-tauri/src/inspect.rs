@@ -122,13 +122,23 @@ impl PkgManager {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct PythonInfo {
-    /// `"uv"` / `"poetry"` when a matching lockfile is present, else `None`.
+    /// `"uv"` / `"poetry"` / `"pipenv"` / `"pdm"` from a lockfile / `Pipfile`,
+    /// else `None` (plain `pip`).
     pub runner: Option<String>,
     /// A `requirements.txt` sits in this project.
     pub requirements: bool,
+    /// `.venv` / `venv` directory name, when one exists here — its interpreter
+    /// is preferred over a bare `python` for this project's actions.
+    pub venv: Option<String>,
+    /// A Django `manage.py` sits in this project.
+    pub manage_py: bool,
+    /// `main.py` / `app.py` / `__main__.py` at the project root, first found.
+    pub entry: Option<String>,
+    /// `conftest.py` / `pytest.ini` / `tox.ini` / a `tests/` dir — offer pytest.
+    pub pytest: bool,
 }
 
 fn has_ext_ignore_case(path: &Path, ext: &str) -> bool {
@@ -189,17 +199,47 @@ fn inspect_dir(dir: &Path, rel: &str) -> Project {
     p.has_go_mod = has("go.mod");
 
     let requirements = has("requirements.txt");
-    if has("pyproject.toml") || requirements {
+    let is_python = has("pyproject.toml")
+        || requirements
+        || has("setup.py")
+        || has("setup.cfg")
+        || has("Pipfile")
+        || has("manage.py")
+        || has(".venv")
+        || has("venv");
+    if is_python {
         let runner = if has("uv.lock") {
             Some("uv".to_string())
         } else if has("poetry.lock") {
             Some("poetry".to_string())
+        } else if has("Pipfile.lock") || has("Pipfile") {
+            Some("pipenv".to_string())
+        } else if has("pdm.lock") {
+            Some("pdm".to_string())
         } else {
             None
         };
+        let venv = if has(".venv") {
+            Some(".venv".to_string())
+        } else if has("venv") {
+            Some("venv".to_string())
+        } else {
+            None
+        };
+        let entry = ["main.py", "app.py", "__main__.py"]
+            .into_iter()
+            .find(|f| has(f))
+            .map(str::to_string);
         p.python = Some(PythonInfo {
             runner,
             requirements,
+            venv,
+            manage_py: has("manage.py"),
+            entry,
+            pytest: has("conftest.py")
+                || has("pytest.ini")
+                || has("tox.ini")
+                || has("tests"),
         });
     }
 
@@ -349,6 +389,41 @@ mod tests {
         assert_eq!(py.runner.as_deref(), Some("uv"));
         assert!(py.requirements);
         let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn python_detects_venv_django_entry_and_pytest() {
+        let d = scratch("py");
+        write(d.join("requirements.txt"), "");
+        write(d.join("manage.py"), "");
+        write(d.join("main.py"), "");
+        write(d.join("conftest.py"), "");
+        fs::create_dir_all(d.join(".venv")).unwrap();
+
+        let py = inspect(&d, &gs(&[]))
+            .projects
+            .remove(0)
+            .python
+            .expect("requirements.txt makes it a python project");
+        assert!(py.requirements);
+        assert_eq!(py.venv.as_deref(), Some(".venv"));
+        assert!(py.manage_py);
+        assert_eq!(py.entry.as_deref(), Some("main.py"));
+        assert!(py.pytest);
+        assert_eq!(py.runner, None); // no lockfile / Pipfile
+
+        // A Pipfile alone is enough, and picks the pipenv runner.
+        let d2 = scratch("py-pipenv");
+        write(d2.join("Pipfile"), "");
+        let py2 = inspect(&d2, &gs(&[]))
+            .projects
+            .remove(0)
+            .python
+            .expect("Pipfile makes it a python project");
+        assert_eq!(py2.runner.as_deref(), Some("pipenv"));
+
+        let _ = fs::remove_dir_all(&d);
+        let _ = fs::remove_dir_all(&d2);
     }
 
     #[test]

@@ -208,7 +208,7 @@ rules:
     requires: [go]
 
   - id: python
-    match: [pyproject.toml, requirements.txt]
+    match: [pyproject.toml, requirements.txt, setup.py, setup.cfg, Pipfile, manage.py]
     provider: python
 
   - id: compose
