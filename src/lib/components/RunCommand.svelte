@@ -105,6 +105,7 @@
     {/if}
   </div>
   <div class="mt-1 truncate text-[11px] text-white/25">
-    {command.trim() || "opens the shell here"}
+    {command.trim() ||
+      `opens ${shellSel || "a shell"} in a terminal at ${repoName}`}
   </div>
 </div>
