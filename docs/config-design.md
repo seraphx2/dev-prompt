@@ -134,6 +134,49 @@ Files: `rules.rs` (one provider arm each) + a small parser module per tool;
 
 ---
 
+## 15. Conditional / computed template expansion · _config-language feature_
+
+Today `{{...}}` is plain string substitution — no conditionals, no fallbacks,
+no computed values. That's the wall every "detect X, then adapt" case hits, and
+it's why things like venv-aware Python had to be built in Rust rather than
+authored in `rules.yaml`.
+
+Concretely, a user *can* already:
+
+- match a rule on a directory (`match: [.venv, venv]` — dir names are in the
+  file list), and
+- use `{{path}}` / `{{file}}` in a template-expanded `program:`, e.g.
+  `program: "{{file}}/bin/python"`, with `when: windows` / `when: unix` for the
+  `Scripts` vs `bin` split.
+
+What they **can't** do:
+
+- **Fallback** — one action that uses the venv interpreter *if `.venv` exists*
+  and bare `python` otherwise. No `{{venv_python | default: python}}`. You end
+  up duplicating every action (venv set + plain set → noise), or hardcoding a
+  path that's broken on projects without a venv.
+- **Existence-guard an action** — a rule action's raw `program:` isn't verified
+  to be a real file the way a `programs:` candidate is; it's used as typed.
+- **Compute once, use many** — `venv` threads into pip + pytest + django + run
+  uniformly in Rust; in config you'd repeat the literal in each action.
+- **Project-relative `programs:`** — `programs:` entries resolve once,
+  process-wide, before any project is known, so `{{path}}` isn't available
+  there; no reusable project-scoped program key.
+
+Possible directions (pick one, keep it small):
+
+- `{{a | default: b}}` / `{{a ?? b}}` coalescing in `expand()`.
+- A rule/action-level `when_file:` / `unless_file:` guard (glob, relative to the
+  project dir) so an action only emits when a path exists — covers the venv
+  case without a full expression language.
+- Computed vars: a rule `let:` block (`venv_py: "{{path}}/.venv/bin/python"`)
+  whose values are only bound when their referenced path exists.
+
+Files: `rules.rs` (`expand` + `build_action`), `config.rs` (schema),
+`docs/configuration.md`.
+
+---
+
 ## Done
 
 - **#1** Fatten `default_config.yaml` — 2026-08-31
@@ -162,9 +205,10 @@ Files: `rules.rs` (one provider arm each) + a small parser module per tool;
   pdm runners, and more markers (`setup.py`, `setup.cfg`, `Pipfile`,
   `manage.py`) so non-`requirements.txt` projects get detected. — 2026-09-01
 
-Remaining, hardest-first: #6 task-targets provider, #9 `prompt:` action, #14
-(Cargo-workspace / Xcode / Nx-Turbo-Bazel), #10 Linux terminal picker, #11 fs
-watcher, #12 Wayland hotkey, #13 Eclipse provisioner.
+Remaining, hardest-first: #6 task-targets provider, #15 conditional template
+expansion, #9 `prompt:` action, #14 (Cargo-workspace / Xcode / Nx-Turbo-Bazel),
+#10 Linux terminal picker, #11 fs watcher, #12 Wayland hotkey, #13 Eclipse
+provisioner.
 
 ## Not on this list (shipped alongside)
 
