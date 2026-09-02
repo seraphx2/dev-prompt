@@ -36,26 +36,37 @@ pub fn launch(action: &Action, repo: &Repo) -> AppResult<()> {
         .map(|c| substitute(c, repo))
         .unwrap_or_else(|| repo.path.clone());
 
-    spawn_detached(&action.program, &args, &cwd)
+    spawn_detached(&action.program, &args, &cwd, true)
 }
 
 /// Spawn an arbitrary program fully detached (no console, outlives the overlay).
-/// Shared by the app launcher; an empty `cwd` leaves the working directory
-/// inherited rather than set.
+/// Used by the app launcher, whose `program` is already a fully-resolved path —
+/// so it spawns directly. An empty `cwd` leaves the working directory inherited
+/// rather than set.
 pub fn spawn(program: &str, args: &[String], cwd: &str) -> AppResult<()> {
-    spawn_detached(program, args, cwd)
+    spawn_detached(program, args, cwd, false)
 }
 
 #[cfg(windows)]
-fn spawn_detached(program: &str, args: &[String], cwd: &str) -> AppResult<()> {
+fn spawn_detached(program: &str, args: &[String], cwd: &str, via_cmd: bool) -> AppResult<()> {
     use std::os::windows::process::CommandExt;
     // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
     const FLAGS: u32 = 0x0000_0008 | 0x0000_0200 | 0x0800_0000;
 
-    // Route through `cmd /c` so PATHEXT / .cmd shims (`code.cmd`) and Store
-    // aliases (`wt.exe`) resolve the same way they do in a shell.
-    let mut cmd = Command::new("cmd");
-    cmd.arg("/c").arg(program).args(args);
+    let mut cmd = if via_cmd {
+        // Route through `cmd /c` so PATHEXT / .cmd shims (`code.cmd`) and Store
+        // aliases (`wt.exe`) resolve the same way they do in a shell.
+        let mut c = Command::new("cmd");
+        c.arg("/c").arg(program).args(args);
+        c
+    } else {
+        // `program` is a concrete path already; spawn it straight so Rust's own
+        // argument quoting applies and `cmd`'s quote-stripping never sees the
+        // command line (it corrupts a program path or arg that contains a space).
+        let mut c = Command::new(program);
+        c.args(args);
+        c
+    };
     if !cwd.is_empty() {
         cmd.current_dir(cwd);
     }
@@ -66,7 +77,7 @@ fn spawn_detached(program: &str, args: &[String], cwd: &str) -> AppResult<()> {
 }
 
 #[cfg(not(windows))]
-fn spawn_detached(program: &str, args: &[String], cwd: &str) -> AppResult<()> {
+fn spawn_detached(program: &str, args: &[String], cwd: &str, _via_cmd: bool) -> AppResult<()> {
     let mut cmd = Command::new(program);
     cmd.args(args);
     if !cwd.is_empty() {

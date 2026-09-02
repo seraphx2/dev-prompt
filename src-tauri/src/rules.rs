@@ -244,7 +244,67 @@ fn resolve_var(key: &str, t: &Tmpl) -> String {
     }
 }
 
-/// Quote-aware split for `run:` strings (and `.lnk` argument strings).
+/// Split a Windows command-line *argument* string the way `CommandLineToArgvW`
+/// does: `\` and `"` interact (`\"` is a literal quote, `\\` a literal
+/// backslash), `""` inside a quoted run is a literal `"`, and `'` is an ordinary
+/// character. `.lnk` Arguments follow these rules — [`shell_split`]'s POSIX-ish
+/// `'`/`"` handling silently eats an unpaired apostrophe.
+pub fn win_split_args(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut started = false;
+    let mut in_quotes = false;
+    let mut backslashes = 0usize;
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => backslashes += 1,
+            '"' => {
+                for _ in 0..backslashes / 2 {
+                    cur.push('\\');
+                }
+                started = true;
+                if backslashes % 2 == 1 {
+                    cur.push('"'); // \" -> literal quote
+                } else if in_quotes && chars.peek() == Some(&'"') {
+                    cur.push('"'); // "" inside quotes -> one literal quote
+                    chars.next();
+                } else {
+                    in_quotes = !in_quotes;
+                }
+                backslashes = 0;
+            }
+            c if c.is_whitespace() && !in_quotes => {
+                for _ in 0..backslashes {
+                    cur.push('\\');
+                }
+                backslashes = 0;
+                if started {
+                    out.push(std::mem::take(&mut cur));
+                    started = false;
+                }
+            }
+            c => {
+                for _ in 0..backslashes {
+                    cur.push('\\');
+                }
+                backslashes = 0;
+                cur.push(c);
+                started = true;
+            }
+        }
+    }
+    for _ in 0..backslashes {
+        cur.push('\\');
+    }
+    if started {
+        out.push(cur);
+    }
+    out
+}
+
+/// Quote-aware split for `run:` strings.
 pub fn shell_split(s: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
@@ -1408,6 +1468,25 @@ mod tests {
             ["code", "my dir"]
         );
         assert!(shell_split("").is_empty());
+    }
+
+    #[test]
+    fn win_split_args_follows_commandline_to_argv_rules() {
+        // An apostrophe is an ordinary character, not a quote.
+        assert_eq!(win_split_args("--user=O'Brien"), ["--user=O'Brien"]);
+        // Double quotes group; spaces inside survive.
+        assert_eq!(
+            win_split_args(r#"--fullscreen "--title=My Movie""#),
+            ["--fullscreen", "--title=My Movie"]
+        );
+        // Backslash/quote interaction: \" is a literal quote, \\ a literal slash.
+        assert_eq!(win_split_args(r#"a\"b"#), [r#"a"b"#]);
+        assert_eq!(win_split_args(r#"a\\b"#), [r"a\\b"]);
+        // "" inside a quoted run is one literal quote.
+        assert_eq!(win_split_args(r#""a""b""#), [r#"a"b"#]);
+        // A quoted path keeps its spaces and internal backslashes.
+        assert_eq!(win_split_args(r#""C:\Some Path\x""#), [r"C:\Some Path\x"]);
+        assert!(win_split_args("").is_empty());
     }
 
     #[cfg(windows)]

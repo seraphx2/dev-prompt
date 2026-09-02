@@ -395,7 +395,7 @@ impl RawApp {
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .map(crate::rules::shell_split)
+            .map(crate::rules::win_split_args)
             .unwrap_or_default();
 
         let icon = self
