@@ -73,6 +73,8 @@ export function reloadConfig(): Promise<AppConfig> {
 /** Save an editable subset of settings; returns the updated config. */
 export function saveConfig(patch: {
   hotkey?: string;
+  /** "" turns the second (app-launcher) hotkey off. */
+  apps_hotkey?: string;
   roots?: string[];
   cache_ttl_secs?: number;
   scan_max_depth?: number;
@@ -163,9 +165,16 @@ export function copyPath(path: string): Promise<void> {
   return writeText(path);
 }
 
-/** Fired by the backend when the overlay is shown via the global hotkey. */
-export function onOverlayShown(cb: () => void): Promise<UnlistenFn> {
-  return listen("overlay:shown", () => cb());
+/**
+ * Fired by the backend when the overlay is shown. `scope` is `"apps"` when it
+ * was opened via the app-launcher hotkey, else `"repos"`.
+ */
+export function onOverlayShown(
+  cb: (scope: "repos" | "apps") => void,
+): Promise<UnlistenFn> {
+  return listen<string>("overlay:shown", (e) =>
+    cb(e.payload === "apps" ? "apps" : "repos"),
+  );
 }
 
 /** Fired by the backend after a background rescan replaces the cache. */

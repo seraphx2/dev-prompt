@@ -24,13 +24,19 @@ use commands::AppState;
 const OVERLAY_LABEL: &str = "overlay";
 
 /// Bring the overlay up: centered, focused, on top. `set_always_on_top` may have
-/// been dropped by "open config.yaml", so re-assert it here.
-fn show_overlay(window: &WebviewWindow) {
+/// been dropped by "open config.yaml", so re-assert it here. `scope` is
+/// `"repos"` normally, or `"apps"` when opened via the app-launcher hotkey — the
+/// frontend seeds the search box accordingly.
+fn show_overlay_scoped(window: &WebviewWindow, scope: &str) {
     let _ = window.center();
     let _ = window.set_always_on_top(true);
     let _ = window.show();
     let _ = window.set_focus();
-    let _ = window.emit("overlay:shown", ());
+    let _ = window.emit("overlay:shown", scope);
+}
+
+fn show_overlay(window: &WebviewWindow) {
+    show_overlay_scoped(window, "repos");
 }
 
 /// Tell the frontend the overlay is going away so it resets to the repo list
@@ -42,15 +48,27 @@ fn signal_overlay_hidden<R: tauri::Runtime>(window: &impl Emitter<R>) {
     let _ = window.emit("overlay:hidden", ());
 }
 
-/// Show the overlay, or hide it if it is already visible.
-fn toggle_overlay(window: &WebviewWindow) {
+/// Show the overlay in `scope`, or hide it if it is already visible.
+fn toggle_overlay_scoped(window: &WebviewWindow, scope: &str) {
     match window.is_visible() {
         Ok(true) => {
             signal_overlay_hidden(window);
             let _ = window.hide();
         }
-        _ => show_overlay(window),
+        _ => show_overlay_scoped(window, scope),
     }
+}
+
+fn toggle_overlay(window: &WebviewWindow) {
+    toggle_overlay_scoped(window, "repos");
+}
+
+/// True when `accel` parses to the same shortcut the OS just reported.
+fn shortcut_is(accel: &str, fired: &tauri_plugin_global_shortcut::Shortcut) -> bool {
+    accel
+        .parse::<tauri_plugin_global_shortcut::Shortcut>()
+        .map(|s| &s == fired)
+        .unwrap_or(false)
 }
 
 fn apply_overlay_effects(window: &WebviewWindow) {
@@ -146,12 +164,23 @@ pub fn run() {
     builder
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    if event.state == ShortcutState::Pressed {
-                        if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
-                            toggle_overlay(&win);
-                        }
+                .with_handler(|app, shortcut, event| {
+                    if event.state != ShortcutState::Pressed {
+                        return;
                     }
+                    let Some(win) = app.get_webview_window(OVERLAY_LABEL) else {
+                        return;
+                    };
+                    // The app-launcher hotkey opens straight into the `>` scope.
+                    let scope = {
+                        let state = app.state::<AppState>();
+                        let cfg = state.config.lock().unwrap();
+                        match cfg.apps_hotkey.as_deref() {
+                            Some(h) if !h.is_empty() && shortcut_is(h, shortcut) => "apps",
+                            _ => "repos",
+                        }
+                    };
+                    toggle_overlay_scoped(&win, scope);
                 })
                 .build(),
         )
@@ -163,15 +192,20 @@ pub fn run() {
 
             apply_overlay_effects(&window);
 
-            // Register the configured global hotkey.
-            let hotkey = {
+            // Register the configured global hotkey(s).
+            let (hotkey, apps_hotkey) = {
                 let state = app.state::<AppState>();
                 let cfg = state.config.lock().unwrap();
-                cfg.hotkey.clone()
+                (cfg.hotkey.clone(), cfg.apps_hotkey.clone())
             };
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
             if let Err(e) = app.global_shortcut().register(hotkey.as_str()) {
                 eprintln!("failed to register hotkey `{hotkey}`: {e}");
+            }
+            if let Some(ah) = apps_hotkey.as_deref().filter(|h| !h.is_empty()) {
+                if let Err(e) = app.global_shortcut().register(ah) {
+                    eprintln!("failed to register apps hotkey `{ah}`: {e}");
+                }
             }
 
             // System-tray entry point — the window is otherwise invisible with

@@ -279,6 +279,8 @@ pub fn reload_config(state: State<'_, AppState>) -> AppResult<Config> {
 #[serde(rename_all = "snake_case")]
 pub struct ConfigPatch {
     pub hotkey: Option<String>,
+    /// `Some("")` turns the second (app-launcher) hotkey off.
+    pub apps_hotkey: Option<String>,
     pub roots: Option<Vec<String>>,
     pub cache_ttl_secs: Option<u64>,
     pub scan_max_depth: Option<usize>,
@@ -301,11 +303,17 @@ pub fn save_config(
 ) -> AppResult<Config> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-    let old_hotkey = state.config.lock().unwrap().hotkey.clone();
+    let (old_hotkey, old_apps_hotkey) = {
+        let cfg = state.config.lock().unwrap();
+        (cfg.hotkey.clone(), cfg.apps_hotkey.clone())
+    };
     let mut user = config::load_user()?;
 
     if let Some(h) = patch.hotkey {
         user.hotkey = Some(h.trim().to_string());
+    }
+    if let Some(h) = patch.apps_hotkey {
+        user.apps_hotkey = Some(h.trim().to_string());
     }
     if let Some(roots) = patch.roots {
         user.roots = roots
@@ -356,11 +364,40 @@ pub fn save_config(
     }
 
     let new_hotkey = user.hotkey.clone().unwrap_or_else(|| old_hotkey.clone());
+    let new_apps_hotkey = user
+        .apps_hotkey
+        .clone()
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty());
+
+    if new_apps_hotkey.as_deref() == Some(new_hotkey.as_str()) {
+        return Err(AppError::msg(
+            "The app launcher hotkey must be different from the repo browser hotkey.",
+        ));
+    }
+
+    let register = |accel: &str| -> AppResult<()> {
+        app.global_shortcut().register(accel).map_err(|e| {
+            AppError::msg(format!(
+                "Couldn't register {accel} — it may already be in use by another \
+                 app, or it isn't a valid combination. ({e})"
+            ))
+        })
+    };
+
     if new_hotkey != old_hotkey {
-        let gs = app.global_shortcut();
-        gs.register(new_hotkey.as_str())
-            .map_err(|e| AppError::msg(format!("invalid hotkey `{new_hotkey}`: {e}")))?;
-        let _ = gs.unregister(old_hotkey.as_str());
+        register(&new_hotkey)?;
+        let _ = app.global_shortcut().unregister(old_hotkey.as_str());
+    }
+    if new_apps_hotkey != old_apps_hotkey {
+        if let Some(h) = &new_apps_hotkey {
+            register(h)?;
+        }
+        if let Some(old) = old_apps_hotkey.as_deref().filter(|s| !s.is_empty()) {
+            if Some(old) != new_apps_hotkey.as_deref() {
+                let _ = app.global_shortcut().unregister(old);
+            }
+        }
     }
 
     // A changed `terminal` pin must not lose to a memoized `terminal` lookup.

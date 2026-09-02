@@ -28,6 +28,10 @@ const RULES_TEMPLATE: &str = include_str!("rules_template.yaml");
 pub struct Config {
     /// Accelerator string understood by `tauri-plugin-global-shortcut`.
     pub hotkey: String,
+    /// Optional second global hotkey that opens the overlay straight into the
+    /// `>` app-launcher scope. `None` / empty = not registered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apps_hotkey: Option<String>,
     /// Root directories to scan. `~`, `%VAR%`, `$VAR` are expanded.
     pub roots: Vec<String>,
     pub scan: ScanConfig,
@@ -68,6 +72,7 @@ impl Default for Config {
         // guards against that).
         Config {
             hotkey: "CmdOrCtrl+Shift+Space".into(),
+            apps_hotkey: None,
             roots: Vec::new(),
             scan: ScanConfig::default(),
             cache_ttl_secs: 900,
@@ -352,6 +357,9 @@ pub struct UniversalConfig {
 pub struct UserConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hotkey: Option<String>,
+    /// `""` means "explicitly off" (survives a reload); absent means "unset".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apps_hotkey: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub roots: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -409,6 +417,10 @@ pub fn bundled_defaults() -> Config {
 fn merge_settings(cfg: &mut Config, u: UserConfig) {
     if let Some(h) = u.hotkey {
         cfg.hotkey = h;
+    }
+    if let Some(h) = u.apps_hotkey {
+        // An empty string is a deliberate "off" — keep it as `None`.
+        cfg.apps_hotkey = (!h.trim().is_empty()).then_some(h);
     }
     if !u.roots.is_empty() {
         cfg.roots = u.roots;
@@ -541,6 +553,9 @@ pub fn save_user(u: &UserConfig) -> AppResult<()> {
 fn first_run_user() -> UserConfig {
     UserConfig {
         hotkey: Some("CmdOrCtrl+Shift+Space".into()),
+        // The default lives in default_config.yaml so it applies to existing
+        // configs too; only write here if the user turns it off.
+        apps_hotkey: None,
         // No seeded roots — the first run shows the empty-state guidance and the
         // user picks their own directory. Guessing `~/git`, `~/src`, … just
         // added noise paths people had to hunt down and delete.
@@ -758,6 +773,18 @@ mod tests {
         })
         .unwrap();
         assert!(y.contains("collapse_nested: auto"), "{y}");
+    }
+
+    #[test]
+    fn apps_hotkey_defaults_on_and_treats_empty_as_off() {
+        let mut cfg = bundled_defaults();
+        assert_eq!(cfg.apps_hotkey.as_deref(), Some("CmdOrCtrl+Shift+Period"));
+
+        merge_settings(&mut cfg, serde_yaml_ng::from_str("apps_hotkey: Alt+Space").unwrap());
+        assert_eq!(cfg.apps_hotkey.as_deref(), Some("Alt+Space"));
+
+        merge_settings(&mut cfg, serde_yaml_ng::from_str("apps_hotkey: ''").unwrap());
+        assert_eq!(cfg.apps_hotkey, None); // explicit off round-trips
     }
 
     #[test]

@@ -49,6 +49,8 @@ export type MenuItem =
 
 export interface AppConfig {
   hotkey: string;
+  /** Optional second hotkey that opens straight into the `>` app scope. */
+  apps_hotkey?: string | null;
   roots: string[];
   /** `collapse_nested`: `true` collapse, `false` list all, `"auto"` keep independent. */
   scan: { max_depth: number; collapse_nested: boolean | "auto" };

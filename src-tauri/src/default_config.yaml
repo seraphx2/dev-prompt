@@ -20,6 +20,9 @@
 #   {{env:VAR}}                 {{<program-key>}} a resolved program
 
 hotkey: CmdOrCtrl+Shift+Space
+# Second global hotkey — opens straight into the ">" app launcher. Same key as
+# ">". Set to "" in config.yaml (or "turn off" in Settings) to disable it.
+apps_hotkey: CmdOrCtrl+Shift+Period
 roots: []
 scan:
   max_depth: 4

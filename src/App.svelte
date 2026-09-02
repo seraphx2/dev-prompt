@@ -339,7 +339,9 @@
   $effect(() => {
     if (mode === "repo-list") {
       void search; // re-run when the input is (re)mounted after leaving the menu
-      tick().then(() => search?.focus());
+      // Don't re-select an existing query (e.g. the ">" prefix on an app-scope
+      // open) — just ensure focus.
+      tick().then(() => search?.focus(false));
     }
   });
 
@@ -505,12 +507,15 @@
   onMount(() => {
     const unlisteners: Array<Promise<() => void>> = [];
     unlisteners.push(
-      onOverlayShown(() => {
-        query = "";
+      onOverlayShown((scope) => {
+        // The app-launcher hotkey opens straight into the ">" scope, caret
+        // after the prefix so the first keystroke filters rather than replaces.
+        query = scope === "apps" ? ">" : "";
         selected = 0;
         backToList();
-        void tick().then(() => search?.focus());
+        void tick().then(() => search?.focus(scope !== "apps"));
         void loadInitial();
+        if (scope === "apps") void loadApps();
       }),
     );
     unlisteners.push(
