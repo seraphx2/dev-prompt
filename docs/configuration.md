@@ -5,7 +5,7 @@ dev-prompt has three config layers:
 | | |
 |---|---|
 | **`default_config.yaml`** | Bundled into the binary — the full set of markers, programs, rules, and universal actions. The baseline; you never edit it. Canonical copy: [`src-tauri/src/default_config.yaml`](../src-tauri/src/default_config.yaml). |
-| **`config.yaml`** | Your **settings** — hotkey, roots, scan depth, cache lifetime. Managed entirely by the Settings screen; you don't normally open it by hand. |
+| **`config.yaml`** | Your **settings** — hotkeys, roots, scan depth, cache lifetime, terminal, apps. Managed entirely by the Settings screen; you don't normally open it by hand. |
 | **`rules.yaml`** | Your **overrides** — extra markers, programs, rules, and universal actions layered over the defaults. Hand-authored. The Settings screen never rewrites it, so your comments stay put. |
 
 Both files live in your OS config directory, created on first run:
@@ -31,10 +31,11 @@ The rest of this document is about `rules.yaml`.
 | `rules` | Your rules are **prepended** — they run first and show first. `rules_disable: [id]` sets a built-in aside. |
 | `universal` | `universal.disable: [id]` removes built-ins, `universal.add: [...]` appends yours, `universal.default: id` sets which action Enter runs on a repo in the main list. |
 
-(`hotkey`, `roots`, `scan`, `cache_ttl_secs`, `terminal`, `terminal_template`,
-`shell`, `apps` are **settings**, not overrides — they live in `config.yaml` and
-are edited in the Settings screen. Putting them in `rules.yaml` has no effect.
-See [Terminal](#terminal) and [Apps](#apps).)
+(`hotkey`, `apps_hotkey`, `roots`, `scan`, `cache_ttl_secs`, `terminal`,
+`terminal_template`, `shell`, `apps` are **settings**, not overrides — they live
+in `config.yaml` and are edited in the Settings screen. Putting them in
+`rules.yaml` has no effect. See [Hotkeys](#hotkeys), [Terminal](#terminal) and
+[Apps](#apps).)
 
 A disabled built-in isn't deleted — it still appears in the Settings
 "Active configuration" viewer marked *disabled*, it's just never evaluated. This
@@ -193,6 +194,34 @@ Usable in `name`, `program`, `args`, and `run`:
 
 ---
 
+## Hotkeys
+
+Two global hotkeys, set from **Settings ▸ Global hotkeys** and stored in
+`config.yaml`:
+
+```yaml
+# config.yaml
+hotkey: CmdOrCtrl+Shift+Space        # opens the overlay on the repo browser
+apps_hotkey: CmdOrCtrl+Shift+Period  # opens straight into the ">" app launcher
+                                     #   ("" = off; the Settings toggle writes it)
+```
+
+`apps_hotkey` is a convenience — it's the same as pressing the main hotkey then
+typing `>`. It's on by default (`Ctrl+Shift+.`, i.e. `Ctrl+>`); the **App
+launcher** field has a *turn off* link. The two must be different.
+
+The recorder (click a field, press a combination) checks what you pick against a
+built-in list: it **refuses** combos the OS reserves or that can't be
+intercepted (`Alt+Tab`, `Win+L`, `Ctrl+Alt+Del`, bare keys, …) and **asks you
+to confirm** ones commonly used elsewhere (`Ctrl+Shift+N`, a lone
+`Ctrl+`*letter*, any `Win+`*key*, …). This is a maintained list, not detection —
+Windows has no API for the shortcuts individual apps use internally, so a combo
+can still collide with something the list doesn't know. If another program has
+already claimed a combo through the OS, registration fails and the old hotkey
+stays active.
+
+---
+
 ## Terminal
 
 Which terminal emulator "Open in terminal" and every `terminal: true` action
@@ -227,10 +256,11 @@ The **Run command…** action picks a shell per-run, defaulting to that setting.
 ## Apps
 
 Type `>` in the search bar to switch the list from repositories to **installed
-applications**. Delete back to an empty box (or clear it) to return — the repo
-list is always the default when the overlay opens. Enter launches the selected
-app; `Ctrl+R` re-enumerates. Frecency: apps you launch from dev-prompt float to
-the top of the empty-query list.
+applications** — or press the [app-launcher hotkey](#hotkeys) to open there
+directly. Delete back to an empty box (or clear it) to return — the repo list is
+always the default when the overlay opens the normal way. Enter launches the
+selected app; `Ctrl+R` re-enumerates. Frecency: apps you launch from dev-prompt
+float to the top of the empty-query list.
 
 **Windows only.** On other platforms the `>` scope shows an empty list.
 

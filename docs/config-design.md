@@ -232,6 +232,12 @@ Files: `rules.rs` (`expand` + `build_action`), `config.rs` (schema),
   `list_apps` / `rescan_apps` / `run_app`, `app-usage.json` frecency;
   `AppList` / `AppRow`, `config.apps.{enabled,extra_dirs,exclude}` + Settings
   controls. Phase 2 in #16. — 2026-09-01
+- **Second app-launcher hotkey + hotkey guard** — `config.apps_hotkey`
+  (default `Ctrl+Shift+.`) opens straight into the `>` scope; scoped
+  `overlay:shown` payload. `hotkeys.ts::classifyHotkey` block/warn list in the
+  recorder (extracted to `HotkeyRecorder.svelte`, used for both hotkeys).
+  Settings: hotkeys side-by-side, Shell inline with Terminal, "Start at login"
+  to the top, a zero-height sticky Save, save-first "Rescan" buttons. — 2026-09-01
 
 Remaining, hardest-first: #6 task-targets provider, #16 app-launcher phase 2,
 #15 conditional template expansion, #14 (Cargo-workspace / Xcode / Nx-Turbo-
