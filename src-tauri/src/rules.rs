@@ -408,6 +408,10 @@ pub fn terminal_options(config: &Config) -> Vec<(String, String)> {
 /// Wrap `argv` in a shell that runs the command and then stays open with a real
 /// console (ANSI colour, a live TTY — tools like Claude Code render monochrome
 /// otherwise). `shell` = `config.shell`, else `pwsh` → Windows PowerShell.
+///
+/// Each of these shells takes the command as one string, so every `argv` element
+/// is quoted for that shell first — `argv.join(" ")` alone lets the shell
+/// re-split on a space inside a path (`C:\Users\First Last\...`).
 #[cfg(windows)]
 fn shell_wrap(argv: &[String], shell: Option<&str>) -> Vec<String> {
     let shell = shell.unwrap_or(if which("pwsh").is_some() {
@@ -415,27 +419,55 @@ fn shell_wrap(argv: &[String], shell: Option<&str>) -> Vec<String> {
     } else {
         "powershell"
     });
-    let joined = argv.join(" ");
     let kind = basename(shell).to_lowercase();
     let kind = kind.trim_end_matches(".exe");
+
+    fn join_quoted(argv: &[String], q: impl Fn(&str) -> String) -> String {
+        argv.iter().map(|a| q(a)).collect::<Vec<_>>().join(" ")
+    }
+    // PowerShell / nu: single quotes are literal (`''` escapes one quote).
+    let ps = |s: &str| format!("'{}'", s.replace('\'', "''"));
+    // POSIX: `'\''` closes, escapes a literal quote, reopens.
+    let sh = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
+    // cmd: double-quote anything with whitespace or a quote.
+    let cm = |s: &str| {
+        if s.is_empty() || s.contains([' ', '\t', '"']) {
+            format!("\"{}\"", s.replace('"', "\"\""))
+        } else {
+            s.to_string()
+        }
+    };
+
     match kind {
+        // `& <quoted>` so a quoted program *path* is invoked, not echoed.
         "pwsh" | "powershell" => vec![
             shell.to_string(),
             "-NoLogo".to_string(),
             "-NoExit".to_string(),
             "-Command".to_string(),
-        ]
-        .into_iter()
-        .chain(argv.iter().cloned())
-        .collect(),
-        "cmd" => vec![shell.to_string(), "/k".to_string(), joined],
+            format!("& {}", join_quoted(argv, ps)),
+        ],
+        // Outer quotes: `cmd /k` strips the outermost pair before parsing.
+        "cmd" => vec![
+            shell.to_string(),
+            "/k".to_string(),
+            format!("\"{}\"", join_quoted(argv, cm)),
+        ],
         "bash" | "zsh" | "sh" | "fish" => vec![
             shell.to_string(),
             "-c".to_string(),
-            format!("{joined}; exec {kind}"),
+            format!("{}; exec {kind}", join_quoted(argv, sh)),
         ],
-        "nu" => vec![shell.to_string(), "-e".to_string(), joined],
-        _ => vec![shell.to_string(), "-c".to_string(), joined],
+        "nu" => vec![
+            shell.to_string(),
+            "-e".to_string(),
+            join_quoted(argv, ps),
+        ],
+        _ => vec![
+            shell.to_string(),
+            "-c".to_string(),
+            join_quoted(argv, sh),
+        ],
     }
 }
 
@@ -465,12 +497,18 @@ fn terminalize(
             .or_else(|| resolver.resolve("terminal"))
             .unwrap_or_else(|| "wt.exe".to_string());
 
-        // 2. Raw template override.
+        // 2. Raw template override. Split the template first, then splice `argv`
+        //    in where `{{cmd}}` stands as its own token — joining `argv` and
+        //    re-splitting the whole line shreds any element with a space in it.
         if let Some(tmpl) = resolver.terminal_template {
-            let line = tmpl
-                .replace("{{dir}}", cwd)
-                .replace("{{cmd}}", &argv.join(" "));
-            let parts = shell_split(&line);
+            let mut parts: Vec<String> = Vec::new();
+            for tok in shell_split(tmpl) {
+                if tok == "{{cmd}}" {
+                    parts.extend(argv.iter().cloned());
+                } else {
+                    parts.push(tok.replace("{{dir}}", cwd));
+                }
+            }
             return (
                 parts.first().cloned().unwrap_or_else(|| term.clone()),
                 parts.into_iter().skip(1).collect(),
@@ -1421,18 +1459,32 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn shell_wrap_per_shell_hold_syntax() {
+    fn shell_wrap_quotes_each_arg_per_shell() {
         let argv = vec!["cargo".to_string(), "build".to_string()];
-        assert_eq!(shell_wrap(&argv, Some("cmd")), vec!["cmd", "/k", "cargo build"]);
+        assert_eq!(
+            shell_wrap(&argv, Some("cmd")),
+            vec!["cmd", "/k", "\"cargo build\""]
+        );
         assert_eq!(
             shell_wrap(&argv, Some("bash")),
-            vec!["bash", "-c", "cargo build; exec bash"]
+            vec!["bash", "-c", "'cargo' 'build'; exec bash"]
         );
         let ps = shell_wrap(&argv, Some("pwsh"));
         assert_eq!(&ps[..4], &["pwsh", "-NoLogo", "-NoExit", "-Command"]);
-        assert_eq!(ps.last().unwrap(), "build");
+        assert_eq!(ps.last().unwrap(), "& 'cargo' 'build'");
         // None -> pwsh (or powershell) with the -Command wrap.
         assert!(shell_wrap(&argv, None).contains(&"-Command".to_string()));
+
+        // A space in a path must survive the round-trip through each shell.
+        let spaced = vec!["C:\\a b\\tool.exe".to_string(), "run".to_string()];
+        assert_eq!(
+            shell_wrap(&spaced, Some("pwsh")).last().unwrap(),
+            "& 'C:\\a b\\tool.exe' 'run'"
+        );
+        assert_eq!(
+            shell_wrap(&spaced, Some("cmd")).last().unwrap(),
+            "\"\"C:\\a b\\tool.exe\" run\""
+        );
     }
 
     #[test]
@@ -1504,7 +1556,7 @@ mod tests {
         assert_eq!(p, "C:/x/wt.exe");
         assert_eq!(&a[..2], &["-d", cwd]);
         assert!(a.contains(&"-Command".to_string()));
-        assert_eq!(a.last().unwrap(), "test");
+        assert_eq!(a.last().unwrap(), "& 'cargo' 'test'");
         assert_eq!(c, None);
 
         let (_, a, _) = terminalize(&argv, cwd, &pin("C:/x/alacritty.exe", None), true);
@@ -1528,7 +1580,7 @@ mod tests {
             .with_terminal(Some("C:/x/wt.exe"), None)
             .with_shell(Some("cmd"));
         let (_, a, _) = terminalize(&argv, cwd, &r, true);
-        assert_eq!(&a[2..], &["cmd", "/k", "cargo test"]);
+        assert_eq!(&a[2..], &["cmd", "/k", "\"cargo test\""]);
 
         // Unknown emulator, no template -> command handed to the binary + cwd.
         let (p, a, c) = terminalize(&argv, cwd, &pin("C:/x/kitty.exe", None), true);
@@ -1546,6 +1598,16 @@ mod tests {
         assert_eq!(p, "kitty");
         assert_eq!(a, vec!["--directory", cwd, "--", "cargo", "test"]);
         assert_eq!(c, None);
+
+        // A space in cwd or in an argv element survives the template splice.
+        let spaced = vec!["my tool".to_string(), "go".to_string()];
+        let (_, a, _) = terminalize(
+            &spaced,
+            "C:\\my repo",
+            &pin("C:/x/kitty.exe", Some("kitty --directory {{dir}} -- {{cmd}}")),
+            true,
+        );
+        assert_eq!(a, vec!["--directory", "C:\\my repo", "--", "my tool", "go"]);
     }
 
     #[test]
