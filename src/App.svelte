@@ -2,35 +2,89 @@
   import { onMount, tick } from "svelte";
   import SearchInput from "./lib/components/SearchInput.svelte";
   import ResultList from "./lib/components/ResultList.svelte";
+  import AppList from "./lib/components/AppList.svelte";
   import ActionMenu from "./lib/components/ActionMenu.svelte";
+  import RunCommand from "./lib/components/RunCommand.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import {
     buildActions,
     copyPath,
     hideOverlay,
+    listApps,
     listRepos,
+    onAppsUpdated,
     onGotoSettings,
     onOverlayHidden,
     onOverlayShown,
     onReposUpdated,
     onRepoContextUpdated,
     refreshRepoContext,
+    rescanApps,
     rescanRepos,
     runAction,
+    runApp,
+    runCommand,
     searchRepos,
     setDismissOnBlur,
   } from "./lib/ipc";
-  import type { Action, MenuItem, ScoredRepo } from "./lib/types";
+  import type { Action, AppEntry, MenuItem, ScoredRepo } from "./lib/types";
   import { fuzzyScore } from "./lib/fuzzy";
   import { upd, pollUpdates } from "./lib/updateStore.svelte";
 
   const DAY_MS = 24 * 60 * 60 * 1000;
 
-  type Mode = "repo-list" | "action-menu" | "settings";
+  type Mode = "repo-list" | "action-menu" | "settings" | "run-command";
 
   let query = $state("");
   let results = $state<ScoredRepo[]>([]);
   let selected = $state(0);
+
+  // App-launcher scope: a leading ">" in the query switches the repo list for a
+  // search over installed apps. Repos stay the default on every overlay open.
+  let apps = $state<AppEntry[]>([]);
+  let appStatus = $state("");
+  let appsScanning = $state(false);
+  const appScope = $derived(query.startsWith(">"));
+  const term = $derived(
+    appScope ? query.slice(1).replace(/^\s+/, "") : query.trim(),
+  );
+
+  type AppHit = { app: AppEntry; positions: number[] };
+  const filteredApps = $derived.by<AppHit[]>(() => {
+    if (!appScope) return [];
+    const q = term;
+    if (!q) {
+      return [...apps]
+        .sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name))
+        .map((app) => ({ app, positions: [] }));
+    }
+    const scored: { app: AppEntry; positions: number[]; score: number }[] = [];
+    for (const app of apps) {
+      const onName = fuzzyScore(q, app.name);
+      if (onName) {
+        scored.push({ app, positions: onName.positions, score: onName.score });
+      } else if (fuzzyScore(q, app.exec)) {
+        // Path-only match: always ranks below any name match.
+        scored.push({ app, positions: [], score: -1e6 });
+      }
+    }
+    scored.sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.app.uses - a.app.uses ||
+        a.app.name.localeCompare(b.app.name),
+    );
+    return scored.map(({ app, positions }) => ({ app, positions }));
+  });
+
+  const activeCount = $derived(
+    appScope ? filteredApps.length : results.length,
+  );
+
+  // Keep the selection inside whichever list is on screen.
+  $effect(() => {
+    if (selected >= activeCount) selected = Math.max(0, activeCount - 1);
+  });
 
   let mode = $state<Mode>("repo-list");
   let actions = $state<Action[]>([]);
@@ -39,6 +93,8 @@
   let activeRepo = $state<ScoredRepo | null>(null);
   /** When set, the action menu is drilled into this `Detected · <x>` group. */
   let subGroup = $state<string | null>(null);
+  /** `run:` template of the prompt action that opened the "Run command…" mode. */
+  let promptTemplate = $state("");
 
   const SUB_PREFIX = "Detected · ";
 
@@ -116,6 +172,9 @@
       subGroup = it.target;
       actionQuery = "";
       actionSel = 0;
+    } else if (it.action.prompt) {
+      promptTemplate = it.action.hint ?? "";
+      mode = "run-command";
     } else if (activeRepo) {
       execute(it.action, activeRepo.repo.path);
     }
@@ -131,14 +190,20 @@
     }
   }
 
-  // The settings screen is a form — don't let a click-away dismiss it.
+  // Settings + the run-command input are forms — a click-away mustn't nuke them.
   $effect(() => {
-    void setDismissOnBlur(mode !== "settings");
+    void setDismissOnBlur(mode !== "settings" && mode !== "run-command");
   });
 
   // Footer key hints, per screen. `[key, description]`.
   const hints = $derived<[string, string][]>(
-    mode === "repo-list"
+    mode === "repo-list" && appScope
+      ? [
+          ["Up/Down", "move"],
+          ["Enter", "launch"],
+          ["Esc", "close"],
+        ]
+      : mode === "repo-list"
       ? [
           ["Up/Down", "move"],
           ["Enter", "launch"],
@@ -147,21 +212,39 @@
         ]
       : mode === "settings"
         ? [["Esc", "back"]]
-        : [
-            ["Up/Down", "move"],
-            ["Enter", "run"],
-            ["Esc", "back"],
-          ],
+        : mode === "run-command"
+          ? [
+              ["Enter", "run"],
+              ["Esc", "back"],
+            ]
+          : [
+              ["Up/Down", "move"],
+              ["Enter", "run"],
+              ["Esc", "back"],
+            ],
   );
 
   let scanning = $state(false);
   let status = $state("");
   let search: SearchInput | undefined = $state();
 
+  // The footer status line, per screen: the app count in ">" scope, both counts
+  // on the settings screen, the repo cache line otherwise.
+  const footerStatus = $derived(
+    mode === "repo-list" && appScope
+      ? appStatus
+      : mode === "settings"
+        ? [status, apps.length ? `${apps.length} apps` : ""]
+            .filter(Boolean)
+            .join(" · ")
+        : status,
+  );
+
   // Nothing indexed and no scan running — the user hasn't pointed dev-prompt at
   // any folders yet. Show setup guidance and glow the settings gear.
   const noRepos = $derived(
     mode === "repo-list" &&
+      !appScope &&
       !scanning &&
       query.trim() === "" &&
       results.length === 0,
@@ -170,6 +253,11 @@
   let searchSeq = 0;
 
   async function refresh() {
+    // In `>` app scope the list comes from `filteredApps`, not `results`; a repo
+    // search here matches nothing and would blank `results` + reset `selected`,
+    // yanking the app highlight mid-navigation. Guard here so every caller
+    // (the query $effect, loadInitial, rescan, onReposUpdated) is covered.
+    if (appScope) return;
     const seq = ++searchSeq;
     const scored = await searchRepos(query);
     if (seq !== searchSeq) return; // a newer query already answered
@@ -177,9 +265,11 @@
     if (selected >= results.length) selected = Math.max(0, results.length - 1);
   }
 
-  // Re-run the fuzzy search whenever the query changes.
+  // Re-run the fuzzy search whenever the query changes (repo scope only; the
+  // app list filters client-side via `filteredApps`).
   $effect(() => {
     void query;
+    if (appScope) return;
     refresh();
   });
 
@@ -213,6 +303,32 @@
     return `${Math.round(secs / 3600)}h`;
   }
 
+  async function loadApps() {
+    try {
+      const p = await listApps();
+      apps = p.apps;
+      appStatus = `${p.apps.length} apps`;
+      if (p.stale || p.ageSecs < 0) void rescanAppsNow();
+    } catch (e) {
+      appStatus = `${e}`;
+    }
+  }
+
+  async function rescanAppsNow() {
+    if (appsScanning) return;
+    appsScanning = true;
+    appStatus = "Scanning for apps…";
+    try {
+      const p = await rescanApps();
+      apps = p.apps;
+      appStatus = `${p.apps.length} apps · just scanned`;
+    } catch (e) {
+      appStatus = `App scan failed: ${e}`;
+    } finally {
+      appsScanning = false;
+    }
+  }
+
   async function openActions(entry: ScoredRepo) {
     activeRepo = entry;
     actions = await buildActions(entry.repo.path);
@@ -231,6 +347,7 @@
     actions = [];
     actionQuery = "";
     subGroup = null;
+    promptTemplate = "";
   }
 
   // Keep the search box focused whenever the repo list is showing, so typing
@@ -239,7 +356,9 @@
   $effect(() => {
     if (mode === "repo-list") {
       void search; // re-run when the input is (re)mounted after leaving the menu
-      tick().then(() => search?.focus());
+      // Don't re-select an existing query (e.g. the ">" prefix on an app-scope
+      // open) — just ensure focus.
+      tick().then(() => search?.focus(false));
     }
   });
 
@@ -262,6 +381,32 @@
     }
   }
 
+  async function runCommandAndHide(path: string, cmd: string, shell: string) {
+    if (running) return;
+    running = true;
+    try {
+      await runCommand(path, cmd, shell);
+      await hideOverlay();
+    } catch (e) {
+      status = `Run failed: ${e}`;
+    } finally {
+      running = false;
+    }
+  }
+
+  async function runAppAndHide(app: AppEntry) {
+    if (running) return;
+    running = true;
+    try {
+      await runApp(app);
+      await hideOverlay();
+    } catch (e) {
+      appStatus = `Launch failed: ${e}`;
+    } finally {
+      running = false;
+    }
+  }
+
   /** Enter on a repo runs its default action (the terminal), else the first. */
   async function activateRepo(i: number) {
     const entry = results[i];
@@ -274,21 +419,24 @@
   function onListKeydown(e: KeyboardEvent) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      selected = Math.min(selected + 1, results.length - 1);
+      selected = Math.min(selected + 1, activeCount - 1);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       selected = Math.max(selected - 1, 0);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (e.shiftKey || e.ctrlKey) {
+      if (appScope) {
+        const hit = filteredApps[selected];
+        if (hit) runAppAndHide(hit.app);
+      } else if (e.shiftKey || e.ctrlKey) {
         if (results[selected]) openActions(results[selected]);
       } else {
         activateRepo(selected);
       }
     } else if (e.key === "Tab") {
-      // Tab always goes "forward" — into the selected repo's actions.
+      // Tab goes "forward" — into the selected repo's actions (repo scope only).
       e.preventDefault();
-      if (results[selected]) openActions(results[selected]);
+      if (!appScope && results[selected]) openActions(results[selected]);
     } else if (e.key === "Delete") {
       e.preventDefault();
       query = "";
@@ -297,7 +445,8 @@
       hideOverlay();
     } else if (e.key.toLowerCase() === "r" && e.ctrlKey) {
       e.preventDefault();
-      rescan();
+      if (appScope) rescanAppsNow();
+      else rescan();
     } else if (
       (e.key === "," || e.code === "Comma") &&
       (e.ctrlKey || e.metaKey)
@@ -339,6 +488,8 @@
   function onWindowKeydown(e: KeyboardEvent) {
     if (mode === "action-menu") {
       onMenuKeydown(e);
+    } else if (mode === "run-command") {
+      // The RunCommand component owns its keys (Enter / Esc).
     } else if (mode === "settings") {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -361,6 +512,9 @@
       if (back) menuBack();
       else if (menuItems[actionSel]?.kind === "submenu")
         activateMenuItem(actionSel);
+    } else if (appScope) {
+      if (back) hideOverlay();
+      else if (filteredApps[selected]) runAppAndHide(filteredApps[selected].app);
     } else {
       if (back) hideOverlay();
       else if (results[selected]) openActions(results[selected]);
@@ -370,12 +524,15 @@
   onMount(() => {
     const unlisteners: Array<Promise<() => void>> = [];
     unlisteners.push(
-      onOverlayShown(() => {
-        query = "";
+      onOverlayShown((scope) => {
+        // The app-launcher hotkey opens straight into the ">" scope, caret
+        // after the prefix so the first keystroke filters rather than replaces.
+        query = scope === "apps" ? ">" : "";
         selected = 0;
         backToList();
-        void tick().then(() => search?.focus());
+        void tick().then(() => search?.focus(scope !== "apps"));
         void loadInitial();
+        if (scope === "apps") void loadApps();
       }),
     );
     unlisteners.push(
@@ -392,6 +549,9 @@
       }),
     );
     unlisteners.push(onReposUpdated(() => void refresh()));
+    unlisteners.push(
+      onAppsUpdated(() => void listApps().then((p) => (apps = p.apps))),
+    );
     unlisteners.push(
       onRepoContextUpdated((path) => {
         // A background re-inspect found this repo stale — rebuild the menu in
@@ -410,6 +570,7 @@
 
     search?.focus();
     void loadInitial();
+    void loadApps();
 
     // Update check: once now, then daily while the app runs.
     void pollUpdates();
@@ -435,8 +596,23 @@
          border border-hair bg-panel/[0.82] backdrop-blur-xl"
 >
   {#if mode === "repo-list"}
-    <SearchInput bind:this={search} bind:value={query} />
-    {#if noRepos}
+    <SearchInput
+      bind:this={search}
+      bind:value={query}
+      placeholder={appScope ? "Search apps…" : "Search repos…    › for apps"}
+    />
+    {#if appScope}
+      <AppList
+        entries={filteredApps}
+        {selected}
+        scanning={appsScanning}
+        onselect={(i) => (selected = i)}
+        onactivate={(i) => {
+          selected = i;
+          if (filteredApps[i]) runAppAndHide(filteredApps[i].app);
+        }}
+      />
+    {:else if noRepos}
       <div
         class="flex flex-1 flex-col items-center justify-center gap-2.5 px-10 text-center"
       >
@@ -467,6 +643,15 @@
       onselect={(i) => (actionSel = i)}
       onrun={(i) => activateMenuItem(i)}
       onback={menuBack}
+    />
+  {:else if mode === "run-command" && activeRepo}
+    <RunCommand
+      repoName={activeRepo.repo.name}
+      repoPath={activeRepo.repo.path}
+      template={promptTemplate}
+      onrun={(cmd, sh) =>
+        activeRepo && runCommandAndHide(activeRepo.repo.path, cmd, sh)}
+      onback={() => (mode = "action-menu")}
     />
   {:else if mode === "settings"}
     <Settings onback={backToList} onsaved={() => rescan()} />
@@ -505,7 +690,7 @@
           </svg>
         </button>
       {/if}
-      <span class="truncate">{status}</span>
+      <span class="truncate">{footerStatus}</span>
       {#if mode === "repo-list"}
         <span class="inline-flex shrink-0 items-center gap-1"
           ><kbd>Ctrl+R</kbd>rescan</span

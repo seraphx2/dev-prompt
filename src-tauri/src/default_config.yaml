@@ -20,6 +20,9 @@
 #   {{env:VAR}}                 {{<program-key>}} a resolved program
 
 hotkey: CmdOrCtrl+Shift+Space
+# Second global hotkey — opens straight into the ">" app launcher. Same key as
+# ">". Set to "" in config.yaml (or "turn off" in Settings) to disable it.
+apps_hotkey: CmdOrCtrl+Shift+Period
 roots: []
 scan:
   max_depth: 4
@@ -31,6 +34,17 @@ scan:
   #                     ancestor's .gitmodules, not under vendor/ third_party/ …
   collapse_nested: true
 cache_ttl_secs: 900
+
+# --- installed-app launcher (the ">" scope in the search bar) ---------------
+# Type ">" in the overlay to search installed apps instead of repos. Windows
+# only for now. Discovery unions Start Menu shortcuts, Store apps, the Uninstall
+# registry entries, and a bounded *.exe scan of %LOCALAPPDATA%\Programs.
+apps:
+  enabled: true
+  # Extra folders to scan for portable / unregistered executables.
+  extra_dirs: []
+  # Drop any app whose name or path contains one of these (case-insensitive).
+  exclude: []
 
 # --- discovery markers -------------------------------------------------------
 # VCS dirs + workspace files with no distinct actions. Build manifests
@@ -139,7 +153,7 @@ programs:
       - "%USERPROFILE%/springtoolsuite4/SpringToolSuite4.exe"
 
   terminal:
-    windows: [wt.exe]
+    windows: [wt.exe, alacritty, wezterm]
     linux:
       [alacritty, kitty, wezterm, foot, gnome-terminal, konsole, xfce4-terminal, x-terminal-emulator, xterm]
     macos: [open]
@@ -350,6 +364,7 @@ universal:
     - { id: terminal, name: "Open in terminal", terminal: true, icon: terminal }
     - { id: filemanager, name: "Reveal in file manager", program: "{{filemanager}}", args: ["{{path}}"], icon: folder }
     - { id: copy-path, name: "Copy path", client: true, icon: copy }
+    - { id: run-command, name: "Run command…", prompt: true, terminal: true, icon: run }
 
     - { id: claude-code, name: "Launch Claude Code", terminal: true, run: "claude", needs: [claude], icon: claude }
     - { id: vscode, name: "Open in VS Code", program: "{{code}}", args: ["{{path}}"], needs: [code], icon: vscode }

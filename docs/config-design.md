@@ -20,37 +20,49 @@ Files: `rules.rs` (or a `providers/` split if it grows), `default_config.yaml`.
 
 ---
 
-## 9. `prompt: true` / "Run command…" · _medium-hard, new frontend mode_
+## 10. Terminal abstraction — non-Windows · _hard, mostly untestable here_
 
-A dynamic action: prompt for a one-off command, run it in the terminal at the
-repo dir.
+The Windows half shipped (see Done): `TermKind` table (`wt` / `alacritty` /
+`wezterm`), a `terminal:` pin and `terminal_template:` override, the `shell:`
+knob + per-shell `shell_wrap`, `list_terminals` / `list_shells`, and the
+Settings dropdowns. Left:
 
-- `RuleAction.prompt: bool`; `{{input}}` template var.
-- Frontend: a fourth overlay mode (or an inline input on the action row) that
-  captures the string, then calls `run_action` with it threaded through.
-- Backend: `run_action` needs an optional `input` arg that `expand()` picks up.
+- **Linux emulator table** — `terminalize()`'s `#[cfg(not(windows))]` branch
+  still spawns the bare command with no window. Add the same table shape:
+  - `alacritty --working-directory D -e CMD` · `kitty --directory D CMD`
+  - `wezterm start --cwd D -- CMD` · `gnome-terminal --working-directory=D -- CMD`
+  - `konsole --workdir D -e CMD` · `foot --working-directory=D CMD`
+  - `xterm -e sh -c 'cd D; CMD; exec $SHELL'`
+  - Wayland-only emulators + the `x-terminal-emulator` alias. Verify on WSLg / VM.
+- **macOS** — `open -a Terminal D` opens a window; running a *command* needs
+  `osascript` (`tell app "Terminal" to do script …`) or a temp script.
+- **`shell_wrap` on non-Windows** — currently the branch runs the command
+  bare; wire `config.shell` + the per-shell "run and hold" flags in there too.
 
-Files: `config.rs`, `rules.rs`, `commands.rs`, `App.svelte`, a new component,
-`ipc.ts`.
+Files: `rules.rs` (`terminalize`, `shell_wrap`), `default_config.yaml`.
 
 ---
 
-## 10. Linux terminal picker · _hard — and untestable without a GUI Linux_
+## 16. App launcher — phase 2 · _incremental on the shipped V1_
 
-`terminalize()` on non-Windows just spawns the bare command (no window). Needs:
+The `>` app scope shipped (see Done): Windows discovery (Start Menu + Store +
+Uninstall keys + bounded `%LOCALAPPDATA%\Programs` scan), extracted+cached
+icons, frecency, `apps.{enabled,extra_dirs,exclude}`, Settings controls. Left:
 
-- a per-emulator table: working-dir flag + command-exec syntax
-  - `alacritty --working-directory D -e CMD`
-  - `kitty --directory D CMD`
-  - `wezterm start --cwd D -- CMD`
-  - `gnome-terminal --working-directory=D -- CMD`
-  - `konsole --workdir D -e CMD`
-  - `foot --working-directory=D CMD`
-  - `xterm -e sh -c 'cd D; CMD; exec $SHELL'`
-- "first of `programs.terminal.linux` that resolves" → pick its table entry.
-- `terminal:` in `config.yaml` to pin one; raw-template override for exotic setups.
+- **Blended overflow** — when a no-prefix repo query has few/no matches, show the
+  top ~4 app hits under a dim `— Apps —` divider without leaving repo scope.
+  Needs the keyboard-nav model to walk a mixed list and Enter to branch (repo →
+  action menu, app → launch).
+- **App action menu** — Tab on an app row → Open / Open file location / Run as
+  administrator / Copy path. Currently Tab is a no-op in the `>` scope.
+- **Non-Windows discovery** — `apps::discover` returns `[]` off Windows. Linux:
+  parse `$XDG_DATA_DIRS/applications/*.desktop` (`Name`, `Exec`, `Icon`, skip
+  `NoDisplay=true`). macOS: enumerate `/Applications` + `~/Applications`
+  `.app` bundles, launch via `open -a`.
+- **Native enumeration** — replace the embedded PowerShell script with direct
+  registry reads + `IShellLink` if the ~4 s cold rescan ever matters.
 
-Files: `rules.rs`, `default_config.yaml`. Verify on WSLg / a VM.
+Files: `src-tauri/src/apps.rs`, `src/App.svelte`, `src/lib/components/AppList.svelte`.
 
 ---
 
@@ -134,6 +146,49 @@ Files: `rules.rs` (one provider arm each) + a small parser module per tool;
 
 ---
 
+## 15. Conditional / computed template expansion · _config-language feature_
+
+Today `{{...}}` is plain string substitution — no conditionals, no fallbacks,
+no computed values. That's the wall every "detect X, then adapt" case hits, and
+it's why things like venv-aware Python had to be built in Rust rather than
+authored in `rules.yaml`.
+
+Concretely, a user *can* already:
+
+- match a rule on a directory (`match: [.venv, venv]` — dir names are in the
+  file list), and
+- use `{{path}}` / `{{file}}` in a template-expanded `program:`, e.g.
+  `program: "{{file}}/bin/python"`, with `when: windows` / `when: unix` for the
+  `Scripts` vs `bin` split.
+
+What they **can't** do:
+
+- **Fallback** — one action that uses the venv interpreter *if `.venv` exists*
+  and bare `python` otherwise. No `{{venv_python | default: python}}`. You end
+  up duplicating every action (venv set + plain set → noise), or hardcoding a
+  path that's broken on projects without a venv.
+- **Existence-guard an action** — a rule action's raw `program:` isn't verified
+  to be a real file the way a `programs:` candidate is; it's used as typed.
+- **Compute once, use many** — `venv` threads into pip + pytest + django + run
+  uniformly in Rust; in config you'd repeat the literal in each action.
+- **Project-relative `programs:`** — `programs:` entries resolve once,
+  process-wide, before any project is known, so `{{path}}` isn't available
+  there; no reusable project-scoped program key.
+
+Possible directions (pick one, keep it small):
+
+- `{{a | default: b}}` / `{{a ?? b}}` coalescing in `expand()`.
+- A rule/action-level `when_file:` / `unless_file:` guard (glob, relative to the
+  project dir) so an action only emits when a path exists — covers the venv
+  case without a full expression language.
+- Computed vars: a rule `let:` block (`venv_py: "{{path}}/.venv/bin/python"`)
+  whose values are only bound when their referenced path exists.
+
+Files: `rules.rs` (`expand` + `build_action`), `config.rs` (schema),
+`docs/configuration.md`.
+
+---
+
 ## Done
 
 - **#1** Fatten `default_config.yaml` — 2026-08-31
@@ -161,10 +216,33 @@ Files: `rules.rs` (one provider arm each) + a small parser module per tool;
   `tox.ini`/`tests/`), run entry (`main.py`/`app.py`/`__main__.py`), pipenv +
   pdm runners, and more markers (`setup.py`, `setup.cfg`, `Pipfile`,
   `manage.py`) so non-`requirements.txt` projects get detected. — 2026-09-01
+- **Terminal emulator selector (Windows)** — `TermKind` table (`wt` /
+  `alacritty` / `wezterm`), `terminal:` pin + `terminal_template:` override in
+  `config.yaml`, `list_terminals` command, Settings dropdown. — 2026-09-01
+- **#9 "Run command…" + shell default (Windows)** — `prompt: true` actions +
+  `{{input}}`; a 4th overlay mode (`RunCommand.svelte`) with a per-run shell
+  picker; `run_command` / `list_shells`; `config.shell` + per-shell `shell_wrap`
+  ("run and hold" for pwsh / cmd / bash / nu / …) + a Settings **Shell**
+  dropdown. — 2026-09-01
+- **App launcher — `>` scope (Windows)** — type `>` in the search bar to search
+  installed apps instead of repos. `apps.rs` discovery via one embedded
+  PowerShell script (Start Menu + `Get-StartApps` Store + Uninstall hives +
+  bounded `%LOCALAPPDATA%\Programs` scan), extracted + disk-cached icons,
+  `keep_entry` noise filter + path dedupe; `apps.json` cache (24 h TTL),
+  `list_apps` / `rescan_apps` / `run_app`, `app-usage.json` frecency;
+  `AppList` / `AppRow`, `config.apps.{enabled,extra_dirs,exclude}` + Settings
+  controls. Phase 2 in #16. — 2026-09-01
+- **Second app-launcher hotkey + hotkey guard** — `config.apps_hotkey`
+  (default `Ctrl+Shift+.`) opens straight into the `>` scope; scoped
+  `overlay:shown` payload. `hotkeys.ts::classifyHotkey` block/warn list in the
+  recorder (extracted to `HotkeyRecorder.svelte`, used for both hotkeys).
+  Settings: hotkeys side-by-side, Shell inline with Terminal, "Start at login"
+  to the top, a zero-height sticky Save, save-first "Rescan" buttons. — 2026-09-01
 
-Remaining, hardest-first: #6 task-targets provider, #9 `prompt:` action, #14
-(Cargo-workspace / Xcode / Nx-Turbo-Bazel), #10 Linux terminal picker, #11 fs
-watcher, #12 Wayland hotkey, #13 Eclipse provisioner.
+Remaining, hardest-first: #6 task-targets provider, #16 app-launcher phase 2,
+#15 conditional template expansion, #14 (Cargo-workspace / Xcode / Nx-Turbo-
+Bazel), #10 terminal abstraction (non-Windows), #11 fs watcher, #12 Wayland
+hotkey, #13 Eclipse provisioner.
 
 ## Not on this list (shipped alongside)
 

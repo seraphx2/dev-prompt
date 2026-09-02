@@ -42,6 +42,10 @@ pub struct Action {
     pub cwd: Option<String>,
     /// Handled in the frontend (copy path). No process spawned.
     pub client_side: bool,
+    /// Opens the "Run command…" input rather than spawning. `hint` is the
+    /// template (may contain `{{input}}`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub prompt: bool,
 }
 
 // --- program resolution (process-global memo) -----------------------------
@@ -59,11 +63,35 @@ pub fn clear_program_cache() {
 
 pub struct Resolver<'a> {
     programs: &'a std::collections::BTreeMap<String, ProgramSpec>,
+    /// `config.terminal` — a pinned emulator (key / bare name / absolute path).
+    terminal: Option<&'a str>,
+    /// `config.terminal_template` — raw `{{dir}}` / `{{cmd}}` invocation.
+    terminal_template: Option<&'a str>,
+    /// `config.shell` — shell a one-shot terminal command runs inside.
+    shell: Option<&'a str>,
 }
 
 impl<'a> Resolver<'a> {
     pub fn new(programs: &'a std::collections::BTreeMap<String, ProgramSpec>) -> Self {
-        Self { programs }
+        Self {
+            programs,
+            terminal: None,
+            terminal_template: None,
+            shell: None,
+        }
+    }
+
+    /// Attach the terminal settings from `config.yaml`.
+    pub fn with_terminal(mut self, terminal: Option<&'a str>, template: Option<&'a str>) -> Self {
+        self.terminal = terminal;
+        self.terminal_template = template;
+        self
+    }
+
+    /// Attach `config.shell`.
+    pub fn with_shell(mut self, shell: Option<&'a str>) -> Self {
+        self.shell = shell;
+        self
     }
 
     /// Resolve a program key to an absolute path, memoized for the process.
@@ -204,6 +232,8 @@ fn resolve_var(key: &str, t: &Tmpl) -> String {
             .and_then(|f| f.file_stem())
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default(),
+        // Left intact for a `prompt:` action — the frontend fills it in.
+        "input" => "{{input}}".to_string(),
         _ => {
             if let Some(var) = key.strip_prefix("env:") {
                 std::env::var(var).unwrap_or_default()
@@ -214,8 +244,68 @@ fn resolve_var(key: &str, t: &Tmpl) -> String {
     }
 }
 
+/// Split a Windows command-line *argument* string the way `CommandLineToArgvW`
+/// does: `\` and `"` interact (`\"` is a literal quote, `\\` a literal
+/// backslash), `""` inside a quoted run is a literal `"`, and `'` is an ordinary
+/// character. `.lnk` Arguments follow these rules — [`shell_split`]'s POSIX-ish
+/// `'`/`"` handling silently eats an unpaired apostrophe.
+pub fn win_split_args(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut started = false;
+    let mut in_quotes = false;
+    let mut backslashes = 0usize;
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => backslashes += 1,
+            '"' => {
+                for _ in 0..backslashes / 2 {
+                    cur.push('\\');
+                }
+                started = true;
+                if backslashes % 2 == 1 {
+                    cur.push('"'); // \" -> literal quote
+                } else if in_quotes && chars.peek() == Some(&'"') {
+                    cur.push('"'); // "" inside quotes -> one literal quote
+                    chars.next();
+                } else {
+                    in_quotes = !in_quotes;
+                }
+                backslashes = 0;
+            }
+            c if c.is_whitespace() && !in_quotes => {
+                for _ in 0..backslashes {
+                    cur.push('\\');
+                }
+                backslashes = 0;
+                if started {
+                    out.push(std::mem::take(&mut cur));
+                    started = false;
+                }
+            }
+            c => {
+                for _ in 0..backslashes {
+                    cur.push('\\');
+                }
+                backslashes = 0;
+                cur.push(c);
+                started = true;
+            }
+        }
+    }
+    for _ in 0..backslashes {
+        cur.push('\\');
+    }
+    if started {
+        out.push(cur);
+    }
+    out
+}
+
 /// Quote-aware split for `run:` strings.
-fn shell_split(s: &str) -> Vec<String> {
+pub fn shell_split(s: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut quote: Option<char> = None;
@@ -262,39 +352,215 @@ fn basename(p: &str) -> String {
 
 // --- terminal wrapping -------------------------------------------------
 
+/// Terminal emulators whose command-line dev-prompt knows how to build.
+/// Anything else needs a `terminal_template`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TermKind {
+    WindowsTerminal,
+    Alacritty,
+    WezTerm,
+    Unknown,
+}
+
+fn term_kind(binary: &str) -> TermKind {
+    match basename(binary)
+        .to_lowercase()
+        .trim_end_matches(".exe")
+    {
+        "wt" | "windowsterminal" => TermKind::WindowsTerminal,
+        "alacritty" => TermKind::Alacritty,
+        "wezterm" | "wezterm-gui" => TermKind::WezTerm,
+        _ => TermKind::Unknown,
+    }
+}
+
+/// `(id, label)` for every configured terminal candidate that resolves on this
+/// machine *and* has a known invocation. Feeds the Settings dropdown.
+pub fn terminal_options(config: &Config) -> Vec<(String, String)> {
+    let Some(spec) = config.programs.get("terminal") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for c in spec.candidates() {
+        let ProgramCandidate::Path(raw) = c else {
+            continue;
+        };
+        let Some(resolved) = resolve_path_candidate(raw) else {
+            continue;
+        };
+        if term_kind(&resolved) == TermKind::Unknown {
+            continue;
+        }
+        // A plain name / absolute path round-trips as-is; a glob stores the hit.
+        let id = if raw.contains(['*', '?', '[']) {
+            resolved.clone()
+        } else {
+            raw.clone()
+        };
+        let label = basename(&resolved);
+        if !out.iter().any(|(_, l): &(String, String)| *l == label) {
+            out.push((id, label));
+        }
+    }
+    out
+}
+
+/// Wrap `argv` in a shell that runs the command and then stays open with a real
+/// console (ANSI colour, a live TTY — tools like Claude Code render monochrome
+/// otherwise). `shell` = `config.shell`, else `pwsh` → Windows PowerShell.
+///
+/// Each of these shells takes the command as one string, so every `argv` element
+/// is quoted for that shell first — `argv.join(" ")` alone lets the shell
+/// re-split on a space inside a path (`C:\Users\First Last\...`).
+#[cfg(windows)]
+fn shell_wrap(argv: &[String], shell: Option<&str>) -> Vec<String> {
+    let shell = shell.unwrap_or(if which("pwsh").is_some() {
+        "pwsh"
+    } else {
+        "powershell"
+    });
+    let kind = basename(shell).to_lowercase();
+    let kind = kind.trim_end_matches(".exe");
+
+    fn join_quoted(argv: &[String], q: impl Fn(&str) -> String) -> String {
+        argv.iter().map(|a| q(a)).collect::<Vec<_>>().join(" ")
+    }
+    // PowerShell / nu: single quotes are literal (`''` escapes one quote).
+    let ps = |s: &str| format!("'{}'", s.replace('\'', "''"));
+    // POSIX: `'\''` closes, escapes a literal quote, reopens.
+    let sh = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
+    // cmd: double-quote anything with whitespace or a quote.
+    let cm = |s: &str| {
+        if s.is_empty() || s.contains([' ', '\t', '"']) {
+            format!("\"{}\"", s.replace('"', "\"\""))
+        } else {
+            s.to_string()
+        }
+    };
+
+    match kind {
+        // `& <quoted>` so a quoted program *path* is invoked, not echoed.
+        "pwsh" | "powershell" => vec![
+            shell.to_string(),
+            "-NoLogo".to_string(),
+            "-NoExit".to_string(),
+            "-Command".to_string(),
+            format!("& {}", join_quoted(argv, ps)),
+        ],
+        // Outer quotes: `cmd /k` strips the outermost pair before parsing.
+        "cmd" => vec![
+            shell.to_string(),
+            "/k".to_string(),
+            format!("\"{}\"", join_quoted(argv, cm)),
+        ],
+        "bash" | "zsh" | "sh" | "fish" => vec![
+            shell.to_string(),
+            "-c".to_string(),
+            format!("{}; exec {kind}", join_quoted(argv, sh)),
+        ],
+        "nu" => vec![
+            shell.to_string(),
+            "-e".to_string(),
+            join_quoted(argv, ps),
+        ],
+        _ => vec![
+            shell.to_string(),
+            "-c".to_string(),
+            join_quoted(argv, sh),
+        ],
+    }
+}
+
 /// `(program, args, cwd)` to run `argv` in a terminal at `cwd`. Empty `argv`
-/// means "just open a terminal there".
-fn terminalize(argv: &[String], cwd: &str, resolver: &Resolver) -> (String, Vec<String>, Option<String>) {
+/// means "just open a terminal there". `wrap` = run `argv` inside a shell that
+/// stays open (one-shot commands); `false` = hand `argv` to the emulator raw
+/// (e.g. `argv == ["bash"]` → an interactive bash).
+fn terminalize(
+    argv: &[String],
+    cwd: &str,
+    resolver: &Resolver,
+    wrap: bool,
+) -> (String, Vec<String>, Option<String>) {
     #[cfg(windows)]
     {
+        // 1. Which binary — a pinned `terminal:`, else the first resolving
+        //    `programs.terminal` candidate, else Windows Terminal.
         let term = resolver
-            .resolve("terminal")
+            .terminal
+            .and_then(|t| {
+                if t.contains(['/', '\\']) {
+                    Some(t.to_string()) // absolute / relative path, use as-is
+                } else {
+                    which(t) // bare name → PATH
+                }
+            })
+            .or_else(|| resolver.resolve("terminal"))
             .unwrap_or_else(|| "wt.exe".to_string());
-        let mut args = vec!["-d".to_string(), cwd.to_string()];
-        if !argv.is_empty() {
-            // Run the command *inside* a shell so it keeps a real console — ANSI
-            // colour, a live TTY, and the tab stays open after it exits (WT
-            // otherwise closes a bare `wt <cmd>` tab on exit, and the command's
-            // stdout isn't a tty so tools like Claude Code render monochrome).
-            let shell = if which("pwsh").is_some() {
-                "pwsh"
-            } else {
-                "powershell"
-            };
-            args.extend([
-                shell.to_string(),
-                "-NoLogo".to_string(),
-                "-NoExit".to_string(),
-                "-Command".to_string(),
-            ]);
+
+        // 2. Raw template override. Split the template first, then splice `argv`
+        //    in where `{{cmd}}` stands as its own token — joining `argv` and
+        //    re-splitting the whole line shreds any element with a space in it.
+        if let Some(tmpl) = resolver.terminal_template {
+            let mut parts: Vec<String> = Vec::new();
+            for tok in shell_split(tmpl) {
+                if tok == "{{cmd}}" {
+                    parts.extend(argv.iter().cloned());
+                } else {
+                    parts.push(tok.replace("{{dir}}", cwd));
+                }
+            }
+            return (
+                parts.first().cloned().unwrap_or_else(|| term.clone()),
+                parts.into_iter().skip(1).collect(),
+                None,
+            );
         }
-        args.extend(argv.iter().cloned());
-        (term, args, None)
+
+        // The command portion, shell-wrapped or raw.
+        let run: Vec<String> = if argv.is_empty() {
+            Vec::new()
+        } else if wrap {
+            shell_wrap(argv, resolver.shell)
+        } else {
+            argv.to_vec()
+        };
+
+        // 3. Known-emulator table.
+        match term_kind(&term) {
+            TermKind::Alacritty => {
+                let mut args = vec!["--working-directory".to_string(), cwd.to_string()];
+                if !run.is_empty() {
+                    args.push("-e".to_string());
+                    args.extend(run);
+                }
+                (term, args, None)
+            }
+            TermKind::WezTerm => {
+                let mut args =
+                    vec!["start".to_string(), "--cwd".to_string(), cwd.to_string()];
+                if !run.is_empty() {
+                    args.push("--".to_string());
+                    args.extend(run);
+                }
+                (term, args, None)
+            }
+            TermKind::WindowsTerminal => {
+                let mut args = vec!["-d".to_string(), cwd.to_string()];
+                args.extend(run);
+                (term, args, None)
+            }
+            TermKind::Unknown => {
+                // No table entry and no template: best effort — hand the
+                // command straight to the binary with a working directory.
+                (term, argv.to_vec(), Some(cwd.to_string()))
+            }
+        }
     }
     #[cfg(not(windows))]
     {
-        // No per-emulator working-dir flag knowledge yet (its own milestone):
-        // run the command directly in `cwd`.
+        // Per-emulator handling on non-Windows is its own milestone
+        // (docs/config-design.md #10); run the command directly in `cwd`.
+        let _ = wrap;
         if argv.is_empty() {
             let term = resolver
                 .resolve("terminal")
@@ -304,6 +570,18 @@ fn terminalize(argv: &[String], cwd: &str, resolver: &Resolver) -> (String, Vec<
             (argv[0].clone(), argv[1..].to_vec(), Some(cwd.to_string()))
         }
     }
+}
+
+/// Build a spawnable `(program, args, cwd)` for a free-form command line — the
+/// seam the "Run command…" backend uses. `wrap: false` opens `command` (a shell
+/// name) interactively.
+pub fn terminal_command(
+    command: &str,
+    cwd: &str,
+    resolver: &Resolver,
+    wrap: bool,
+) -> (String, Vec<String>, Option<String>) {
+    terminalize(&shell_split(command), cwd, resolver, wrap)
 }
 
 // --- action construction ---------------------------------------------
@@ -328,11 +606,30 @@ fn build_action(
             args: Vec::new(),
             cwd: None,
             client_side: true,
+            prompt: false,
         });
     }
 
     if ra.needs.iter().any(|k| resolver.resolve(k).is_none()) {
         return None;
+    }
+
+    if ra.prompt {
+        // No process here — the frontend opens the "Run command…" input. `run:`
+        // (if any) is the template shown, `{{input}}` left intact for it.
+        return Some(Action {
+            id,
+            label: expand(&ra.name, t),
+            hint: ra.run.as_deref().map(|r| expand(r, t)).unwrap_or_default(),
+            group: group.to_string(),
+            default: ra.default,
+            icon: ra.icon.clone(),
+            program: String::new(),
+            args: Vec::new(),
+            cwd: Some(cwd.to_string()),
+            client_side: false,
+            prompt: true,
+        });
     }
 
     let (program, args, hint): (String, Vec<String>, String) = if let Some(prog) = &ra.program {
@@ -361,7 +658,7 @@ fn build_action(
         } else {
             std::iter::once(program.clone()).chain(args).collect()
         };
-        terminalize(&argv, cwd, resolver)
+        terminalize(&argv, cwd, resolver, true)
     } else {
         if program.is_empty() {
             return None;
@@ -380,6 +677,7 @@ fn build_action(
         args: final_args,
         cwd: final_cwd,
         client_side: false,
+        prompt: false,
     })
 }
 
@@ -403,7 +701,7 @@ fn provider_actions(
 ) -> Vec<Action> {
     let term_in = |id: String, label: String, argv: Vec<String>, at: &str| -> Action {
         let hint = argv.join(" ");
-        let (p, a, c) = terminalize(&argv, at, resolver);
+        let (p, a, c) = terminalize(&argv, at, resolver, true);
         Action {
             id,
             label,
@@ -415,6 +713,7 @@ fn provider_actions(
             args: a,
             cwd: c,
             client_side: false,
+            prompt: false,
         }
     };
     let term = |id: String, label: String, argv: Vec<String>| term_in(id, label, argv, cwd);
@@ -867,7 +1166,9 @@ fn universal_actions(config: &Config, repo: &Repo, resolver: &Resolver) -> Vec<A
 }
 
 pub fn evaluate(config: &Config, ctx: &RepoContext, repo: &Repo) -> Vec<Action> {
-    let resolver = Resolver::new(&config.programs);
+    let resolver = Resolver::new(&config.programs)
+        .with_terminal(config.terminal.as_deref(), config.terminal_template.as_deref())
+        .with_shell(config.shell.as_deref());
 
     // Universal actions first — "open in terminal / editor / file manager" is the
     // common case; the detected per-ecosystem stuff sits below it.
@@ -930,7 +1231,9 @@ pub struct ProjectHit {
 /// settings "trace a repo" view. Shares [`rule_gate`] and [`rule_project_actions`]
 /// with [`evaluate`], so its verdicts match what the action menu actually shows.
 pub fn trace(config: &Config, ctx: &RepoContext, repo: &Repo) -> RepoTrace {
-    let resolver = Resolver::new(&config.programs);
+    let resolver = Resolver::new(&config.programs)
+        .with_terminal(config.terminal.as_deref(), config.terminal_template.as_deref())
+        .with_shell(config.shell.as_deref());
 
     let universal = universal_actions(config, repo, &resolver)
         .into_iter()
@@ -1154,6 +1457,61 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn shell_wrap_quotes_each_arg_per_shell() {
+        let argv = vec!["cargo".to_string(), "build".to_string()];
+        assert_eq!(
+            shell_wrap(&argv, Some("cmd")),
+            vec!["cmd", "/k", "\"cargo build\""]
+        );
+        assert_eq!(
+            shell_wrap(&argv, Some("bash")),
+            vec!["bash", "-c", "'cargo' 'build'; exec bash"]
+        );
+        let ps = shell_wrap(&argv, Some("pwsh"));
+        assert_eq!(&ps[..4], &["pwsh", "-NoLogo", "-NoExit", "-Command"]);
+        assert_eq!(ps.last().unwrap(), "& 'cargo' 'build'");
+        // None -> pwsh (or powershell) with the -Command wrap.
+        assert!(shell_wrap(&argv, None).contains(&"-Command".to_string()));
+
+        // A space in a path must survive the round-trip through each shell.
+        let spaced = vec!["C:\\a b\\tool.exe".to_string(), "run".to_string()];
+        assert_eq!(
+            shell_wrap(&spaced, Some("pwsh")).last().unwrap(),
+            "& 'C:\\a b\\tool.exe' 'run'"
+        );
+        assert_eq!(
+            shell_wrap(&spaced, Some("cmd")).last().unwrap(),
+            "\"\"C:\\a b\\tool.exe\" run\""
+        );
+    }
+
+    #[test]
+    fn prompt_action_yields_a_no_program_action_keeping_the_template() {
+        let programs = std::collections::BTreeMap::new();
+        let r = Resolver::new(&programs);
+        let t = Tmpl {
+            repo: "/r",
+            path: "/r",
+            rel: "",
+            name: "r",
+            file: None,
+            resolver: &r,
+        };
+        let ra = crate::config::RuleAction {
+            name: "npm run…".into(),
+            run: Some("npm run {{input}}".into()),
+            prompt: true,
+            terminal: true,
+            ..Default::default()
+        };
+        let a = build_action(&ra, "npm-run".into(), "General", "/r", &t, &r).unwrap();
+        assert!(a.prompt);
+        assert!(a.program.is_empty());
+        assert_eq!(a.hint, "npm run {{input}}"); // {{input}} survives expand()
+    }
+
     #[test]
     fn shell_split_handles_quotes() {
         assert_eq!(shell_split(r#"docker compose up -d"#), ["docker", "compose", "up", "-d"]);
@@ -1162,6 +1520,94 @@ mod tests {
             ["code", "my dir"]
         );
         assert!(shell_split("").is_empty());
+    }
+
+    #[test]
+    fn win_split_args_follows_commandline_to_argv_rules() {
+        // An apostrophe is an ordinary character, not a quote.
+        assert_eq!(win_split_args("--user=O'Brien"), ["--user=O'Brien"]);
+        // Double quotes group; spaces inside survive.
+        assert_eq!(
+            win_split_args(r#"--fullscreen "--title=My Movie""#),
+            ["--fullscreen", "--title=My Movie"]
+        );
+        // Backslash/quote interaction: \" is a literal quote, \\ a literal slash.
+        assert_eq!(win_split_args(r#"a\"b"#), [r#"a"b"#]);
+        assert_eq!(win_split_args(r#"a\\b"#), [r"a\\b"]);
+        // "" inside a quoted run is one literal quote.
+        assert_eq!(win_split_args(r#""a""b""#), [r#"a"b"#]);
+        // A quoted path keeps its spaces and internal backslashes.
+        assert_eq!(win_split_args(r#""C:\Some Path\x""#), [r"C:\Some Path\x"]);
+        assert!(win_split_args("").is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn terminalize_drives_known_emulators_and_templates() {
+        let programs = std::collections::BTreeMap::new();
+        let argv = vec!["cargo".to_string(), "test".to_string()];
+        let cwd = "C:\\repo";
+        // Absolute-path pins bypass the PATH lookup so the branch is deterministic.
+        let pin = |p: &'static str, t: Option<&'static str>| {
+            Resolver::new(&programs).with_terminal(Some(p), t)
+        };
+
+        let (p, a, c) = terminalize(&argv, cwd, &pin("C:/x/wt.exe", None), true);
+        assert_eq!(p, "C:/x/wt.exe");
+        assert_eq!(&a[..2], &["-d", cwd]);
+        assert!(a.contains(&"-Command".to_string()));
+        assert_eq!(a.last().unwrap(), "& 'cargo' 'test'");
+        assert_eq!(c, None);
+
+        let (_, a, _) = terminalize(&argv, cwd, &pin("C:/x/alacritty.exe", None), true);
+        assert_eq!(&a[..2], &["--working-directory", cwd]);
+        assert!(a.contains(&"-e".to_string()));
+
+        let (_, a, _) = terminalize(&argv, cwd, &pin("C:/x/wezterm.exe", None), true);
+        assert_eq!(&a[..4], &["start", "--cwd", cwd, "--"]);
+
+        // Empty argv = "just open a terminal here" — no shell wrap.
+        let (_, a, _) = terminalize(&[], cwd, &pin("C:/x/alacritty.exe", None), true);
+        assert_eq!(a, vec!["--working-directory", cwd]);
+
+        // wrap = false — argv handed to the emulator raw (e.g. an interactive shell).
+        let (_, a, _) =
+            terminalize(&["bash".to_string()], cwd, &pin("C:/x/wt.exe", None), false);
+        assert_eq!(a, vec!["-d", cwd, "bash"]);
+
+        // config.shell picks the wrapper.
+        let r = Resolver::new(&programs)
+            .with_terminal(Some("C:/x/wt.exe"), None)
+            .with_shell(Some("cmd"));
+        let (_, a, _) = terminalize(&argv, cwd, &r, true);
+        assert_eq!(&a[2..], &["cmd", "/k", "\"cargo test\""]);
+
+        // Unknown emulator, no template -> command handed to the binary + cwd.
+        let (p, a, c) = terminalize(&argv, cwd, &pin("C:/x/kitty.exe", None), true);
+        assert_eq!(p, "C:/x/kitty.exe");
+        assert_eq!(a, argv);
+        assert_eq!(c, Some(cwd.to_string()));
+
+        // Template override wins over the table.
+        let (p, a, c) = terminalize(
+            &argv,
+            cwd,
+            &pin("C:/x/kitty.exe", Some("kitty --directory {{dir}} -- {{cmd}}")),
+            true,
+        );
+        assert_eq!(p, "kitty");
+        assert_eq!(a, vec!["--directory", cwd, "--", "cargo", "test"]);
+        assert_eq!(c, None);
+
+        // A space in cwd or in an argv element survives the template splice.
+        let spaced = vec!["my tool".to_string(), "go".to_string()];
+        let (_, a, _) = terminalize(
+            &spaced,
+            "C:\\my repo",
+            &pin("C:/x/kitty.exe", Some("kitty --directory {{dir}} -- {{cmd}}")),
+            true,
+        );
+        assert_eq!(a, vec!["--directory", "C:\\my repo", "--", "my tool", "go"]);
     }
 
     #[test]

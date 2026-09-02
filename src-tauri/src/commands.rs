@@ -5,13 +5,16 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::apps::{self, AppEntry};
 use crate::cache;
 use crate::config::{self, resolved_roots, Config};
 use crate::error::{AppError, AppResult};
 use crate::index::{self, ScoredRepo};
 use crate::inspect::{self, RepoContext};
 use crate::launch;
-use crate::rules::{build_actions as build_actions_impl, find_action, Action};
+use crate::rules::{
+    build_actions as build_actions_impl, find_action, terminal_command, Action, Resolver,
+};
 use crate::scan::{self, Repo};
 
 /// In-memory app state shared across commands.
@@ -23,6 +26,10 @@ pub struct AppState {
     pub contexts: Mutex<HashMap<String, RepoContext>>,
     /// Age (secs) of the list currently in `repos`; -1 when never cached.
     pub age_secs: Mutex<i64>,
+    /// Installed apps for the `>` scope, cached in `apps.json`.
+    pub apps: Mutex<Vec<AppEntry>>,
+    /// Age (secs) of `apps`; -1 when never cached.
+    pub apps_age_secs: Mutex<i64>,
     /// Whether losing focus dismisses the overlay. Off while the settings
     /// screen is open so clicking away to copy a path doesn't nuke edits.
     pub dismiss_on_blur: Mutex<bool>,
@@ -39,11 +46,14 @@ impl AppState {
             contexts: HashMap::new(),
             age_secs: -1,
         });
+        let (apps, apps_age) = cache::load_apps().unwrap_or((Vec::new(), -1));
         AppState {
             config: Mutex::new(config),
             repos: Mutex::new(loaded.repos),
             contexts: Mutex::new(loaded.contexts),
             age_secs: Mutex::new(loaded.age_secs),
+            apps: Mutex::new(apps),
+            apps_age_secs: Mutex::new(apps_age),
             dismiss_on_blur: Mutex::new(true),
             first_run,
         }
@@ -269,15 +279,24 @@ pub fn reload_config(state: State<'_, AppState>) -> AppResult<Config> {
 #[serde(rename_all = "snake_case")]
 pub struct ConfigPatch {
     pub hotkey: Option<String>,
+    /// `Some("")` turns the second (app-launcher) hotkey off.
+    pub apps_hotkey: Option<String>,
     pub roots: Option<Vec<String>>,
     pub cache_ttl_secs: Option<u64>,
     pub scan_max_depth: Option<usize>,
     pub collapse_nested: Option<config::CollapseNested>,
+    /// `Some("")` clears the pin / template / shell back to auto.
+    pub terminal: Option<String>,
+    pub terminal_template: Option<String>,
+    pub shell: Option<String>,
+    pub apps: Option<config::AppsConfig>,
 }
 
 /// Apply an editable subset of settings: write `config.yaml`, update the live
-/// config, and re-register the global hotkey if it changed (validated first, so
-/// a bad accelerator is rejected before anything is persisted).
+/// config, and re-register the global hotkeys if they changed. Accelerators are
+/// parsed up front and the new ones claimed before the file is written; if any
+/// step fails the claims are rolled back, so the live shortcuts and `config.yaml`
+/// never disagree.
 #[tauri::command]
 pub fn save_config(
     app: AppHandle,
@@ -286,11 +305,17 @@ pub fn save_config(
 ) -> AppResult<Config> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-    let old_hotkey = state.config.lock().unwrap().hotkey.clone();
+    let (old_hotkey, old_apps_hotkey) = {
+        let cfg = state.config.lock().unwrap();
+        (cfg.hotkey.clone(), cfg.apps_hotkey.clone())
+    };
     let mut user = config::load_user()?;
 
     if let Some(h) = patch.hotkey {
         user.hotkey = Some(h.trim().to_string());
+    }
+    if let Some(h) = patch.apps_hotkey {
+        user.apps_hotkey = Some(h.trim().to_string());
     }
     if let Some(roots) = patch.roots {
         user.roots = roots
@@ -312,19 +337,310 @@ pub fn save_config(
         }
         user.scan = Some(scan);
     }
-
-    let new_hotkey = user.hotkey.clone().unwrap_or_else(|| old_hotkey.clone());
-    if new_hotkey != old_hotkey {
-        let gs = app.global_shortcut();
-        gs.register(new_hotkey.as_str())
-            .map_err(|e| AppError::msg(format!("invalid hotkey `{new_hotkey}`: {e}")))?;
-        let _ = gs.unregister(old_hotkey.as_str());
+    if let Some(t) = patch.terminal {
+        let t = t.trim();
+        user.terminal = (!t.is_empty()).then(|| t.to_string());
+    }
+    if let Some(t) = patch.terminal_template {
+        let t = t.trim();
+        user.terminal_template = (!t.is_empty()).then(|| t.to_string());
+    }
+    if let Some(s) = patch.shell {
+        let s = s.trim();
+        user.shell = (!s.is_empty()).then(|| s.to_string());
+    }
+    if let Some(mut a) = patch.apps {
+        a.extra_dirs = a
+            .extra_dirs
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        a.exclude = a
+            .exclude
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        user.apps = Some(a);
     }
 
-    config::save_user(&user)?;
+    let new_hotkey = user.hotkey.clone().unwrap_or_else(|| old_hotkey.clone());
+    // Fall back to the current effective value (like `new_hotkey` does) when the
+    // patch omits it — otherwise a Save that doesn't mention `apps_hotkey` reads
+    // as "cleared" and tears down the bundled default.
+    let new_apps_hotkey = user
+        .apps_hotkey
+        .clone()
+        .or_else(|| old_apps_hotkey.clone())
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty());
+
+    // Reject malformed combos before touching OS state or the config file.
+    let parse_ok = |accel: &str| -> AppResult<()> {
+        accel
+            .parse::<tauri_plugin_global_shortcut::Shortcut>()
+            .map(|_| ())
+            .map_err(|e| AppError::msg(format!("\"{accel}\" isn't a valid hotkey. ({e})")))
+    };
+    parse_ok(&new_hotkey)?;
+    if let Some(h) = &new_apps_hotkey {
+        parse_ok(h)?;
+    }
+
+    if let Some(h) = &new_apps_hotkey {
+        if crate::same_shortcut(h, &new_hotkey) {
+            return Err(AppError::msg(
+                "The app launcher hotkey must be different from the repo browser hotkey.",
+            ));
+        }
+    }
+
+    let hotkey_changed = !crate::same_shortcut(&new_hotkey, &old_hotkey);
+    let old_apps_nonempty = old_apps_hotkey.as_deref().filter(|s| !s.is_empty());
+    let apps_changed = match (new_apps_hotkey.as_deref(), old_apps_nonempty) {
+        (Some(a), Some(b)) => !crate::same_shortcut(a, b),
+        (None, None) => false,
+        _ => true,
+    };
+
+    let register = |accel: &str| -> AppResult<()> {
+        app.global_shortcut().register(accel).map_err(|e| {
+            AppError::msg(format!(
+                "Couldn't register {accel} — it may already be in use by another \
+                 app, or it isn't a valid combination. ({e})"
+            ))
+        })
+    };
+    let unregister = |accel: &str| {
+        let _ = app.global_shortcut().unregister(accel);
+    };
+
+    // Claim the new accelerators first; on any failure, undo the claims so the
+    // live shortcuts still match what's on disk.
+    let mut claimed: Vec<&str> = Vec::new();
+    if hotkey_changed {
+        register(&new_hotkey)?;
+        claimed.push(new_hotkey.as_str());
+    }
+    if apps_changed {
+        if let Some(h) = &new_apps_hotkey {
+            if let Err(e) = register(h) {
+                for a in &claimed {
+                    unregister(a);
+                }
+                return Err(e);
+            }
+            claimed.push(h.as_str());
+        }
+    }
+
+    // A changed `terminal` pin must not lose to a memoized `terminal` lookup.
+    crate::rules::clear_program_cache();
+
+    if let Err(e) = config::save_user(&user) {
+        for a in &claimed {
+            unregister(a);
+        }
+        return Err(e);
+    }
+
+    // Persisted — safe to release the superseded accelerators now.
+    if hotkey_changed {
+        unregister(old_hotkey.as_str());
+    }
+    if apps_changed {
+        if let Some(old) = old_apps_nonempty {
+            if new_apps_hotkey.as_deref() != Some(old) {
+                unregister(old);
+            }
+        }
+    }
+
     let merged = config::load()?;
     *state.config.lock().unwrap() = merged.clone();
     Ok(merged)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalOption {
+    /// Value to store in `config.terminal` (bare name / path).
+    pub id: String,
+    /// Display name (the binary's basename).
+    pub label: String,
+}
+
+/// Installed terminal emulators dev-prompt knows how to drive — feeds the
+/// Settings dropdown.
+#[tauri::command]
+pub fn list_terminals(state: State<'_, AppState>) -> Vec<TerminalOption> {
+    let cfg = state.config.lock().unwrap();
+    crate::rules::terminal_options(&cfg)
+        .into_iter()
+        .map(|(id, label)| TerminalOption { id, label })
+        .collect()
+}
+
+/// Shells found on PATH — feeds the Settings "Shell" dropdown and the
+/// "Run command…" picker.
+#[tauri::command]
+pub fn list_shells() -> Vec<String> {
+    let mut out: Vec<String> = ["pwsh", "powershell", "cmd", "bash", "zsh", "fish", "nu"]
+        .into_iter()
+        .filter(|name| crate::rules::which(name).is_some())
+        .map(String::from)
+        .collect();
+
+    // Git-for-Windows bash usually isn't on PATH.
+    #[cfg(windows)]
+    if !out.iter().any(|s| s == "bash") {
+        let git_bash = ["ProgramFiles", "ProgramFiles(x86)"]
+            .into_iter()
+            .filter_map(|b| std::env::var(b).ok())
+            .flat_map(|pf| {
+                ["Git\\bin\\bash.exe", "Git\\usr\\bin\\bash.exe"]
+                    .map(|rel| Path::new(&pf).join(rel))
+            })
+            .any(|p| p.is_file());
+        if git_bash {
+            out.push("bash".to_string());
+        }
+    }
+    out
+}
+
+/// Run a free-form command in `path`'s terminal. Blank `command` opens the
+/// chosen shell interactively. Feeds the "Run command…" action.
+#[tauri::command]
+pub fn run_command(
+    state: State<'_, AppState>,
+    path: String,
+    command: String,
+    shell: Option<String>,
+) -> AppResult<()> {
+    let repo = repo_for_path(&state, &path);
+    let cfg = state.config.lock().unwrap();
+    let shell = shell
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| cfg.shell.clone());
+    let resolver = Resolver::new(&cfg.programs)
+        .with_terminal(cfg.terminal.as_deref(), cfg.terminal_template.as_deref())
+        .with_shell(shell.as_deref());
+
+    let command = command.trim();
+    let (program, args, cwd) = if command.is_empty() {
+        let sh = shell.clone().unwrap_or_else(|| {
+            if crate::rules::which("pwsh").is_some() {
+                "pwsh".into()
+            } else {
+                "powershell".into()
+            }
+        });
+        terminal_command(&sh, &repo.path, &resolver, false)
+    } else {
+        terminal_command(command, &repo.path, &resolver, true)
+    };
+
+    let action = Action {
+        id: "run-command".into(),
+        label: command.to_string(),
+        hint: command.to_string(),
+        group: String::new(),
+        default: false,
+        icon: None,
+        program,
+        args,
+        cwd,
+        client_side: false,
+        prompt: false,
+    };
+    launch::launch(&action, &repo)
+}
+
+// --- installed-app launcher ( > scope ) -----------------------------------
+
+/// Apps change rarely — a day-long freshness window keeps re-enumeration cheap.
+const APPS_TTL_SECS: u64 = 86_400;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppsPayload {
+    pub apps: Vec<AppEntry>,
+    pub age_secs: i64,
+    pub stale: bool,
+}
+
+/// Fold current launch counts into a freshly-cloned app list.
+fn apps_with_usage(mut apps: Vec<AppEntry>) -> Vec<AppEntry> {
+    let counts = crate::usage::counts();
+    for a in &mut apps {
+        a.uses = counts.get(&a.exec.to_lowercase()).copied().unwrap_or(0);
+    }
+    apps
+}
+
+/// Cache-first installed-app list for the `>` scope.
+#[tauri::command]
+pub fn list_apps(state: State<'_, AppState>) -> AppsPayload {
+    let apps = apps_with_usage(state.apps.lock().unwrap().clone());
+    let age = *state.apps_age_secs.lock().unwrap();
+    AppsPayload {
+        apps,
+        age_secs: age,
+        stale: cache::is_stale(age, APPS_TTL_SECS),
+    }
+}
+
+/// Re-enumerate installed apps off the UI thread. Emits `apps:updated`.
+#[tauri::command]
+pub async fn rescan_apps(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppsPayload> {
+    let cfg = state.config.lock().unwrap().clone();
+
+    let fresh = if cfg.apps.enabled {
+        tauri::async_runtime::spawn_blocking(move || apps::discover(&cfg))
+            .await
+            .map_err(|e| AppError::msg(format!("app scan task failed: {e}")))?
+    } else {
+        Vec::new()
+    };
+
+    cache::save_apps(&fresh)?;
+    *state.apps.lock().unwrap() = fresh.clone();
+    *state.apps_age_secs.lock().unwrap() = 0;
+
+    let _ = app.emit("apps:updated", ());
+    Ok(AppsPayload {
+        apps: apps_with_usage(fresh),
+        age_secs: 0,
+        stale: false,
+    })
+}
+
+/// Launch an installed app, bumping its frecency count only if the launch
+/// actually starts (a stale entry whose exe is gone shouldn't climb the list).
+#[tauri::command]
+pub fn run_app(
+    exec: String,
+    kind: String,
+    args: Option<Vec<String>>,
+) -> AppResult<()> {
+    let kind = match kind.as_str() {
+        "aumid" => crate::apps::AppKind::Aumid,
+        _ => crate::apps::AppKind::Exe,
+    };
+    let entry = AppEntry {
+        name: String::new(),
+        exec: exec.clone(),
+        kind,
+        args: args.unwrap_or_default(),
+        icon: None,
+        source: String::new(),
+        uses: 0,
+    };
+    apps::launch(&entry)?;
+    crate::usage::bump(&exec);
+    Ok(())
 }
 
 /// Toggle whether focus loss dismisses the overlay (frontend turns this off for

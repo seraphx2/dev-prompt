@@ -5,14 +5,18 @@
     getAutostart,
     getConfig,
     listRepos,
+    listShells,
+    listTerminals,
     openRulesFile,
     pickDirectories,
     reloadConfig,
     repoRuleTrace,
+    rescanApps,
     saveConfig,
     setAutostart,
   } from "../ipc";
-  import type { ConfigSummary, RepoTrace } from "../types";
+  import type { ConfigSummary, RepoTrace, TerminalOption } from "../types";
+  import HotkeyRecorder from "./HotkeyRecorder.svelte";
   import { icons, iconKeys } from "../icons";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { currentVersion, installUpdate } from "../updater";
@@ -31,6 +35,18 @@
   let scanDepth = $state(4);
   // Bound to the <select>; serialises to `true` / `false` / `"auto"` on save.
   let collapseNested = $state<"true" | "false" | "auto">("true");
+  // "" = auto, "__custom__" = raw template, else a terminal id.
+  let terminalSel = $state("");
+  let terminalTemplate = $state("");
+  let terminals = $state<TerminalOption[]>([]);
+  // "" = default shell (pwsh -> powershell), else a shell name.
+  let shellSel = $state("");
+  let shells = $state<string[]>([]);
+  // Installed-app launcher (the ">" scope).
+  let appsEnabled = $state(true);
+  let appExtraDirs = $state<string[]>([]);
+  let appExclude = $state<string[]>([]);
+  let appsSnapshot = "";
   let autostart = $state(false);
   let loaded = $state(false);
   let busy = $state(false);
@@ -107,6 +123,16 @@
     } catch {
       traceRepos = [];
     }
+    try {
+      terminals = await listTerminals();
+    } catch {
+      terminals = [];
+    }
+    try {
+      shells = await listShells();
+    } catch {
+      shells = [];
+    }
     void pollUpdates(true);
   });
 
@@ -146,57 +172,18 @@
     }
   }
 
-  // --- hotkey recorder ---
-  let capturing = $state(false);
-  let captureHint = $state("");
-  let typeMode = $state(false);
+  // --- global hotkeys (recorder logic lives in HotkeyRecorder.svelte) ---
+  let appsHotkey = $state("");
 
-  function codeToKey(code: string, fallback: string): string {
-    if (code.startsWith("Key")) return code.slice(3); // KeyA -> A
-    if (code.startsWith("Digit")) return code.slice(5); // Digit1 -> 1
-    return code || fallback; // Space, F5, Comma, ArrowUp, Minus, …
-  }
-
-  function onCaptureKey(e: KeyboardEvent) {
-    if (!capturing) return;
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (e.key === "Escape") {
-      capturing = false;
-      captureHint = "";
-      return;
-    }
-    if (["Control", "Alt", "Shift", "Meta", "OS"].includes(e.key)) {
-      captureHint = "…keep going";
-      return;
-    }
-
-    const mods: string[] = [];
-    if (e.ctrlKey) mods.push("CmdOrCtrl");
-    if (e.altKey) mods.push("Alt");
-    if (e.shiftKey) mods.push("Shift");
-    if (e.metaKey) mods.push("Super");
-
-    const key = codeToKey(e.code, e.key);
-    if (mods.length === 0 && !/^F\d{1,2}$/.test(key)) {
-      captureHint = "needs Ctrl, Alt or Shift";
-      return;
-    }
-
-    hotkey = [...mods, key].join("+");
-    capturing = false;
-    captureHint = "";
-    void saveHotkey();
-  }
-
-  // Recording a hotkey commits immediately (typed edits still use Save).
-  async function saveHotkey() {
+  // A recorded/typed combo commits immediately; the big Save is for the rest.
+  async function persistHotkey(patch: { hotkey?: string; apps_hotkey?: string }) {
     busy = true;
     note("");
     try {
-      await saveConfig({ hotkey: hotkey.trim() });
-      note(`Hotkey saved — ${hotkey.trim()}`);
+      const c = await saveConfig(patch);
+      hotkey = c.hotkey;
+      appsHotkey = c.apps_hotkey ?? "";
+      note("Hotkey saved.");
     } catch (e) {
       note(`${e}`, true);
     } finally {
@@ -212,11 +199,17 @@
 
   function applyConfig(c: {
     hotkey: string;
+    apps_hotkey?: string | null;
     roots: string[];
     scan: { max_depth: number; collapse_nested?: boolean | "auto" };
     cache_ttl_secs: number;
+    terminal?: string | null;
+    terminal_template?: string | null;
+    shell?: string | null;
+    apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
   }) {
     hotkey = c.hotkey;
+    appsHotkey = c.apps_hotkey ?? "";
     roots = c.roots.length ? [...c.roots] : [""];
     ttlMin = Math.max(1, Math.round(c.cache_ttl_secs / 60));
     scanDepth = Math.max(1, c.scan?.max_depth ?? 4);
@@ -224,6 +217,30 @@
       c.scan?.collapse_nested === undefined
         ? "true"
         : (String(c.scan.collapse_nested) as "true" | "false" | "auto");
+    terminalTemplate = c.terminal_template ?? "";
+    terminalSel = terminalTemplate ? "__custom__" : (c.terminal ?? "");
+    shellSel = c.shell ?? "";
+    appsEnabled = c.apps?.enabled ?? true;
+    appExtraDirs = [...(c.apps?.extra_dirs ?? [])];
+    appExclude = [...(c.apps?.exclude ?? [])];
+    appsSnapshot = JSON.stringify([appsEnabled, appExtraDirs, appExclude]);
+  }
+
+  const addAppDir = () => (appExtraDirs = [...appExtraDirs, ""]);
+  function removeAppDir(i: number) {
+    appExtraDirs = appExtraDirs.filter((_, k) => k !== i);
+  }
+  async function browseAppDirs() {
+    const picked = await pickDirectories();
+    if (!picked.length) return;
+    const have = new Set(appExtraDirs.map((d) => d.trim()).filter(Boolean));
+    const add = picked.filter((p) => !have.has(p));
+    if (add.length) {
+      appExtraDirs = [
+        ...appExtraDirs.map((d) => d.trim()).filter(Boolean),
+        ...add,
+      ];
+    }
   }
 
   async function reload() {
@@ -252,25 +269,59 @@
     }
   }
 
-  async function save() {
+  /** Persist every editable field. Returns whether the app settings changed. */
+  async function persist(): Promise<{ ok: boolean; appsChanged: boolean }> {
     busy = true;
     note("");
     try {
+      const appExtra = appExtraDirs.map((d) => d.trim()).filter(Boolean);
+      const appExcl = appExclude.map((d) => d.trim()).filter(Boolean);
       await saveConfig({
-        hotkey: hotkey.trim(),
         roots: roots.map((r) => r.trim()).filter(Boolean),
         cache_ttl_secs: Math.max(60, Math.round(ttlMin * 60)),
         scan_max_depth: Math.max(1, Math.round(scanDepth)),
         collapse_nested: collapseNested === "auto" ? "auto" : collapseNested === "true",
+        terminal: terminalSel === "__custom__" ? "" : terminalSel,
+        terminal_template:
+          terminalSel === "__custom__" ? terminalTemplate.trim() : "",
+        shell: shellSel,
+        apps: { enabled: appsEnabled, extra_dirs: appExtra, exclude: appExcl },
       });
-      note("Saved.");
-      onsaved();
+      const next = JSON.stringify([appsEnabled, appExtra, appExcl]);
+      const appsChanged = next !== appsSnapshot;
+      appsSnapshot = next;
       void loadSummary();
+      return { ok: true, appsChanged };
     } catch (e) {
       note(`${e}`, true);
+      return { ok: false, appsChanged: false };
     } finally {
       busy = false;
     }
+  }
+
+  async function save() {
+    const { ok, appsChanged } = await persist();
+    if (!ok) return;
+    note("Saved.");
+    onsaved(); // App.svelte re-scans repos
+    if (appsChanged) void rescanApps();
+  }
+
+  // The contextual "Rescan" buttons save first, so they act on what's on screen
+  // rather than whatever was last saved.
+  async function saveAndRescanRepos() {
+    const { ok } = await persist();
+    if (!ok) return;
+    note("Saved — rescanning repositories…");
+    onsaved();
+  }
+
+  async function saveAndRescanApps() {
+    const { ok } = await persist();
+    if (!ok) return;
+    note("Saved — rescanning apps…");
+    await rescanApps();
   }
 </script>
 
@@ -297,53 +348,57 @@
   {#if !loaded}
     <div class="text-white/30">Loading…</div>
   {:else}
-    <label class="block space-y-1.5">
-      <span class="text-orange-400">Global hotkey</span>
-      {#if typeMode}
-        <input
-          bind:value={hotkey}
-          spellcheck="false"
-          placeholder="CmdOrCtrl+Shift+Space"
-          class="w-full rounded border border-hair bg-white/[0.04] px-2 py-1.5 font-mono text-[12px] text-white/90 focus:border-white/25 focus:outline-none"
-        />
-      {:else}
-        <button
-          type="button"
-          onclick={() => {
-            captureHint = "";
-            capturing = true;
-          }}
-          onkeydown={onCaptureKey}
-          class="flex w-full items-center justify-between rounded border px-2 py-1.5 text-left transition-colors
-                 {capturing
-            ? 'border-orange-400/60 bg-orange-400/[0.08]'
-            : 'border-hair bg-white/[0.04] hover:border-white/25'}"
-        >
-          <span
-            class="font-mono text-[12px] {capturing ? 'text-white/40' : 'text-white/90'}"
-          >
-            {capturing ? "Press a combination…" : hotkey || "not set"}
-          </span>
-          <span class="shrink-0 text-[10px] uppercase tracking-wide text-white/30">
-            {capturing ? "Esc cancels" : "click to record"}
-          </span>
-        </button>
-      {/if}
-      <span class="block text-[11px] text-white/25">
-        {#if captureHint}
-          <span class="text-amber-300/70">{captureHint}</span>
-        {:else}
+    <!-- Save floats top-right while the fields it controls are on screen, then
+         scrolls away with this wrapper past the Rules section (which has its
+         own buttons and doesn't use Save). The sticky strip is zero-height so
+         it overlays the first row instead of pushing content down. -->
+    <div class="relative">
+      <div class="pointer-events-none sticky top-0 z-20 h-0">
+        <div class="flex justify-end">
           <button
             type="button"
-            class="underline decoration-white/20 underline-offset-2 hover:text-white/50"
-            onclick={() => {
-              typeMode = !typeMode;
-              capturing = false;
-            }}>{typeMode ? "use the recorder" : "type it manually"}</button
+            onclick={save}
+            disabled={busy}
+            class="pointer-events-auto -mt-1 rounded-md border border-sky-400/40 bg-sky-500/90 px-3.5 py-1.5 text-[12px] font-medium text-white shadow-lg shadow-black/40 backdrop-blur hover:bg-sky-500 disabled:opacity-50"
           >
-        {/if}
-      </span>
-    </label>
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+
+      <div class="space-y-5">
+        <label class="flex items-center gap-2">
+          <input
+            type="checkbox"
+            bind:checked={autostart}
+            onchange={toggleAutostart}
+            class="h-3.5 w-3.5 accent-sky-500"
+          />
+          <span class="text-orange-400">Start at login</span>
+        </label>
+
+        <div class="space-y-2">
+          <span class="text-orange-400">Global hotkeys</span>
+      <div class="grid grid-cols-2 gap-4">
+        <HotkeyRecorder
+          label="Repo browser"
+          value={hotkey}
+          {busy}
+          onsave={(a) => persistHotkey({ hotkey: a })}
+        />
+        <HotkeyRecorder
+          label="App launcher"
+          value={appsHotkey}
+          clearable
+          {busy}
+          onsave={(a) => persistHotkey({ apps_hotkey: a })}
+        />
+      </div>
+      <p class="text-[11px] text-white/25">
+        The app launcher hotkey opens the overlay straight into the
+        <span class="font-mono">›</span> installed-apps view.
+      </p>
+    </div>
 
     <div class="space-y-1.5">
       <span class="text-orange-400"
@@ -401,6 +456,15 @@
         >
           Browse…
         </button>
+        <button
+          type="button"
+          disabled={busy}
+          onclick={saveAndRescanRepos}
+          title="Save settings and rescan the root directories now"
+          class="rounded border border-hair px-2 py-1 text-[12px] text-white/50 hover:bg-white/10 hover:text-white/80 disabled:opacity-50"
+        >
+          Rescan
+        </button>
       </div>
     </div>
 
@@ -440,26 +504,122 @@
       </select>
     </label>
 
-    <label class="flex items-center gap-2">
-      <input
-        type="checkbox"
-        bind:checked={autostart}
-        onchange={toggleAutostart}
-        class="h-3.5 w-3.5 accent-sky-500"
-      />
-      <span class="text-orange-400">Start at login</span>
-    </label>
+    <div class="flex flex-wrap gap-6">
+      <label class="block space-y-1.5">
+        <span class="text-orange-400">Terminal</span>
+        <select
+          bind:value={terminalSel}
+          title="Which terminal emulator dev-prompt opens for terminal actions"
+          class="w-72 rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+        >
+          <option value="">Auto (first available)</option>
+          {#each terminals as t (t.id)}
+            <option value={t.id}>{t.label}</option>
+          {/each}
+          {#if terminalSel && terminalSel !== "__custom__" && !terminals.some((t) => t.id === terminalSel)}
+            <option value={terminalSel}>{terminalSel}</option>
+          {/if}
+          <option value="__custom__">Custom…</option>
+        </select>
+        {#if terminalSel === "__custom__"}
+          <input
+            bind:value={terminalTemplate}
+            spellcheck="false"
+            placeholder="wezterm start --cwd {'{{dir}}'} -- {'{{cmd}}'}"
+            class="w-full rounded border border-hair bg-white/[0.04] px-2 py-1.5 font-mono text-[12px] text-white/90 focus:border-white/25 focus:outline-none"
+          />
+          <span class="block text-[11px] text-white/25">
+            <span class="font-mono">{"{{dir}}"}</span> = working directory,
+            <span class="font-mono">{"{{cmd}}"}</span> = the command to run.
+          </span>
+        {/if}
+      </label>
 
-    <div>
-      <button
-        type="button"
-        onclick={save}
-        disabled={busy}
-        class="rounded bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
-      >
-        Save
-      </button>
+      <label class="block space-y-1.5">
+        <span class="text-orange-400">Shell</span>
+        <select
+          bind:value={shellSel}
+          title="Shell a one-shot terminal command runs inside"
+          class="w-56 rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+        >
+          <option value="">Default (PowerShell)</option>
+          {#each shells as s (s)}
+            <option value={s}>{s}</option>
+          {/each}
+          {#if shellSel && !shells.includes(shellSel)}
+            <option value={shellSel}>{shellSel}</option>
+          {/if}
+        </select>
+      </label>
     </div>
+
+    <div class="space-y-2 border-t border-hair pt-4">
+      <label class="flex items-center gap-2">
+        <input
+          type="checkbox"
+          bind:checked={appsEnabled}
+          class="h-3.5 w-3.5 accent-sky-500"
+        />
+        <span class="text-orange-400">Index installed apps</span>
+        <span class="text-white/25">— type <span class="font-mono">›</span> in the search bar</span>
+      </label>
+      {#if appsEnabled}
+        <div class="space-y-1.5 pl-5">
+          <span class="text-[11px] text-white/30"
+            >Extra folders to scan for portable executables (Start Menu, Store
+            apps and installed programs are found automatically).</span
+          >
+          {#each appExtraDirs as _d, i (i)}
+            <div class="flex items-center gap-2">
+              <input
+                bind:value={appExtraDirs[i]}
+                spellcheck="false"
+                placeholder="D:\tools"
+                class="min-w-0 flex-1 rounded border border-hair bg-white/[0.04] px-2 py-1.5 font-mono text-[12px] text-white/90 focus:border-white/25 focus:outline-none"
+              />
+              <button
+                type="button"
+                onclick={() => removeAppDir(i)}
+                aria-label="Remove folder"
+                title="Remove folder"
+                class="shrink-0 rounded border border-hair px-2 py-1 text-[11px] text-white/40 hover:bg-white/10 hover:text-white/70"
+              >
+                ×
+              </button>
+            </div>
+          {/each}
+          <div class="flex gap-2">
+            <button
+              type="button"
+              onclick={addAppDir}
+              class="rounded border border-hair px-2 py-1 text-[12px] text-white/50 hover:bg-white/10 hover:text-white/80"
+            >
+              + Add folder
+            </button>
+            <button
+              type="button"
+              onclick={browseAppDirs}
+              class="rounded border border-hair px-2 py-1 text-[12px] text-white/50 hover:bg-white/10 hover:text-white/80"
+            >
+              Browse…
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onclick={saveAndRescanApps}
+              title="Save settings and re-enumerate installed apps now"
+              class="rounded border border-hair px-2 py-1 text-[12px] text-white/50 hover:bg-white/10 hover:text-white/80 disabled:opacity-50"
+            >
+              Rescan apps
+            </button>
+          </div>
+        </div>
+      {/if}
+    </div>
+
+      </div>
+    </div>
+    <!-- /save-relevant wrapper -->
 
     <div class="space-y-2 border-t border-hair pt-4">
       <span class="text-orange-400">Rules</span>

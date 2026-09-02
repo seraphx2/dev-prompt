@@ -28,11 +28,29 @@ const RULES_TEMPLATE: &str = include_str!("rules_template.yaml");
 pub struct Config {
     /// Accelerator string understood by `tauri-plugin-global-shortcut`.
     pub hotkey: String,
+    /// Optional second global hotkey that opens the overlay straight into the
+    /// `>` app-launcher scope. `None` / empty = not registered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apps_hotkey: Option<String>,
     /// Root directories to scan. `~`, `%VAR%`, `$VAR` are expanded.
     pub roots: Vec<String>,
     pub scan: ScanConfig,
     /// How long a cached repo list stays fresh.
     pub cache_ttl_secs: u64,
+    /// Terminal emulator to open (`programs.terminal` key, a bare name, or an
+    /// absolute path). `None` = first `programs.terminal` candidate that resolves.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<String>,
+    /// Raw invocation override for a terminal the built-in table doesn't know.
+    /// `{{dir}}` = working directory, `{{cmd}}` = the command to run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_template: Option<String>,
+    /// Shell a one-shot terminal command runs inside (`pwsh` / `cmd` / `bash`
+    /// / …). `None` = `pwsh`, falling back to Windows PowerShell.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell: Option<String>,
+    /// Installed-app launcher (`>` scope) settings.
+    pub apps: AppsConfig,
     /// Discovery markers — "this folder is a project". Every `rules[].match`
     /// also counts, so a rule implies a marker.
     pub markers: Vec<Marker>,
@@ -54,14 +72,43 @@ impl Default for Config {
         // guards against that).
         Config {
             hotkey: "CmdOrCtrl+Shift+Space".into(),
+            apps_hotkey: None,
             roots: Vec::new(),
             scan: ScanConfig::default(),
             cache_ttl_secs: 900,
+            terminal: None,
+            terminal_template: None,
+            shell: None,
+            apps: AppsConfig::default(),
             markers: Vec::new(),
             programs: BTreeMap::new(),
             rules: Vec::new(),
             universal: UniversalConfig::default(),
             disabled_rules: Vec::new(),
+        }
+    }
+}
+
+/// `apps:` in `config.yaml` — the installed-app launcher reached with `>`.
+/// Windows only; on other platforms discovery yields nothing regardless.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct AppsConfig {
+    /// Index installed applications at all.
+    pub enabled: bool,
+    /// Extra directories to scan for `*.exe` beyond `%LOCALAPPDATA%\Programs`.
+    pub extra_dirs: Vec<String>,
+    /// Case-insensitive substrings; an app whose name or path contains any is
+    /// dropped.
+    pub exclude: Vec<String>,
+}
+
+impl Default for AppsConfig {
+    fn default() -> Self {
+        AppsConfig {
+            enabled: true,
+            extra_dirs: Vec::new(),
+            exclude: Vec::new(),
         }
     }
 }
@@ -271,6 +318,9 @@ pub struct RuleAction {
     pub args: Vec<String>,
     /// Run inside the resolved terminal at the working dir.
     pub terminal: bool,
+    /// Opens the "Run command…" input instead of spawning; `run:` (if any) is
+    /// the template, `{{input}}` the typed value.
+    pub prompt: bool,
     /// Handled in the frontend (e.g. copy path). No process spawned.
     pub client: bool,
     /// Icon key for the menu row (see `src/lib/icons.ts` / Settings ▸ Icons).
@@ -307,12 +357,23 @@ pub struct UniversalConfig {
 pub struct UserConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hotkey: Option<String>,
+    /// `""` means "explicitly off" (survives a reload); absent means "unset".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apps_hotkey: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub roots: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scan: Option<ScanConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_ttl_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_template: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apps: Option<AppsConfig>,
 }
 
 /// `rules.yaml` — hand-authored overrides layered over the bundled defaults.
@@ -357,6 +418,10 @@ fn merge_settings(cfg: &mut Config, u: UserConfig) {
     if let Some(h) = u.hotkey {
         cfg.hotkey = h;
     }
+    if let Some(h) = u.apps_hotkey {
+        // An empty string is a deliberate "off" — keep it as `None`.
+        cfg.apps_hotkey = (!h.trim().is_empty()).then_some(h);
+    }
     if !u.roots.is_empty() {
         cfg.roots = u.roots;
     }
@@ -365,6 +430,18 @@ fn merge_settings(cfg: &mut Config, u: UserConfig) {
     }
     if let Some(t) = u.cache_ttl_secs {
         cfg.cache_ttl_secs = t;
+    }
+    if let Some(t) = u.terminal {
+        cfg.terminal = Some(t);
+    }
+    if let Some(t) = u.terminal_template {
+        cfg.terminal_template = Some(t);
+    }
+    if let Some(s) = u.shell {
+        cfg.shell = Some(s);
+    }
+    if let Some(a) = u.apps {
+        cfg.apps = a;
     }
 }
 
@@ -476,12 +553,21 @@ pub fn save_user(u: &UserConfig) -> AppResult<()> {
 fn first_run_user() -> UserConfig {
     UserConfig {
         hotkey: Some("CmdOrCtrl+Shift+Space".into()),
+        // The default lives in default_config.yaml so it applies to existing
+        // configs too; only write here if the user turns it off.
+        apps_hotkey: None,
         // No seeded roots — the first run shows the empty-state guidance and the
         // user picks their own directory. Guessing `~/git`, `~/src`, … just
         // added noise paths people had to hunt down and delete.
         roots: Vec::new(),
         scan: Some(ScanConfig::default()),
         cache_ttl_secs: Some(900),
+        terminal: None,
+        terminal_template: None,
+        shell: None,
+        // Bundled default is already `enabled: true`; leave the key out of the
+        // starter file so it stays uncluttered.
+        apps: None,
     }
 }
 
@@ -687,6 +773,52 @@ mod tests {
         })
         .unwrap();
         assert!(y.contains("collapse_nested: auto"), "{y}");
+    }
+
+    #[test]
+    fn apps_hotkey_defaults_on_and_treats_empty_as_off() {
+        let mut cfg = bundled_defaults();
+        assert_eq!(cfg.apps_hotkey.as_deref(), Some("CmdOrCtrl+Shift+Period"));
+
+        merge_settings(&mut cfg, serde_yaml_ng::from_str("apps_hotkey: Alt+Space").unwrap());
+        assert_eq!(cfg.apps_hotkey.as_deref(), Some("Alt+Space"));
+
+        merge_settings(&mut cfg, serde_yaml_ng::from_str("apps_hotkey: ''").unwrap());
+        assert_eq!(cfg.apps_hotkey, None); // explicit off round-trips
+    }
+
+    #[test]
+    fn apps_config_defaults_to_enabled() {
+        let cfg = bundled_defaults();
+        assert!(cfg.apps.enabled);
+        assert!(cfg.apps.extra_dirs.is_empty());
+        assert!(cfg.apps.exclude.is_empty());
+    }
+
+    #[test]
+    fn settings_file_carries_apps() {
+        let mut cfg = bundled_defaults();
+        let user: UserConfig = serde_yaml_ng::from_str(
+            "apps:\n  enabled: false\n  extra_dirs: [D:\\tools]\n  exclude: [zoom]\n",
+        )
+        .unwrap();
+        merge_settings(&mut cfg, user);
+        assert!(!cfg.apps.enabled);
+        assert_eq!(cfg.apps.extra_dirs, vec!["D:\\tools"]);
+        assert_eq!(cfg.apps.exclude, vec!["zoom"]);
+    }
+
+    #[test]
+    fn settings_file_carries_terminal_and_shell() {
+        let mut cfg = bundled_defaults();
+        let user: UserConfig = serde_yaml_ng::from_str(
+            "terminal: wezterm\nterminal_template: \"x --cd {{dir}}\"\nshell: bash\n",
+        )
+        .unwrap();
+        merge_settings(&mut cfg, user);
+        assert_eq!(cfg.terminal.as_deref(), Some("wezterm"));
+        assert_eq!(cfg.terminal_template.as_deref(), Some("x --cd {{dir}}"));
+        assert_eq!(cfg.shell.as_deref(), Some("bash"));
     }
 
     #[test]

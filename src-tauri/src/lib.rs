@@ -1,3 +1,4 @@
+mod apps;
 mod cache;
 mod commands;
 mod config;
@@ -11,6 +12,7 @@ mod launch;
 mod maven;
 mod rules;
 mod scan;
+mod usage;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -22,13 +24,19 @@ use commands::AppState;
 const OVERLAY_LABEL: &str = "overlay";
 
 /// Bring the overlay up: centered, focused, on top. `set_always_on_top` may have
-/// been dropped by "open config.yaml", so re-assert it here.
-fn show_overlay(window: &WebviewWindow) {
+/// been dropped by "open config.yaml", so re-assert it here. `scope` is
+/// `"repos"` normally, or `"apps"` when opened via the app-launcher hotkey — the
+/// frontend seeds the search box accordingly.
+fn show_overlay_scoped(window: &WebviewWindow, scope: &str) {
     let _ = window.center();
     let _ = window.set_always_on_top(true);
     let _ = window.show();
     let _ = window.set_focus();
-    let _ = window.emit("overlay:shown", ());
+    let _ = window.emit("overlay:shown", scope);
+}
+
+fn show_overlay(window: &WebviewWindow) {
+    show_overlay_scoped(window, "repos");
 }
 
 /// Tell the frontend the overlay is going away so it resets to the repo list
@@ -40,15 +48,38 @@ fn signal_overlay_hidden<R: tauri::Runtime>(window: &impl Emitter<R>) {
     let _ = window.emit("overlay:hidden", ());
 }
 
-/// Show the overlay, or hide it if it is already visible.
-fn toggle_overlay(window: &WebviewWindow) {
+/// Show the overlay in `scope`, or hide it if it is already visible.
+fn toggle_overlay_scoped(window: &WebviewWindow, scope: &str) {
     match window.is_visible() {
         Ok(true) => {
             signal_overlay_hidden(window);
             let _ = window.hide();
         }
-        _ => show_overlay(window),
+        _ => show_overlay_scoped(window, scope),
     }
+}
+
+fn toggle_overlay(window: &WebviewWindow) {
+    toggle_overlay_scoped(window, "repos");
+}
+
+/// True when `accel` parses to the same shortcut the OS just reported.
+fn shortcut_is(accel: &str, fired: &tauri_plugin_global_shortcut::Shortcut) -> bool {
+    accel
+        .parse::<tauri_plugin_global_shortcut::Shortcut>()
+        .map(|s| &s == fired)
+        .unwrap_or(false)
+}
+
+/// True when two accelerator strings resolve to the same shortcut, so
+/// `Shift+CmdOrCtrl+X` and `CmdOrCtrl+Shift+X` count as unchanged. Unparseable
+/// input matches nothing — callers validate parseability separately.
+pub(crate) fn same_shortcut(a: &str, b: &str) -> bool {
+    use tauri_plugin_global_shortcut::Shortcut;
+    matches!(
+        (a.parse::<Shortcut>(), b.parse::<Shortcut>()),
+        (Ok(x), Ok(y)) if x == y
+    )
 }
 
 fn apply_overlay_effects(window: &WebviewWindow) {
@@ -144,12 +175,23 @@ pub fn run() {
     builder
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    if event.state == ShortcutState::Pressed {
-                        if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
-                            toggle_overlay(&win);
-                        }
+                .with_handler(|app, shortcut, event| {
+                    if event.state != ShortcutState::Pressed {
+                        return;
                     }
+                    let Some(win) = app.get_webview_window(OVERLAY_LABEL) else {
+                        return;
+                    };
+                    // The app-launcher hotkey opens straight into the `>` scope.
+                    let scope = {
+                        let state = app.state::<AppState>();
+                        let cfg = state.config.lock().unwrap();
+                        match cfg.apps_hotkey.as_deref() {
+                            Some(h) if !h.is_empty() && shortcut_is(h, shortcut) => "apps",
+                            _ => "repos",
+                        }
+                    };
+                    toggle_overlay_scoped(&win, scope);
                 })
                 .build(),
         )
@@ -161,15 +203,20 @@ pub fn run() {
 
             apply_overlay_effects(&window);
 
-            // Register the configured global hotkey.
-            let hotkey = {
+            // Register the configured global hotkey(s).
+            let (hotkey, apps_hotkey) = {
                 let state = app.state::<AppState>();
                 let cfg = state.config.lock().unwrap();
-                cfg.hotkey.clone()
+                (cfg.hotkey.clone(), cfg.apps_hotkey.clone())
             };
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
             if let Err(e) = app.global_shortcut().register(hotkey.as_str()) {
                 eprintln!("failed to register hotkey `{hotkey}`: {e}");
+            }
+            if let Some(ah) = apps_hotkey.as_deref().filter(|h| !h.is_empty()) {
+                if let Err(e) = app.global_shortcut().register(ah) {
+                    eprintln!("failed to register apps hotkey `{ah}`: {e}");
+                }
             }
 
             // System-tray entry point — the window is otherwise invisible with
@@ -283,6 +330,12 @@ pub fn run() {
             commands::config_summary,
             commands::reload_config,
             commands::save_config,
+            commands::list_terminals,
+            commands::list_shells,
+            commands::run_command,
+            commands::list_apps,
+            commands::rescan_apps,
+            commands::run_app,
             commands::open_rules_file,
             commands::set_dismiss_on_blur,
             commands::set_update_hint,
@@ -291,4 +344,37 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running dev-prompt");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tauri_plugin_global_shortcut::Shortcut;
+
+    #[test]
+    fn shortcut_is_ignores_spelling_and_modifier_order() {
+        let fired: Shortcut = "CmdOrCtrl+Shift+Period".parse().unwrap();
+        assert!(shortcut_is("CmdOrCtrl+Shift+Period", &fired));
+        assert!(shortcut_is("shift+ctrl+Period", &fired)); // aliases + order
+        assert!(!shortcut_is("CmdOrCtrl+Shift+Space", &fired));
+        assert!(!shortcut_is("gibberish", &fired)); // unparseable -> no match
+    }
+
+    #[test]
+    fn same_shortcut_compares_by_meaning_not_text() {
+        assert!(same_shortcut("CmdOrCtrl+Shift+Period", "shift+ctrl+Period"));
+        assert!(!same_shortcut("CmdOrCtrl+Shift+Period", "CmdOrCtrl+Shift+Space"));
+        assert!(!same_shortcut("gibberish", "gibberish")); // unparseable != unparseable
+    }
+
+    #[test]
+    fn both_bundled_hotkeys_parse() {
+        let cfg = config::bundled_defaults();
+        cfg.hotkey.parse::<Shortcut>().expect("repo hotkey");
+        cfg.apps_hotkey
+            .as_deref()
+            .expect("apps_hotkey ships on by default")
+            .parse::<Shortcut>()
+            .expect("apps hotkey");
+    }
 }

@@ -42,6 +42,13 @@ export function fuzzyScore(needle: string, haystack: string): FuzzyHit | null {
   }
 
   if (ni < n.length) return null;
+
+  // Compactness: penalise how far the match is spread beyond a tight run, so a
+  // contiguous prefix ("DBe" in DBeaver) beats a scattered word-initial match
+  // ("D…B…e" in "Detroit: Become Human").
+  const span = positions[positions.length - 1] - positions[0] - (n.length - 1);
+  score -= Math.min(span, 20) * 2;
+
   score -= positions[0] * 0.2; // nudge earlier matches ahead
   return { score, positions };
 }

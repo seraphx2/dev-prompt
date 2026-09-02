@@ -30,6 +30,8 @@ export interface Action {
   icon?: string | null;
   /** True when this action is handled purely in the frontend (e.g. copy path). */
   clientSide: boolean;
+  /** Opens the "Run command…" input instead of running; `hint` is the template. */
+  prompt?: boolean;
 }
 
 /** A row in the action menu — a runnable action, or a drill-in to a
@@ -47,10 +49,26 @@ export type MenuItem =
 
 export interface AppConfig {
   hotkey: string;
+  /** Optional second hotkey that opens straight into the `>` app scope. */
+  apps_hotkey?: string | null;
   roots: string[];
   /** `collapse_nested`: `true` collapse, `false` list all, `"auto"` keep independent. */
   scan: { max_depth: number; collapse_nested: boolean | "auto" };
   cache_ttl_secs: number;
+  /** Pinned terminal emulator (name / path); absent = auto-probe. */
+  terminal?: string | null;
+  /** Raw `{{dir}}` / `{{cmd}}` invocation for an unknown terminal. */
+  terminal_template?: string | null;
+  /** Shell a one-shot terminal command runs inside; absent = pwsh/powershell. */
+  shell?: string | null;
+  /** Installed-app launcher (`>` scope) settings. */
+  apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
+}
+
+/** An installed terminal emulator dev-prompt can drive — for the Settings dropdown. */
+export interface TerminalOption {
+  id: string;
+  label: string;
 }
 
 export interface ConfigSummary {
@@ -103,6 +121,27 @@ export interface ProjectHit {
 export interface RepoListPayload {
   repos: Repo[];
   /** Age of the cache in seconds; -1 when there was no cache. */
+  ageSecs: number;
+  stale: boolean;
+}
+
+/** An installed application for the `>` launcher scope. */
+export interface AppEntry {
+  name: string;
+  /** Executable path (`exe`) or AppUserModelID (`aumid`). */
+  exec: string;
+  kind: "exe" | "aumid";
+  args?: string[];
+  /** `data:image/png;base64,…` when an icon was extracted. */
+  icon?: string | null;
+  /** "start-menu" | "store" | "uninstall" | "scan". */
+  source: string;
+  /** Times launched from dev-prompt (frecency). */
+  uses: number;
+}
+
+export interface AppListPayload {
+  apps: AppEntry[];
   ageSecs: number;
   stale: boolean;
 }

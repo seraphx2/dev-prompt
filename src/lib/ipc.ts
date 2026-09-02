@@ -5,10 +5,13 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
   Action,
   AppConfig,
+  AppEntry,
+  AppListPayload,
   ConfigSummary,
   RepoListPayload,
   RepoTrace,
   ScoredRepo,
+  TerminalOption,
 } from "./types";
 
 /** Cache-first repo list; returns instantly from the on-disk cache when present. */
@@ -70,12 +73,62 @@ export function reloadConfig(): Promise<AppConfig> {
 /** Save an editable subset of settings; returns the updated config. */
 export function saveConfig(patch: {
   hotkey?: string;
+  /** "" turns the second (app-launcher) hotkey off. */
+  apps_hotkey?: string;
   roots?: string[];
   cache_ttl_secs?: number;
   scan_max_depth?: number;
   collapse_nested?: boolean | "auto";
+  /** "" clears the pin / template / shell back to auto. */
+  terminal?: string;
+  terminal_template?: string;
+  shell?: string;
+  apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
 }): Promise<AppConfig> {
   return invoke<AppConfig>("save_config", { patch });
+}
+
+/** Installed terminal emulators dev-prompt knows how to drive. */
+export function listTerminals(): Promise<TerminalOption[]> {
+  return invoke<TerminalOption[]>("list_terminals");
+}
+
+/** Shells found on PATH (`pwsh`, `bash`, `nu`, …). */
+export function listShells(): Promise<string[]> {
+  return invoke<string[]>("list_shells");
+}
+
+/** Run a free-form command in `path`'s terminal (blank = open the shell). */
+export function runCommand(
+  path: string,
+  command: string,
+  shell?: string,
+): Promise<void> {
+  return invoke<void>("run_command", { path, command, shell: shell || null });
+}
+
+/** Cache-first list of installed apps for the `>` scope. */
+export function listApps(): Promise<AppListPayload> {
+  return invoke<AppListPayload>("list_apps");
+}
+
+/** Force a fresh enumeration of installed apps. Emits `apps:updated`. */
+export function rescanApps(): Promise<AppListPayload> {
+  return invoke<AppListPayload>("rescan_apps");
+}
+
+/** Launch an installed app (bumps its frecency count). */
+export function runApp(e: AppEntry): Promise<void> {
+  return invoke<void>("run_app", {
+    exec: e.exec,
+    kind: e.kind,
+    args: e.args ?? null,
+  });
+}
+
+/** Fired after a background app re-enumeration replaces the cache. */
+export function onAppsUpdated(cb: () => void): Promise<UnlistenFn> {
+  return listen("apps:updated", () => cb());
 }
 
 /** Open rules.yaml (the hand-authored overrides file) in the default editor. */
@@ -112,9 +165,16 @@ export function copyPath(path: string): Promise<void> {
   return writeText(path);
 }
 
-/** Fired by the backend when the overlay is shown via the global hotkey. */
-export function onOverlayShown(cb: () => void): Promise<UnlistenFn> {
-  return listen("overlay:shown", () => cb());
+/**
+ * Fired by the backend when the overlay is shown. `scope` is `"apps"` when it
+ * was opened via the app-launcher hotkey, else `"repos"`.
+ */
+export function onOverlayShown(
+  cb: (scope: "repos" | "apps") => void,
+): Promise<UnlistenFn> {
+  return listen<string>("overlay:shown", (e) =>
+    cb(e.payload === "apps" ? "apps" : "repos"),
+  );
 }
 
 /** Fired by the backend after a background rescan replaces the cache. */

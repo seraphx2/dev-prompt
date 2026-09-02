@@ -13,9 +13,11 @@
 
   let el: HTMLInputElement | undefined = $state();
 
-  export function focus() {
+  export function focus(select = true) {
     el?.focus();
-    el?.select();
+    if (!el) return;
+    if (select) el.select();
+    else el.setSelectionRange(el.value.length, el.value.length); // caret at end
   }
 </script>
 

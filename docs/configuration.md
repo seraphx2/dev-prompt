@@ -5,7 +5,7 @@ dev-prompt has three config layers:
 | | |
 |---|---|
 | **`default_config.yaml`** | Bundled into the binary — the full set of markers, programs, rules, and universal actions. The baseline; you never edit it. Canonical copy: [`src-tauri/src/default_config.yaml`](../src-tauri/src/default_config.yaml). |
-| **`config.yaml`** | Your **settings** — hotkey, roots, scan depth, cache lifetime. Managed entirely by the Settings screen; you don't normally open it by hand. |
+| **`config.yaml`** | Your **settings** — hotkeys, roots, scan depth, cache lifetime, terminal, apps. Managed entirely by the Settings screen; you don't normally open it by hand. |
 | **`rules.yaml`** | Your **overrides** — extra markers, programs, rules, and universal actions layered over the defaults. Hand-authored. The Settings screen never rewrites it, so your comments stay put. |
 
 Both files live in your OS config directory, created on first run:
@@ -31,9 +31,11 @@ The rest of this document is about `rules.yaml`.
 | `rules` | Your rules are **prepended** — they run first and show first. `rules_disable: [id]` sets a built-in aside. |
 | `universal` | `universal.disable: [id]` removes built-ins, `universal.add: [...]` appends yours, `universal.default: id` sets which action Enter runs on a repo in the main list. |
 
-(`hotkey`, `roots`, `scan`, `cache_ttl_secs` are **settings**, not overrides —
-they live in `config.yaml` and are edited in the Settings screen. Putting them in
-`rules.yaml` has no effect.)
+(`hotkey`, `apps_hotkey`, `roots`, `scan`, `cache_ttl_secs`, `terminal`,
+`terminal_template`, `shell`, `apps` are **settings**, not overrides — they live
+in `config.yaml` and are edited in the Settings screen. Putting them in
+`rules.yaml` has no effect. See [Hotkeys](#hotkeys), [Terminal](#terminal) and
+[Apps](#apps).)
 
 A disabled built-in isn't deleted — it still appears in the Settings
 "Active configuration" viewer marked *disabled*, it's just never evaluated. This
@@ -126,6 +128,12 @@ actions:
     run: "make"
     terminal: true
     icon: run                 # glyph for the menu row — see Settings > Icons
+
+  - name: "npm run…"
+    run: "npm run {{input}}"  # prompt: opens the "Run command…" input;
+    prompt: true              #   {{input}} = what you type, the rest is fixed.
+    terminal: true            #   A bare `prompt: true` (no `run:`) takes a
+                              #   whole command line. Blank + a shell = open it.
 ```
 
 **`{{vs}}` and `needs: [vs]` refer to the same thing** — `vs` is a key in the
@@ -140,6 +148,10 @@ or when the action has no program at all (a gated `terminal: true`).
 - `program` + `args`, **or** `run` — not both.
 - `terminal: true` runs it inside the resolved terminal at the working
   directory. Without it, the process is spawned detached with no window.
+- `prompt: true` doesn't run anything — it opens the **Run command…** input in
+  the action menu, seeded with `run:` as a template (`{{input}}` is where the
+  typed text goes). The input has its own shell picker; leave it blank and pick
+  a shell to just open that shell in the repo.
 - `needs:` gates just this action. `needs:` / `requires:` on the *rule* gate the
   whole rule — and `requires:` is rule-only, taking bare executable names checked
   on `PATH` rather than `programs` keys.
@@ -179,6 +191,101 @@ Usable in `name`, `program`, `args`, and `run`:
 | `{{file}}` `{{file.name}}` `{{file.stem}}` | the matched file (only with `per_file: true`) |
 | `{{env:VAR}}` | an environment variable |
 | `{{<program-key>}}` | a resolved program path |
+
+---
+
+## Hotkeys
+
+Two global hotkeys, set from **Settings ▸ Global hotkeys** and stored in
+`config.yaml`:
+
+```yaml
+# config.yaml
+hotkey: CmdOrCtrl+Shift+Space        # opens the overlay on the repo browser
+apps_hotkey: CmdOrCtrl+Shift+Period  # opens straight into the ">" app launcher
+                                     #   ("" = off; the Settings toggle writes it)
+```
+
+`apps_hotkey` is a convenience — it's the same as pressing the main hotkey then
+typing `>`. It's on by default (`Ctrl+Shift+.`, i.e. `Ctrl+>`); the **App
+launcher** field has a *turn off* link. The two must be different.
+
+The recorder (click a field, press a combination) checks what you pick against a
+built-in list: it **refuses** combos the OS reserves or that can't be
+intercepted (`Alt+Tab`, `Win+L`, `Ctrl+Alt+Del`, bare keys, …) and **asks you
+to confirm** ones commonly used elsewhere (`Ctrl+Shift+N`, a lone
+`Ctrl+`*letter*, any `Win+`*key*, …). This is a maintained list, not detection —
+Windows has no API for the shortcuts individual apps use internally, so a combo
+can still collide with something the list doesn't know. If another program has
+already claimed a combo through the OS, registration fails and the old hotkey
+stays active.
+
+---
+
+## Terminal
+
+Which terminal emulator "Open in terminal" and every `terminal: true` action
+open. Set from **Settings ▸ Terminal**; stored in `config.yaml`, not
+`rules.yaml`. **Windows only** for now — other platforms run the command
+directly.
+
+```yaml
+# config.yaml
+terminal: wezterm                         # a programs.terminal key, a PATH
+                                          #   name, or an absolute path.
+                                          #   Absent = first one that resolves.
+terminal_template: >                      # only for a terminal not in the
+  wezterm start --cwd {{dir}} -- {{cmd}}   #   table below. {{dir}} = cwd,
+                                          #   {{cmd}} = the command.
+```
+
+dev-prompt knows how to drive **Windows Terminal** (`wt`), **Alacritty**, and
+**WezTerm** — pick any that's installed from the dropdown. For anything else,
+choose *Custom…* and give a `terminal_template`: it's run verbatim with `{{dir}}`
+and `{{cmd}}` substituted (put `{{cmd}}` after `--` or in quotes so its arguments
+stay together).
+
+A one-shot command is wrapped in a shell so the window stays open and keeps a
+real console (ANSI colour, a live TTY — tools like Claude Code need it). The
+shell is `pwsh` (else Windows PowerShell) unless you set **Settings ▸ Shell** /
+`shell:` — `cmd`, `bash`, `nu`, … are recognised for their "run and hold" flags.
+The **Run command…** action picks a shell per-run, defaulting to that setting.
+
+---
+
+## Apps
+
+Type `>` in the search bar to switch the list from repositories to **installed
+applications** — or press the [app-launcher hotkey](#hotkeys) to open there
+directly. Delete back to an empty box (or clear it) to return — the repo list is
+always the default when the overlay opens the normal way. Enter launches the
+selected app; `Ctrl+R` re-enumerates. Frecency: apps you launch from dev-prompt
+float to the top of the empty-query list.
+
+**Windows only.** On other platforms the `>` scope shows an empty list.
+
+Discovery unions four sources and de-duplicates by executable path:
+
+- **Start Menu** shortcuts (both the machine and per-user `Programs` trees)
+- **Store apps** (`Get-StartApps` AppUserModelIDs)
+- the three **Uninstall** registry hives (`HKLM`, `HKLM\WOW6432Node`, `HKCU`)
+- a bounded `*.exe` scan of `%LOCALAPPDATA%\Programs` plus any `extra_dirs`
+
+Icons are extracted from the executables and cached under
+`%LOCALAPPDATA%\dev-prompt\cache\app-icons\`.
+
+```yaml
+# config.yaml — managed from Settings ▸ "Index installed apps"
+apps:
+  enabled: true
+  extra_dirs:                 # extra folders to scan for portable executables
+    - D:\tools
+  exclude:                    # drop apps whose name or path contains any of
+    - zoom                    #   these (case-insensitive)
+```
+
+Installer stubs, updaters, redistributables, crash handlers and OS components
+under `\Windows\` are filtered out automatically; `exclude` is for the rest.
 
 ---
 
