@@ -228,6 +228,18 @@
   let status = $state("");
   let search: SearchInput | undefined = $state();
 
+  // The footer status line, per screen: the app count in ">" scope, both counts
+  // on the settings screen, the repo cache line otherwise.
+  const footerStatus = $derived(
+    mode === "repo-list" && appScope
+      ? appStatus
+      : mode === "settings"
+        ? [status, apps.length ? `${apps.length} apps` : ""]
+            .filter(Boolean)
+            .join(" · ")
+        : status,
+  );
+
   // Nothing indexed and no scan running — the user hasn't pointed dev-prompt at
   // any folders yet. Show setup guidance and glow the settings gear.
   const noRepos = $derived(
@@ -673,9 +685,7 @@
           </svg>
         </button>
       {/if}
-      <span class="truncate"
-        >{mode === "repo-list" && appScope ? appStatus : status}</span
-      >
+      <span class="truncate">{footerStatus}</span>
       {#if mode === "repo-list"}
         <span class="inline-flex shrink-0 items-center gap-1"
           ><kbd>Ctrl+R</kbd>rescan</span
