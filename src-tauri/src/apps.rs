@@ -253,9 +253,12 @@ fn prune_scanned(scored: Vec<Scored>) -> Vec<Scored> {
     kept
 }
 
-/// Collapse entries that share a non-empty CompanyName *and* ProductName — the
-/// per-vendor satellite exes (`FooLauncher.exe` next to `Foo.exe`). Keeps the
-/// highest-ranked source. Entries missing either field pass through.
+/// Collapse a lower-ranked entry into a higher-ranked one that shares a non-empty
+/// CompanyName *and* ProductName — a raw-scan `FooLauncher.exe` folding into the
+/// curated Start Menu `Foo`. Two entries that *tie* on source rank are distinct
+/// installs of the same product (Python 3.11 vs 3.12, Chrome vs Chrome Beta) and
+/// are both kept — `dedupe` still removes exact-path duplicates afterwards.
+/// Entries missing either field pass through.
 fn dedupe_by_product(scored: Vec<Scored>) -> Vec<Scored> {
     use std::collections::HashMap;
     let mut out: Vec<Scored> = Vec::new();
@@ -273,14 +276,20 @@ fn dedupe_by_product(scored: Vec<Scored>) -> Vec<Scored> {
                 out.push(s);
             }
             Some(i) => {
-                if source_rank(&s.entry.source) > source_rank(&out[i].entry.source) {
-                    if out[i].entry.icon.is_some() && s.entry.icon.is_none() {
-                        let icon = out[i].entry.icon.take();
-                        out[i] = s;
-                        out[i].entry.icon = icon;
-                    } else {
-                        out[i] = s;
+                use std::cmp::Ordering;
+                match source_rank(&s.entry.source).cmp(&source_rank(&out[i].entry.source)) {
+                    Ordering::Greater => {
+                        // Curated entry supersedes the lower-ranked satellite exe.
+                        if out[i].entry.icon.is_some() && s.entry.icon.is_none() {
+                            let icon = out[i].entry.icon.take();
+                            out[i] = s;
+                            out[i].entry.icon = icon;
+                        } else {
+                            out[i] = s;
+                        }
                     }
+                    Ordering::Less => {} // lower-ranked duplicate — drop it
+                    Ordering::Equal => out.push(s), // distinct install — keep both
                 }
             }
         }
@@ -524,6 +533,16 @@ mod tests {
         ]);
         let names: Vec<&str> = got.iter().map(|s| s.entry.name.as_str()).collect();
         assert_eq!(names, vec!["Foo", "bar"]);
+    }
+
+    #[test]
+    fn dedupe_by_product_keeps_distinct_installs_that_tie_on_source() {
+        // Two Python installs: same CompanyName/ProductName, same source rank.
+        let got = dedupe_by_product(vec![
+            scored("Python", r"C:\Py311\python.exe", "scan", "Python", "PSF", 0),
+            scored("Python", r"C:\Py312\python.exe", "scan", "Python", "PSF", 0),
+        ]);
+        assert_eq!(got.len(), 2, "neither version should be silently dropped");
     }
 
     #[test]
