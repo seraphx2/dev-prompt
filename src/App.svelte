@@ -253,6 +253,11 @@
   let searchSeq = 0;
 
   async function refresh() {
+    // In `>` app scope the list comes from `filteredApps`, not `results`; a repo
+    // search here matches nothing and would blank `results` + reset `selected`,
+    // yanking the app highlight mid-navigation. Guard here so every caller
+    // (the query $effect, loadInitial, rescan, onReposUpdated) is covered.
+    if (appScope) return;
     const seq = ++searchSeq;
     const scored = await searchRepos(query);
     if (seq !== searchSeq) return; // a newer query already answered
