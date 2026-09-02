@@ -563,7 +563,8 @@ pub async fn rescan_apps(app: AppHandle, state: State<'_, AppState>) -> AppResul
     })
 }
 
-/// Launch an installed app (and bump its frecency count).
+/// Launch an installed app, bumping its frecency count only if the launch
+/// actually starts (a stale entry whose exe is gone shouldn't climb the list).
 #[tauri::command]
 pub fn run_app(
     exec: String,
@@ -583,8 +584,9 @@ pub fn run_app(
         source: String::new(),
         uses: 0,
     };
+    apps::launch(&entry)?;
     crate::usage::bump(&exec);
-    apps::launch(&entry)
+    Ok(())
 }
 
 /// Toggle whether focus loss dismisses the overlay (frontend turns this off for

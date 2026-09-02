@@ -4,12 +4,19 @@
 //! `count` alone.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
 use crate::config::cache_dir;
 
 const USAGE_FILE: &str = "app-usage.json";
+
+/// Serialises the read-modify-write in [`bump`]. Nothing calls `bump`
+/// concurrently today (the launcher UI debounces and the IPC is synchronous), so
+/// this is defensive: it keeps the on-disk file consistent if a second writer
+/// ever appears.
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct Hit {
@@ -44,12 +51,23 @@ fn apply(mut map: HashMap<String, Hit>, exec: &str, now: u64) -> HashMap<String,
     map
 }
 
+/// Write `json` to `path` atomically: a sibling temp file plus a rename, so a
+/// write interrupted by process exit or shutdown leaves the previous file intact
+/// rather than a truncated one. The rename replaces the destination on both
+/// Windows and Unix.
+fn write_atomic(path: &std::path::Path, json: &str) -> std::io::Result<()> {
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, json)?;
+    std::fs::rename(&tmp, path)
+}
+
 /// Record one launch of `exec` (keyed case-insensitively).
 pub fn bump(exec: &str) {
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let map = apply(read(), exec, now_secs());
     if let Some(p) = path() {
         if let Ok(json) = serde_json::to_string(&map) {
-            let _ = std::fs::write(p, json);
+            let _ = write_atomic(&p, &json);
         }
     }
 }
@@ -79,6 +97,23 @@ mod tests {
         let m = apply(m, "a.exe", 30);
         assert_eq!(m["a.exe"].count, 3);
         assert_eq!(m["a.exe"].last, 30);
+    }
+
+    #[test]
+    fn write_atomic_replaces_the_file_and_leaves_no_temp() {
+        let dir = std::env::temp_dir().join(format!("dp-usage-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("app-usage.json");
+        std::fs::write(&p, "OLD").unwrap();
+
+        write_atomic(&p, "NEW").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "NEW");
+        assert!(
+            !p.with_extension("json.tmp").exists(),
+            "temp file should be renamed away, not left behind"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
