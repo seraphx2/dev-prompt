@@ -334,3 +334,29 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running dev-prompt");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tauri_plugin_global_shortcut::Shortcut;
+
+    #[test]
+    fn shortcut_is_ignores_spelling_and_modifier_order() {
+        let fired: Shortcut = "CmdOrCtrl+Shift+Period".parse().unwrap();
+        assert!(shortcut_is("CmdOrCtrl+Shift+Period", &fired));
+        assert!(shortcut_is("shift+ctrl+Period", &fired)); // aliases + order
+        assert!(!shortcut_is("CmdOrCtrl+Shift+Space", &fired));
+        assert!(!shortcut_is("gibberish", &fired)); // unparseable -> no match
+    }
+
+    #[test]
+    fn both_bundled_hotkeys_parse() {
+        let cfg = config::bundled_defaults();
+        cfg.hotkey.parse::<Shortcut>().expect("repo hotkey");
+        cfg.apps_hotkey
+            .as_deref()
+            .expect("apps_hotkey ships on by default")
+            .parse::<Shortcut>()
+            .expect("apps hotkey");
+    }
+}

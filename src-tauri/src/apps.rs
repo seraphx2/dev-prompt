@@ -547,6 +547,87 @@ mod tests {
         assert_eq!(got.len(), 2);
     }
 
+    fn raw(name: &str, exec: &str, kind: &str) -> RawApp {
+        RawApp {
+            name: Some(name.into()),
+            exec: Some(exec.into()),
+            kind: Some(kind.into()),
+            args: None,
+            icon: None,
+            source: Some("scan".into()),
+            product: None,
+            company: None,
+            size: 0,
+        }
+    }
+
+    #[test]
+    fn into_scored_maps_kind_trims_and_wraps_icon_and_args() {
+        let cfg = crate::config::bundled_defaults();
+
+        let mut r = raw(
+            "  Windows Terminal ",
+            "Microsoft.WindowsTerminal_8wekyb3d8bbwe!App",
+            "aumid",
+        );
+        r.icon = Some("AAAA".into());
+        r.source = Some("store".into());
+        let s = r.into_scored(&cfg).unwrap();
+        assert_eq!(s.entry.kind, AppKind::Aumid);
+        assert_eq!(s.entry.name, "Windows Terminal"); // trimmed
+        assert_eq!(s.entry.icon.as_deref(), Some("data:image/png;base64,AAAA"));
+
+        let mut r = raw("VLC", r"C:\Program Files\VLC\vlc.exe", "exe");
+        r.args = Some(r#"--fullscreen "--meta-title=My Movie""#.into());
+        r.product = Some("  VideoLAN  ".into());
+        r.size = 42;
+        let s = r.into_scored(&cfg).unwrap();
+        assert_eq!(s.entry.kind, AppKind::Exe);
+        assert_eq!(s.entry.args, vec!["--fullscreen", "--meta-title=My Movie"]);
+        assert_eq!(s.product, "VideoLAN"); // trimmed
+        assert_eq!(s.size, 42);
+    }
+
+    #[test]
+    fn into_scored_rejects_empty_and_exe_noise_but_not_aumids() {
+        let cfg = crate::config::bundled_defaults();
+        assert!(raw("", r"C:\x\a.exe", "exe").into_scored(&cfg).is_none());
+        assert!(raw("Real", "   ", "exe").into_scored(&cfg).is_none());
+        // keep_entry applies to exe rows…
+        assert!(raw("Updater", r"C:\x\update.exe", "exe")
+            .into_scored(&cfg)
+            .is_none());
+        // …but not to aumids (there's no path to judge).
+        assert!(raw("Squirrel Thing", "Squirrel_pkg!App", "aumid")
+            .into_scored(&cfg)
+            .is_some());
+    }
+
+    #[test]
+    fn looks_like_main_binary_matches_folder_or_product_either_direction() {
+        assert!(looks_like_main_binary(
+            r"C:\a\GitHubDesktop\GitHubDesktop.exe",
+            "GitHubDesktop",
+            ""
+        ));
+        // folder name carries a version suffix — stem is still contained
+        assert!(looks_like_main_binary(r"C:\a\Foo-1.2.3\foo.exe", "Foo-1.2.3", ""));
+        // stem echoes the product, not the folder
+        assert!(looks_like_main_binary(
+            r"C:\a\bin\launcher.exe",
+            "bin",
+            "Acme Launcher"
+        ));
+        // a satellite exe matches neither
+        assert!(!looks_like_main_binary(
+            r"C:\a\GitHubDesktop\elevate.exe",
+            "GitHubDesktop",
+            "GitHub Desktop"
+        ));
+        // nothing to compare against
+        assert!(!looks_like_main_binary(r"C:\a\x\helper.exe", "", ""));
+    }
+
     #[test]
     fn raw_app_excludes_by_user_pattern() {
         let mut cfg = crate::config::bundled_defaults();

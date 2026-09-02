@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 
@@ -28,6 +29,14 @@ export default defineConfig(async () => ({
 
   // Env variables starting with the item of `envPrefix` will be exposed in tauri's source code through `import.meta.env`.
   envPrefix: ["VITE_", "TAURI_ENV_*"],
+
+  // Unit tests for the pure TS helpers (fuzzy ranking, hotkey classification).
+  // `npm test`. Component/Svelte tests aren't set up — those helpers stay
+  // framework-free on purpose.
+  test: {
+    include: ["src/**/*.test.ts"],
+    environment: "node",
+  },
   build: {
     // Tauri uses Chromium on Windows and WebKit on macOS and Linux
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",

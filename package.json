@@ -9,6 +9,7 @@
     "build": "svelte-check --tsconfig ./tsconfig.json && vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
     "version:calver": "node scripts/version.mjs"
   },
   "license": "MIT",
@@ -32,6 +33,7 @@
     "tailwindcss": "^3.4.17",
     "tslib": "^2.8.1",
     "typescript": "^5.7.2",
-    "vite": "^6.0.5"
+    "vite": "^6.0.5",
+    "vitest": "^4.1.11"
   }
 }
