@@ -64,7 +64,8 @@
       if (onName) {
         scored.push({ app, positions: onName.positions, score: onName.score });
       } else if (fuzzyScore(q, app.exec)) {
-        scored.push({ app, positions: [], score: -1 });
+        // Path-only match: always ranks below any name match.
+        scored.push({ app, positions: [], score: -1e6 });
       }
     }
     scored.sort(
