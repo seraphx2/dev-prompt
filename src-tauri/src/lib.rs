@@ -71,6 +71,17 @@ fn shortcut_is(accel: &str, fired: &tauri_plugin_global_shortcut::Shortcut) -> b
         .unwrap_or(false)
 }
 
+/// True when two accelerator strings resolve to the same shortcut, so
+/// `Shift+CmdOrCtrl+X` and `CmdOrCtrl+Shift+X` count as unchanged. Unparseable
+/// input matches nothing — callers validate parseability separately.
+pub(crate) fn same_shortcut(a: &str, b: &str) -> bool {
+    use tauri_plugin_global_shortcut::Shortcut;
+    matches!(
+        (a.parse::<Shortcut>(), b.parse::<Shortcut>()),
+        (Ok(x), Ok(y)) if x == y
+    )
+}
+
 fn apply_overlay_effects(window: &WebviewWindow) {
     #[cfg(windows)]
     {
@@ -347,6 +358,13 @@ mod tests {
         assert!(shortcut_is("shift+ctrl+Period", &fired)); // aliases + order
         assert!(!shortcut_is("CmdOrCtrl+Shift+Space", &fired));
         assert!(!shortcut_is("gibberish", &fired)); // unparseable -> no match
+    }
+
+    #[test]
+    fn same_shortcut_compares_by_meaning_not_text() {
+        assert!(same_shortcut("CmdOrCtrl+Shift+Period", "shift+ctrl+Period"));
+        assert!(!same_shortcut("CmdOrCtrl+Shift+Period", "CmdOrCtrl+Shift+Space"));
+        assert!(!same_shortcut("gibberish", "gibberish")); // unparseable != unparseable
     }
 
     #[test]

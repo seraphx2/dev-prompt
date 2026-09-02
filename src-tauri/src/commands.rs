@@ -293,8 +293,10 @@ pub struct ConfigPatch {
 }
 
 /// Apply an editable subset of settings: write `config.yaml`, update the live
-/// config, and re-register the global hotkey if it changed (validated first, so
-/// a bad accelerator is rejected before anything is persisted).
+/// config, and re-register the global hotkeys if they changed. Accelerators are
+/// parsed up front and the new ones claimed before the file is written; if any
+/// step fails the claims are rolled back, so the live shortcuts and `config.yaml`
+/// never disagree.
 #[tauri::command]
 pub fn save_config(
     app: AppHandle,
@@ -364,17 +366,43 @@ pub fn save_config(
     }
 
     let new_hotkey = user.hotkey.clone().unwrap_or_else(|| old_hotkey.clone());
+    // Fall back to the current effective value (like `new_hotkey` does) when the
+    // patch omits it — otherwise a Save that doesn't mention `apps_hotkey` reads
+    // as "cleared" and tears down the bundled default.
     let new_apps_hotkey = user
         .apps_hotkey
         .clone()
+        .or_else(|| old_apps_hotkey.clone())
         .map(|h| h.trim().to_string())
         .filter(|h| !h.is_empty());
 
-    if new_apps_hotkey.as_deref() == Some(new_hotkey.as_str()) {
-        return Err(AppError::msg(
-            "The app launcher hotkey must be different from the repo browser hotkey.",
-        ));
+    // Reject malformed combos before touching OS state or the config file.
+    let parse_ok = |accel: &str| -> AppResult<()> {
+        accel
+            .parse::<tauri_plugin_global_shortcut::Shortcut>()
+            .map(|_| ())
+            .map_err(|e| AppError::msg(format!("\"{accel}\" isn't a valid hotkey. ({e})")))
+    };
+    parse_ok(&new_hotkey)?;
+    if let Some(h) = &new_apps_hotkey {
+        parse_ok(h)?;
     }
+
+    if let Some(h) = &new_apps_hotkey {
+        if crate::same_shortcut(h, &new_hotkey) {
+            return Err(AppError::msg(
+                "The app launcher hotkey must be different from the repo browser hotkey.",
+            ));
+        }
+    }
+
+    let hotkey_changed = !crate::same_shortcut(&new_hotkey, &old_hotkey);
+    let old_apps_nonempty = old_apps_hotkey.as_deref().filter(|s| !s.is_empty());
+    let apps_changed = match (new_apps_hotkey.as_deref(), old_apps_nonempty) {
+        (Some(a), Some(b)) => !crate::same_shortcut(a, b),
+        (None, None) => false,
+        _ => true,
+    };
 
     let register = |accel: &str| -> AppResult<()> {
         app.global_shortcut().register(accel).map_err(|e| {
@@ -384,25 +412,51 @@ pub fn save_config(
             ))
         })
     };
+    let unregister = |accel: &str| {
+        let _ = app.global_shortcut().unregister(accel);
+    };
 
-    if new_hotkey != old_hotkey {
+    // Claim the new accelerators first; on any failure, undo the claims so the
+    // live shortcuts still match what's on disk.
+    let mut claimed: Vec<&str> = Vec::new();
+    if hotkey_changed {
         register(&new_hotkey)?;
-        let _ = app.global_shortcut().unregister(old_hotkey.as_str());
+        claimed.push(new_hotkey.as_str());
     }
-    if new_apps_hotkey != old_apps_hotkey {
+    if apps_changed {
         if let Some(h) = &new_apps_hotkey {
-            register(h)?;
-        }
-        if let Some(old) = old_apps_hotkey.as_deref().filter(|s| !s.is_empty()) {
-            if Some(old) != new_apps_hotkey.as_deref() {
-                let _ = app.global_shortcut().unregister(old);
+            if let Err(e) = register(h) {
+                for a in &claimed {
+                    unregister(a);
+                }
+                return Err(e);
             }
+            claimed.push(h.as_str());
         }
     }
 
     // A changed `terminal` pin must not lose to a memoized `terminal` lookup.
     crate::rules::clear_program_cache();
-    config::save_user(&user)?;
+
+    if let Err(e) = config::save_user(&user) {
+        for a in &claimed {
+            unregister(a);
+        }
+        return Err(e);
+    }
+
+    // Persisted — safe to release the superseded accelerators now.
+    if hotkey_changed {
+        unregister(old_hotkey.as_str());
+    }
+    if apps_changed {
+        if let Some(old) = old_apps_nonempty {
+            if new_apps_hotkey.as_deref() != Some(old) {
+                unregister(old);
+            }
+        }
+    }
+
     let merged = config::load()?;
     *state.config.lock().unwrap() = merged.clone();
     Ok(merged)

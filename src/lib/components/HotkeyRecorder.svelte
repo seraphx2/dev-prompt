@@ -20,8 +20,6 @@
 
   let capturing = $state(false);
   let hint = $state("");
-  let typeMode = $state(false);
-  let typed = $state("");
   let pending = $state("");
   let pendingReason = $state("");
 
@@ -35,7 +33,6 @@
     hint = "";
     pending = "";
     pendingReason = "";
-    typeMode = false;
     capturing = true;
   }
 
@@ -95,55 +92,32 @@
     {#if clearable && value}
       <button
         type="button"
+        disabled={busy}
         onclick={() => onsave("")}
-        class="text-[11px] text-white/30 underline decoration-white/20 underline-offset-2 hover:text-white/60"
+        class="text-[11px] text-white/30 underline decoration-white/20 underline-offset-2 hover:text-white/60 disabled:opacity-50"
         >turn off</button
       >
     {/if}
   </div>
 
-  {#if typeMode}
-    <div class="flex gap-2">
-      <input
-        bind:value={typed}
-        spellcheck="false"
-        placeholder="CmdOrCtrl+Shift+Period"
-        onkeydown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            apply(typed.trim());
-          }
-        }}
-        class="min-w-0 flex-1 rounded border border-hair bg-white/[0.04] px-2 py-1.5 font-mono text-[12px] text-white/90 focus:border-white/25 focus:outline-none"
-      />
-      <button
-        type="button"
-        disabled={busy || !typed.trim()}
-        onclick={() => apply(typed.trim())}
-        class="shrink-0 rounded border border-hair px-2 py-1 text-[12px] text-white/50 hover:bg-white/10 hover:text-white/80 disabled:opacity-50"
-        >Set</button
-      >
-    </div>
-  {:else}
-    <button
-      type="button"
-      onclick={start}
-      onkeydown={onKey}
-      class="flex w-full items-center justify-between rounded border px-2 py-1.5 text-left transition-colors
-             {capturing
-        ? 'border-orange-400/60 bg-orange-400/[0.08]'
-        : 'border-hair bg-white/[0.04] hover:border-white/25'}"
+  <button
+    type="button"
+    onclick={start}
+    onkeydown={onKey}
+    class="flex w-full items-center justify-between rounded border px-2 py-1.5 text-left transition-colors
+           {capturing
+      ? 'border-orange-400/60 bg-orange-400/[0.08]'
+      : 'border-hair bg-white/[0.04] hover:border-white/25'}"
+  >
+    <span
+      class="font-mono text-[12px] {capturing ? 'text-white/40' : 'text-white/90'}"
     >
-      <span
-        class="font-mono text-[12px] {capturing ? 'text-white/40' : 'text-white/90'}"
-      >
-        {capturing ? "Press a combination…" : value || (clearable ? "off" : "not set")}
-      </span>
-      <span class="shrink-0 text-[10px] uppercase tracking-wide text-white/30">
-        {capturing ? "Esc cancels" : "click to record"}
-      </span>
-    </button>
-  {/if}
+      {capturing ? "Press a combination…" : value || (clearable ? "off" : "not set")}
+    </span>
+    <span class="shrink-0 text-[10px] uppercase tracking-wide text-white/30">
+      {capturing ? "Esc cancels" : "click to record"}
+    </span>
+  </button>
 
   {#if pending}
     <div
@@ -170,19 +144,7 @@
     </div>
   {/if}
 
-  <span class="block text-[11px] text-white/25">
-    {#if hint}
-      <span class="text-amber-300/70">{hint}</span>
-    {:else}
-      <button
-        type="button"
-        class="underline decoration-white/20 underline-offset-2 hover:text-white/50"
-        onclick={() => {
-          typed = value;
-          typeMode = !typeMode;
-          capturing = false;
-        }}>{typeMode ? "use the recorder" : "type it manually"}</button
-      >
-    {/if}
-  </span>
+  {#if hint}
+    <span class="block text-[11px] text-amber-300/70">{hint}</span>
+  {/if}
 </div>
