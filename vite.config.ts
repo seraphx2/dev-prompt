@@ -36,6 +36,12 @@ export default defineConfig(async () => ({
   test: {
     include: ["src/**/*.test.ts"],
     environment: "node",
+    // vitest 4's default `forks` (and `threads`) pool crashes here with
+    // "Cannot read properties of undefined (reading 'config')" whenever the cwd
+    // resolves with a lowercase Windows drive letter (e.g. `d:\git\...`).
+    // vmThreads is unaffected, and these are pure-function tests with no
+    // DOM/native deps, so the lighter isolation costs us nothing.
+    pool: "vmThreads",
   },
   build: {
     // Tauri uses Chromium on Windows and WebKit on macOS and Linux
