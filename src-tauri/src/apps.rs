@@ -4,8 +4,12 @@
 //! (`DISCOVER_PS1`) that unions four sources — `Get-StartApps` (Win32 + Store),
 //! Start Menu `.lnk` targets, the three Uninstall registry hives, and a bounded
 //! `*.exe` scan of `%LOCALAPPDATA%\Programs` plus any user `extra_dirs`. The
-//! script also extracts and disk-caches each app's icon. Rust then filters
-//! (`keep_entry` + `config.apps.exclude`) and dedupes by executable path.
+//! script also extracts and disk-caches each app's icon.
+//!
+//! Rust does the culling: [`keep_entry`] drops installer/updater/helper noise,
+//! [`prune_scanned`] keeps only the "main binary" per folder for the raw-scan
+//! tiers, [`dedupe_by_product`] collapses same-vendor duplicates, and [`dedupe`]
+//! merges entries that point at the same executable.
 //!
 //! On non-Windows [`discover`] returns an empty list — the `>` scope simply
 //! shows nothing.
@@ -37,7 +41,7 @@ pub struct AppEntry {
     /// `data:image/png;base64,…` when an icon was extracted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
-    /// `start-menu` | `store` | `uninstall` | `scan`.
+    /// `start-menu` | `store` | `uninstall` | `scan` | `extra`.
     pub source: String,
     /// Times launched from dev-prompt (merged from `app-usage.json`).
     #[serde(default)]
@@ -50,8 +54,47 @@ fn source_rank(source: &str) -> u8 {
         "start-menu" => 4,
         "store" => 3,
         "uninstall" => 2,
-        _ => 1, // "scan"
+        _ => 1, // "scan" / "extra"
     }
+}
+
+/// Letters + digits, lowercased — for loose name comparisons.
+fn norm(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn path_stem(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+fn parent_dir(path: &str) -> String {
+    std::path::Path::new(path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
+}
+
+fn dir_leaf(dir: &str) -> &str {
+    dir.rsplit(['\\', '/']).next().unwrap_or(dir)
+}
+
+/// Does this exe look like "the app" for its folder — its basename echoes the
+/// folder name or the product name (either containing the other)?
+fn looks_like_main_binary(exec: &str, folder: &str, product: &str) -> bool {
+    let s = norm(&path_stem(exec));
+    if s.is_empty() {
+        return false;
+    }
+    let f = norm(folder);
+    let p = norm(product);
+    (!f.is_empty() && (f.contains(&s) || s.contains(&f)))
+        || (!p.is_empty() && (p.contains(&s) || s.contains(&p)))
 }
 
 /// Reject installer stubs, updaters, redistributables and OS components — the
@@ -66,8 +109,9 @@ pub fn keep_entry(name: &str, path: &str) -> bool {
 
     const NAME_BAD: &[&str] = &[
         "uninstall", "unins00", "setup", "installer", "update", "updater",
-        "crashpad", "crash handler", "crashhandler", "helper", "vc_redist",
-        "vcredist", "redistributable", "web installer", "repair",
+        "crashpad", "crash handler", "crashhandler", "crash reporter",
+        "crashreporter", "helper", "vc_redist", "vcredist", "redistributable",
+        "web installer", "repair", "elevate", "squirrel", "bootstrapper",
     ];
     if NAME_BAD.iter().any(|b| n.contains(b)) {
         return false;
@@ -82,6 +126,7 @@ pub fn keep_entry(name: &str, path: &str) -> bool {
     const FILE_BAD: &[&str] = &[
         "unins", "setup.exe", "update.exe", "updater.exe", "crashpad_handler.exe",
         "vcredist", "vc_redist", "dxsetup.exe", "notification_helper.exe",
+        "elevate.exe", "squirrel.exe",
     ];
     if FILE_BAD.iter().any(|b| file.contains(b)) {
         return false;
@@ -165,11 +210,82 @@ pub fn discover(cfg: &Config) -> Vec<AppEntry> {
     }
 
     let raw: Vec<RawApp> = serde_json::from_str(trimmed).unwrap_or_default();
-    let entries = raw
+    let scored = raw
         .into_iter()
-        .filter_map(|r| r.into_entry(cfg))
+        .filter_map(|r| r.into_scored(cfg))
         .collect::<Vec<_>>();
-    dedupe(entries)
+    let scored = prune_scanned(scored);
+    let scored = dedupe_by_product(scored);
+    dedupe(scored.into_iter().map(|s| s.entry).collect())
+}
+
+/// For the raw-scan tiers (`scan` / `extra`), keep only the executable that
+/// looks like the app in each folder — the one whose name echoes the folder or
+/// product name. When none do, keep just the largest. Folders with a single
+/// candidate, and all curated sources, pass through untouched.
+fn prune_scanned(scored: Vec<Scored>) -> Vec<Scored> {
+    use std::collections::HashMap;
+
+    let (scanned, mut kept): (Vec<Scored>, Vec<Scored>) = scored
+        .into_iter()
+        .partition(|s| matches!(s.entry.source.as_str(), "scan" | "extra"));
+
+    let mut by_dir: HashMap<String, Vec<Scored>> = HashMap::new();
+    for s in scanned {
+        by_dir.entry(parent_dir(&s.entry.exec)).or_default().push(s);
+    }
+
+    for (dir, group) in by_dir {
+        if group.len() == 1 {
+            kept.extend(group);
+            continue;
+        }
+        let folder = dir_leaf(&dir).to_string();
+        let (matched, rest): (Vec<Scored>, Vec<Scored>) = group
+            .into_iter()
+            .partition(|s| looks_like_main_binary(&s.entry.exec, &folder, &s.product));
+        if !matched.is_empty() {
+            kept.extend(matched);
+        } else if let Some(biggest) = rest.into_iter().max_by_key(|s| s.size) {
+            kept.push(biggest);
+        }
+    }
+    kept
+}
+
+/// Collapse entries that share a non-empty CompanyName *and* ProductName — the
+/// per-vendor satellite exes (`FooLauncher.exe` next to `Foo.exe`). Keeps the
+/// highest-ranked source. Entries missing either field pass through.
+fn dedupe_by_product(scored: Vec<Scored>) -> Vec<Scored> {
+    use std::collections::HashMap;
+    let mut out: Vec<Scored> = Vec::new();
+    let mut seen: HashMap<(String, String), usize> = HashMap::new();
+
+    for s in scored {
+        let key = (norm(&s.company), norm(&s.product));
+        if key.0.is_empty() || key.1.is_empty() {
+            out.push(s);
+            continue;
+        }
+        match seen.get(&key).copied() {
+            None => {
+                seen.insert(key, out.len());
+                out.push(s);
+            }
+            Some(i) => {
+                if source_rank(&s.entry.source) > source_rank(&out[i].entry.source) {
+                    if out[i].entry.icon.is_some() && s.entry.icon.is_none() {
+                        let icon = out[i].entry.icon.take();
+                        out[i] = s;
+                        out[i].entry.icon = icon;
+                    } else {
+                        out[i] = s;
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 #[cfg(windows)]
@@ -228,10 +344,25 @@ struct RawApp {
     icon: Option<String>,
     #[serde(default)]
     source: Option<String>,
+    #[serde(default)]
+    product: Option<String>,
+    #[serde(default)]
+    company: Option<String>,
+    #[serde(default)]
+    size: u64,
+}
+
+/// An [`AppEntry`] plus the version-resource fields the culling passes need
+/// (not persisted to `apps.json`).
+struct Scored {
+    entry: AppEntry,
+    product: String,
+    company: String,
+    size: u64,
 }
 
 impl RawApp {
-    fn into_entry(self, cfg: &Config) -> Option<AppEntry> {
+    fn into_scored(self, cfg: &Config) -> Option<Scored> {
         let name = self.name?.trim().to_string();
         let exec = self.exec?.trim().to_string();
         if name.is_empty() || exec.is_empty() {
@@ -276,14 +407,19 @@ impl RawApp {
 
         let source = self.source.unwrap_or_else(|| "scan".into());
 
-        Some(AppEntry {
-            name,
-            exec,
-            kind,
-            args,
-            icon,
-            source,
-            uses: 0,
+        Some(Scored {
+            entry: AppEntry {
+                name,
+                exec,
+                kind,
+                args,
+                icon,
+                source,
+                uses: 0,
+            },
+            product: self.product.unwrap_or_default().trim().to_string(),
+            company: self.company.unwrap_or_default().trim().to_string(),
+            size: self.size,
         })
     }
 }
@@ -323,6 +459,15 @@ mod tests {
         }
     }
 
+    fn scored(name: &str, exec: &str, source: &str, product: &str, company: &str, size: u64) -> Scored {
+        Scored {
+            entry: entry(name, exec, source, None),
+            product: product.into(),
+            company: company.into(),
+            size,
+        }
+    }
+
     #[test]
     fn keep_entry_rejects_noise_keeps_real_apps() {
         assert!(!keep_entry("Uninstall DBeaver", r"C:\Program Files\DBeaver\unins000.exe"));
@@ -332,12 +477,53 @@ mod tests {
         ));
         assert!(!keep_entry("Notepad", r"C:\Windows\System32\notepad.exe"));
         assert!(!keep_entry("Something Setup", r"D:\dl\something-setup.exe"));
+        assert!(!keep_entry("Elevate", r"C:\Users\me\AppData\Local\GitHubDesktop\Elevate.exe"));
+        assert!(!keep_entry("app", r"D:\tools\foo\squirrel.exe"));
 
         assert!(keep_entry("DBeaver", r"C:\Program Files\DBeaver\dbeaver.exe"));
         assert!(keep_entry(
             "Visual Studio Code",
             r"C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe"
         ));
+    }
+
+    #[test]
+    fn prune_scanned_keeps_only_the_main_binary_per_folder() {
+        let got = prune_scanned(vec![
+            scored("GitHub Desktop", r"C:\a\GitHubDesktop\GitHubDesktop.exe", "scan", "GitHub Desktop", "GitHub", 40),
+            scored("tool", r"C:\a\GitHubDesktop\tool.exe", "scan", "GitHub Desktop", "GitHub", 10),
+            // a curated entry in the same dir is never pruned
+            scored("Sidecar", r"C:\a\GitHubDesktop\sidecar.exe", "start-menu", "", "", 0),
+        ]);
+        let names: Vec<&str> = got.iter().map(|s| s.entry.name.as_str()).collect();
+        assert!(names.contains(&"GitHub Desktop"));
+        assert!(names.contains(&"Sidecar"));
+        assert!(!names.contains(&"tool"));
+    }
+
+    #[test]
+    fn prune_scanned_leaves_single_exe_folders_and_extra_dirs_alone() {
+        let got = prune_scanned(vec![scored(
+            "mytool",
+            r"D:\tools\mytool\mytool.exe",
+            "extra",
+            "",
+            "",
+            0,
+        )]);
+        assert_eq!(got.len(), 1);
+    }
+
+    #[test]
+    fn dedupe_by_product_collapses_same_vendor_and_product() {
+        let got = dedupe_by_product(vec![
+            scored("FooLauncher", r"C:\a\FooLauncher.exe", "scan", "Foo", "Acme", 0),
+            scored("Foo", r"C:\b\Foo.exe", "start-menu", "Foo", "Acme", 0),
+            // no metadata -> never collapsed
+            scored("bar", r"C:\c\bar.exe", "scan", "", "", 0),
+        ]);
+        let names: Vec<&str> = got.iter().map(|s| s.entry.name.as_str()).collect();
+        assert_eq!(names, vec!["Foo", "bar"]);
     }
 
     #[test]
@@ -372,7 +558,10 @@ mod tests {
             args: None,
             icon: None,
             source: Some("start-menu".into()),
+            product: None,
+            company: None,
+            size: 0,
         };
-        assert!(raw.into_entry(&cfg).is_none());
+        assert!(raw.into_scored(&cfg).is_none());
     }
 }

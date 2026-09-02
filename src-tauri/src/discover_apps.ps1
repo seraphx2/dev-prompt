@@ -1,7 +1,9 @@
 # Installed-application enumeration for dev-prompt's ">" app scope.
 # Invoked by src/apps.rs via `powershell -Command -` (script on stdin). Emits a
-# single compressed JSON array of { name, exec, kind, args, icon, source }.
+# single compressed JSON array of
+#   { name, exec, kind, args, icon, source, product, company, size }
 # `__EXTRA_DIRS__` and `__ICON_CAP__` are substituted by the Rust caller.
+# Rust does the noise filtering / dedupe; this script just gathers.
 
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'
@@ -46,6 +48,15 @@ function IconFor($path) {
 
 $rows = New-Object System.Collections.ArrayList
 
+# ProductName / CompanyName for an on-disk exe (used by Rust dedupe). Cheap —
+# no icon work.
+function MetaFor($path) {
+  try {
+    $vi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($path)
+    return @{ product = [string]$vi.ProductName; company = [string]$vi.CompanyName }
+  } catch { return @{ product = ''; company = '' } }
+}
+
 # 1. Store apps (AppUserModelIDs) via Get-StartApps. Win32 .lnk apps also show
 #    up here but are picked up with a real path in step 2.
 foreach ($a in (Get-StartApps)) {
@@ -71,13 +82,17 @@ foreach ($m in $menus) {
     $t = [string]$lnk.TargetPath
     if (-not $t) { continue }
     if ([IO.Path]::GetExtension($t).ToLower() -ne '.exe') { continue }
+    $mi = MetaFor $t
     [void]$rows.Add([pscustomobject]@{
-      name   = [IO.Path]::GetFileNameWithoutExtension($f.Name)
-      exec   = $t
-      kind   = 'exe'
-      args   = [string]$lnk.Arguments
-      icon   = (IconFor $t)
-      source = 'start-menu'
+      name    = [IO.Path]::GetFileNameWithoutExtension($f.Name)
+      exec    = $t
+      kind    = 'exe'
+      args    = [string]$lnk.Arguments
+      icon    = (IconFor $t)
+      source  = 'start-menu'
+      product = $mi.product
+      company = $mi.company
+      size    = 0
     })
   }
 }
@@ -112,24 +127,48 @@ foreach ($kp in $unKeys) {
     }
     if (-not $exe) { continue }
 
+    $mi = MetaFor $exe
     [void]$rows.Add([pscustomobject]@{
       name = [string]$p.DisplayName; exec = $exe; kind = 'exe'
       args = ''; icon = (IconFor $exe); source = 'uninstall'
+      product = $mi.product; company = $mi.company; size = 0
     })
   }
 }
 
-# 4. Bounded *.exe scan of per-user install roots + user-configured extra dirs.
-$scanDirs = @((Join-Path $env:LOCALAPPDATA 'Programs')) + @(__EXTRA_DIRS__)
-foreach ($d in $scanDirs) {
-  if (-not $d -or -not (Test-Path -LiteralPath $d)) { continue }
+$reject = '(?i)unins|setup|update|crash|helper|redist|vcredist|elevate|squirrel|bootstrapper'
+
+# 4a. Built-in per-user install root — requires a real FileDescription.
+foreach ($d in @((Join-Path $env:LOCALAPPDATA 'Programs'))) {
+  if (-not (Test-Path -LiteralPath $d)) { continue }
   foreach ($f in (Get-ChildItem -LiteralPath $d -Recurse -Depth 3 -Filter *.exe -File)) {
-    if ($f.Name -match '(?i)unins|setup|update|crash|helper|redist|vcredist') { continue }
-    $desc = [string]$f.VersionInfo.FileDescription
+    if ($f.Name -match $reject) { continue }
+    $vi = $f.VersionInfo
+    $desc = [string]$vi.FileDescription
     if (-not $desc) { continue }
     [void]$rows.Add([pscustomobject]@{
       name = $desc; exec = $f.FullName; kind = 'exe'
       args = ''; icon = (IconFor $f.FullName); source = 'scan'
+      product = [string]$vi.ProductName; company = [string]$vi.CompanyName
+      size = [int64]$f.Length
+    })
+  }
+}
+
+# 4b. User-configured extra dirs — lenient: keep metadata-less binaries too
+#     (Rust's per-folder "main binary" pick trims the rest).
+foreach ($d in @(__EXTRA_DIRS__)) {
+  if (-not $d -or -not (Test-Path -LiteralPath $d)) { continue }
+  foreach ($f in (Get-ChildItem -LiteralPath $d -Recurse -Depth 3 -Filter *.exe -File)) {
+    if ($f.Name -match $reject) { continue }
+    $vi = $f.VersionInfo
+    $desc = [string]$vi.FileDescription
+    $nm = if ($desc) { $desc } else { [IO.Path]::GetFileNameWithoutExtension($f.Name) }
+    [void]$rows.Add([pscustomobject]@{
+      name = $nm; exec = $f.FullName; kind = 'exe'
+      args = ''; icon = (IconFor $f.FullName); source = 'extra'
+      product = [string]$vi.ProductName; company = [string]$vi.CompanyName
+      size = [int64]$f.Length
     })
   }
 }
