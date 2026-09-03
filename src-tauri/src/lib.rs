@@ -302,6 +302,11 @@ pub fn run() {
             // Warm the process-global program-resolution cache off the UI thread
             // so the first action menu / launch doesn't pay for globbing, PATH
             // scans and vswhere on the main thread the way it used to.
+            //
+            // If a config reload (`clear_program_cache`) lands while this is
+            // still resolving, a stale entry can survive until the next reload.
+            // The window is ~1s at startup and self-heals, so it's not worth a
+            // cache generation counter to close.
             {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn_blocking(move || {

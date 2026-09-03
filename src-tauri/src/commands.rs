@@ -74,8 +74,16 @@ fn context_for(state: &AppState, repo: &Repo) -> RepoContext {
         return ctx;
     }
     let cfg = state.config.lock().unwrap();
-    let discovery = config::compile_globset(&config::discovery_globs(&cfg));
-    inspect::inspect(Path::new(&repo.path), &discovery)
+    inspect_cold(&repo.path, &cfg)
+}
+
+/// Cold-path project inspection for a repo the last scan didn't capture (cache
+/// predates the feature, or the repo was added since). Shared by the
+/// `spawn_blocking` closures in `build_actions` / `run_action`, which can't call
+/// `context_for` because it borrows `AppState`.
+fn inspect_cold(repo_path: &str, cfg: &Config) -> RepoContext {
+    let discovery = config::compile_globset(&config::discovery_globs(cfg));
+    inspect::inspect(Path::new(repo_path), &discovery)
 }
 
 #[derive(Debug, Serialize)]
@@ -181,14 +189,17 @@ pub async fn build_actions(
     let cached = state.contexts.lock().unwrap().get(&repo.path).cloned();
     let cfg = state.config.lock().unwrap().clone();
     Ok(tauri::async_runtime::spawn_blocking(move || {
-        let ctx = cached.unwrap_or_else(|| {
-            let discovery = config::compile_globset(&config::discovery_globs(&cfg));
-            inspect::inspect(Path::new(&repo.path), &discovery)
-        });
+        let ctx = cached.unwrap_or_else(|| inspect_cold(&repo.path, &cfg));
         build_actions_impl(&repo, &ctx, &cfg)
     })
     .await
-    .unwrap_or_default())
+    .unwrap_or_else(|e| {
+        // A JoinError here means the closure panicked (poisoned mutex, an unwrap
+        // in `inspect`). An empty menu is a softer landing than failing the IPC,
+        // but the panic shouldn't vanish silently.
+        eprintln!("build_actions task failed: {e}");
+        Vec::new()
+    }))
 }
 
 /// Rule-by-rule explanation of what a single repo produces and why — feeds the
@@ -257,10 +268,7 @@ pub async fn run_action(
     let cached = state.contexts.lock().unwrap().get(&repo.path).cloned();
     let cfg = state.config.lock().unwrap().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let ctx = cached.unwrap_or_else(|| {
-            let discovery = config::compile_globset(&config::discovery_globs(&cfg));
-            inspect::inspect(Path::new(&repo.path), &discovery)
-        });
+        let ctx = cached.unwrap_or_else(|| inspect_cold(&repo.path, &cfg));
         let action = find_action(&repo, &ctx, &cfg, &action_id)
             .ok_or_else(|| AppError::msg(format!("unknown action: {action_id}")))?;
         launch::launch(&action, &repo)
@@ -701,9 +709,11 @@ pub async fn run_app(
     tauri::async_runtime::spawn_blocking(move || apps::launch(&entry))
         .await
         .map_err(|e| AppError::msg(format!("launch task failed: {e}")))??;
-    // Frecency is a side effect — don't make the caller (which dismisses the
-    // overlay next) wait on the app-usage.json read-modify-write.
-    tauri::async_runtime::spawn_blocking(move || crate::usage::bump(&exec));
+    // Frecency write stays off the UI thread but is still awaited: it's a
+    // sub-millisecond JSON rewrite, and letting it run detached loses the
+    // increment whenever the process exits (tray quit, updater relaunch) before
+    // the task gets scheduled.
+    let _ = tauri::async_runtime::spawn_blocking(move || crate::usage::bump(&exec)).await;
     Ok(())
 }
 
