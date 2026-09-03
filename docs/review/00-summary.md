@@ -4,7 +4,7 @@
 **Raw findings:** 41 (10 + 8 + 12 + 8 + 3) — see `01`–`05`.
 **Consolidated:** 16 work items + 1 cleanup batch. The 41 collapse because several are one root cause seen from different call sites.
 
-**Progress:** Tier 1 (WI-1…WI-6) complete. Tier 2 (WI-7…WI-16) and the Tier-3 batch open (one Tier-3 item, P4 #7, landed with WI-2). Resolved findings in `01`–`05` are collapsed to one-line stubs with their commit hash.
+**Progress:** Tier 1 (WI-1…WI-6) complete, plus WI-16 (CI on `dev` pushes) and Tier-3 P4 #7. Tier 2 (WI-7…WI-15) and the rest of the Tier-3 batch open. Resolved findings in `01`–`05` are collapsed to one-line stubs with their commit hash.
 
 Per-pass detail:
 [01 — rules/config engine](01-rules-config-engine.md) ·
@@ -25,6 +25,7 @@ Per-pass detail:
 | **WI-4** | `app-usage.json` data-loss race + bump-before-launch | P3 #2, P2 #6 | `5b09b87` |
 | **WI-5** | `dedupe_by_product` drops side-by-side installs | P3 #1 | `e26e1f4` |
 | **WI-6** | Wrong-app-launch race — rescan yanks selection to row 0 | P4 #2 | `f57947c` |
+| **WI-16** | No CI on direct `dev` pushes between PRs | P5 #3 | `ci-dev.yml` — separate workflow, composite `.github/actions/ci`, doc-only pushes skipped |
 
 ## Tier 2 — should fix, not release-blocking
 
@@ -39,7 +40,6 @@ Per-pass detail:
 | **WI-13** | `flutter-android` rule has no `requires:` gate | P1 #7 | add `requires: [gradle]` (or gate on the wrapper existing) |
 | **WI-14** | `run_command` token-substitutes free-form input | P2 #3 | spawn the parsed argv directly, no `{{token}}` pass for typed commands |
 | **WI-15** | `onWindowMouse` has no `run-command` branch | P4 #4 | mirror the `onWindowKeydown` `run-command` branch — button 3 → back to action menu, button 4 → no-op |
-| **WI-16** | No CI on direct `dev` pushes between PRs | P5 #3 | re-add a `push` trigger scoped to `dev` (or a light build+test job), or document the tradeoff in the workflow |
 
 ## Tier 3 — cleanup batch (do together, low risk)
 

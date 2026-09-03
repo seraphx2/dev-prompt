@@ -20,12 +20,7 @@ Resolved items are collapsed to a one-line stub with the commit that closed them
 
 ## 🟡 Medium
 
-### [ ] 3. Dropping the `push` trigger leaves direct `dev` commits with no CI between PRs
-[ci.yml:6](../../.github/workflows/ci.yml#L6) · intentional per commit `65ed182`
-
-The workflow is: long-lived `dev`, direct commits to `dev`, periodic `dev→main` merge PR. With the `push: branches-ignore: [main]` trigger removed, commits pushed to `dev` after a PR merges and before the next PR opens get **no** build / clippy / `cargo test` / `npm test`. A broken commit sits on `dev` undetected until the next PR, which then runs CI once over the cumulative delta — making a failure hard to attribute to a commit.
-
-**Fix (if you want the coverage back):** re-add a `push` trigger scoped to `dev` only, or a lightweight `push`-triggered job (build + test, skip the heavier matrix). If the removal was deliberate to save minutes, note the tradeoff in the workflow file so it's not "fixed" later by mistake.
+### [x] 3. Dropping the `push` trigger leaves direct `dev` commits with no CI between PRs — `ci-dev.yml` (+ shared `.github/actions/ci`)
 
 ---
 

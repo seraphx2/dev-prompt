@@ -1,0 +1,48 @@
+name: CI steps
+description: >
+  Frontend build + typecheck + unit tests, then Rust clippy + tests.
+  Shared by ci.yml (the dev->main PR gate, context "check") and
+  ci-dev.yml (per-commit coverage on dev). Assumes the repo is already
+  checked out.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v5
+      with:
+        node-version: 22
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy
+
+    - name: Cache Rust build
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: src-tauri
+
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
+
+    # svelte-check + vite build. Also produces dist/, which the Rust build
+    # needs (tauri::generate_context! embeds the frontend).
+    - name: Frontend build + typecheck
+      shell: bash
+      run: npm run build
+
+    - name: Frontend unit tests
+      shell: bash
+      run: npm test
+
+    - name: Clippy
+      shell: bash
+      working-directory: src-tauri
+      run: cargo clippy --all-targets -- -D warnings
+
+    - name: Tests
+      shell: bash
+      working-directory: src-tauri
+      run: cargo test
