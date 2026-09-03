@@ -1,3 +1,10 @@
+// A lot of the app-discovery and Windows-arg-splitting machinery in `apps` /
+// `rules` is only reachable from `#[cfg(windows)]` call sites. Off Windows those
+// helpers are genuinely unreferenced — that's expected, not rot — and the
+// Windows build (local dev + release.yml's `tauri build`) still lints dead_code
+// in full.
+#![cfg_attr(not(windows), allow(dead_code))]
+
 mod apps;
 mod cache;
 mod commands;
