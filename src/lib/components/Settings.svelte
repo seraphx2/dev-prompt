@@ -585,7 +585,7 @@
       </label>
     </div>
 
-    <div class="space-y-2 border-t border-hair pt-4">
+    <div class="space-y-2">
       <label class="flex items-center gap-2">
         <input
           type="checkbox"
