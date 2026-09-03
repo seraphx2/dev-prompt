@@ -299,6 +299,26 @@ pub fn run() {
                 show_overlay(&window);
             }
 
+            // Warm the process-global program-resolution cache off the UI thread
+            // so the first action menu / launch doesn't pay for globbing, PATH
+            // scans and vswhere on the main thread the way it used to.
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    let cfg = handle.state::<AppState>().config.lock().unwrap().clone();
+                    let resolver = crate::rules::Resolver::new(&cfg.programs)
+                        .with_terminal(
+                            cfg.terminal.as_deref(),
+                            cfg.terminal_template.as_deref(),
+                        )
+                        .with_shell(cfg.shell.as_deref());
+                    for key in cfg.programs.keys() {
+                        let _ = resolver.resolve(key);
+                    }
+                    let _ = resolver.resolve("terminal");
+                });
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| match event {

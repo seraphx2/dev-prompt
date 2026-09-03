@@ -168,12 +168,27 @@ fn repo_for_path(state: &AppState, path: &str) -> Repo {
         })
 }
 
+/// `async` + `spawn_blocking`: rule evaluation resolves every program key, and
+/// the first call per session globs the filesystem / scans PATH / runs vswhere
+/// (memoized after). A cache miss also walks the repo. None of that belongs on
+/// the UI thread — the action menu `await`s this before it renders.
 #[tauri::command]
-pub fn build_actions(state: State<'_, AppState>, path: String) -> Vec<Action> {
+pub async fn build_actions(
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<Vec<Action>> {
     let repo = repo_for_path(&state, &path);
-    let ctx = context_for(&state, &repo);
-    let cfg = state.config.lock().unwrap();
-    build_actions_impl(&repo, &ctx, &cfg)
+    let cached = state.contexts.lock().unwrap().get(&repo.path).cloned();
+    let cfg = state.config.lock().unwrap().clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        let ctx = cached.unwrap_or_else(|| {
+            let discovery = config::compile_globset(&config::discovery_globs(&cfg));
+            inspect::inspect(Path::new(&repo.path), &discovery)
+        });
+        build_actions_impl(&repo, &ctx, &cfg)
+    })
+    .await
+    .unwrap_or_default())
 }
 
 /// Rule-by-rule explanation of what a single repo produces and why — feeds the
@@ -229,20 +244,29 @@ pub async fn refresh_repo_context(
     Ok(())
 }
 
+/// `async` + `spawn_blocking` for the same reason as [`build_actions`], plus the
+/// `CreateProcess` in `launch::launch` — the overlay `await`s this before it
+/// dismisses.
 #[tauri::command]
-pub fn run_action(
+pub async fn run_action(
     state: State<'_, AppState>,
     action_id: String,
     path: String,
 ) -> AppResult<()> {
     let repo = repo_for_path(&state, &path);
-    let ctx = context_for(&state, &repo);
-    let action = {
-        let cfg = state.config.lock().unwrap();
-        find_action(&repo, &ctx, &cfg, &action_id)
-    }
-    .ok_or_else(|| AppError::msg(format!("unknown action: {action_id}")))?;
-    launch::launch(&action, &repo)
+    let cached = state.contexts.lock().unwrap().get(&repo.path).cloned();
+    let cfg = state.config.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let ctx = cached.unwrap_or_else(|| {
+            let discovery = config::compile_globset(&config::discovery_globs(&cfg));
+            inspect::inspect(Path::new(&repo.path), &discovery)
+        });
+        let action = find_action(&repo, &ctx, &cfg, &action_id)
+            .ok_or_else(|| AppError::msg(format!("unknown action: {action_id}")))?;
+        launch::launch(&action, &repo)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("launch task failed: {e}")))?
 }
 
 #[tauri::command]
@@ -528,50 +552,56 @@ pub fn list_shells() -> Vec<String> {
 
 /// Run a free-form command in `path`'s terminal. Blank `command` opens the
 /// chosen shell interactively. Feeds the "Run command…" action.
+/// `async` + `spawn_blocking`: terminal/shell resolution (`which`, globs) and the
+/// spawn — the overlay `await`s this before it dismisses.
 #[tauri::command]
-pub fn run_command(
+pub async fn run_command(
     state: State<'_, AppState>,
     path: String,
     command: String,
     shell: Option<String>,
 ) -> AppResult<()> {
     let repo = repo_for_path(&state, &path);
-    let cfg = state.config.lock().unwrap();
-    let shell = shell
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| cfg.shell.clone());
-    let resolver = Resolver::new(&cfg.programs)
-        .with_terminal(cfg.terminal.as_deref(), cfg.terminal_template.as_deref())
-        .with_shell(shell.as_deref());
+    let cfg = state.config.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let shell = shell
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| cfg.shell.clone());
+        let resolver = Resolver::new(&cfg.programs)
+            .with_terminal(cfg.terminal.as_deref(), cfg.terminal_template.as_deref())
+            .with_shell(shell.as_deref());
 
-    let command = command.trim();
-    let (program, args, cwd) = if command.is_empty() {
-        let sh = shell.clone().unwrap_or_else(|| {
-            if crate::rules::which("pwsh").is_some() {
-                "pwsh".into()
-            } else {
-                "powershell".into()
-            }
-        });
-        terminal_command(&sh, &repo.path, &resolver, false)
-    } else {
-        terminal_command(command, &repo.path, &resolver, true)
-    };
+        let command = command.trim();
+        let (program, args, cwd) = if command.is_empty() {
+            let sh = shell.clone().unwrap_or_else(|| {
+                if crate::rules::which("pwsh").is_some() {
+                    "pwsh".into()
+                } else {
+                    "powershell".into()
+                }
+            });
+            terminal_command(&sh, &repo.path, &resolver, false)
+        } else {
+            terminal_command(command, &repo.path, &resolver, true)
+        };
 
-    let action = Action {
-        id: "run-command".into(),
-        label: command.to_string(),
-        hint: command.to_string(),
-        group: String::new(),
-        default: false,
-        icon: None,
-        program,
-        args,
-        cwd,
-        client_side: false,
-        prompt: false,
-    };
-    launch::launch(&action, &repo)
+        let action = Action {
+            id: "run-command".into(),
+            label: command.to_string(),
+            hint: command.to_string(),
+            group: String::new(),
+            default: false,
+            icon: None,
+            program,
+            args,
+            cwd,
+            client_side: false,
+            prompt: false,
+        };
+        launch::launch(&action, &repo)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("run command task failed: {e}")))?
 }
 
 // --- installed-app launcher ( > scope ) -----------------------------------
@@ -648,8 +678,10 @@ pub async fn rescan_apps(app: AppHandle, state: State<'_, AppState>) -> AppResul
 
 /// Launch an installed app, bumping its frecency count only if the launch
 /// actually starts (a stale entry whose exe is gone shouldn't climb the list).
+/// `async` + `spawn_blocking`: keeps the spawn and the frecency file write off
+/// the UI thread, which is about to dismiss the overlay.
 #[tauri::command]
-pub fn run_app(
+pub async fn run_app(
     exec: String,
     kind: String,
     args: Option<Vec<String>>,
@@ -666,8 +698,12 @@ pub fn run_app(
         icon: None,
         source: String::new(),
     };
-    apps::launch(&entry)?;
-    crate::usage::bump(&exec);
+    tauri::async_runtime::spawn_blocking(move || apps::launch(&entry))
+        .await
+        .map_err(|e| AppError::msg(format!("launch task failed: {e}")))??;
+    // Frecency is a side effect — don't make the caller (which dismisses the
+    // overlay next) wait on the app-usage.json read-modify-write.
+    tauri::async_runtime::spawn_blocking(move || crate::usage::bump(&exec));
     Ok(())
 }
 
