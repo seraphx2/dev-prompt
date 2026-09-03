@@ -48,10 +48,20 @@ fn signal_overlay_hidden<R: tauri::Runtime>(window: &impl Emitter<R>) {
     let _ = window.emit("overlay:hidden", ());
 }
 
+/// Drop the first-run "stay open" latch. Called the first time the user
+/// explicitly dismisses the overlay (hotkey toggle-off, `hide_overlay`, close),
+/// after which normal dismiss-on-blur resumes. A no-op on every later launch.
+fn release_sticky_open(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<AppState>() {
+        *state.sticky_open.lock().unwrap() = false;
+    }
+}
+
 /// Show the overlay in `scope`, or hide it if it is already visible.
 fn toggle_overlay_scoped(window: &WebviewWindow, scope: &str) {
     match window.is_visible() {
         Ok(true) => {
+            release_sticky_open(window.app_handle());
             signal_overlay_hidden(window);
             let _ = window.hide();
         }
@@ -135,25 +145,26 @@ fn round_window_corners(window: &WebviewWindow) {
     }
 }
 
-/// Arg the autostart entry is registered with — its presence means "launched at
-/// login", so the overlay stays hidden until the hotkey. A normal user launch
-/// (Start menu, double-click) omits it and we pop the overlay so people can see
-/// the app is running.
+/// Arg the autostart entry is registered with, so a login launch stays
+/// distinguishable from a manual one in the process args. Nothing branches on it
+/// today — first run is the only launch that shows the overlay; every other
+/// launch (manual or at login) starts silent in the tray — but it's kept so
+/// existing autostart Run keys don't need rewriting and a future "started at
+/// login" check has something to read.
 const AUTOSTART_ARG: &str = "--autostart";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
 
-    // Single-instance must be registered first: a second launch focuses the
-    // running overlay instead of starting a duplicate (no second tray icon, no
-    // failed hotkey re-registration).
+    // Single-instance must be registered first: it holds an OS lock so a second
+    // `dev-prompt.exe` hands off to the running instance and exits before it can
+    // become a window, tray icon, or a second hotkey registration. The re-launch
+    // is deliberately inert — no window pops; the hotkey or tray is how you
+    // reach a running instance.
     #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-        if let Some(w) = app.get_webview_window(OVERLAY_LABEL) {
-            show_overlay(&w);
-        }
-    }));
+    let builder =
+        builder.plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}));
 
     let mut builder = builder
         .plugin(tauri_plugin_os::init())
@@ -274,20 +285,17 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // First run: opt into start-at-login (the user can turn it off in
-            // Settings; we never re-enable).
-            #[cfg(desktop)]
-            {
-                use tauri_plugin_autostart::ManagerExt;
-                let first_run = app.state::<AppState>().first_run;
-                if first_run {
-                    let _ = app.autolaunch().enable();
-                }
-            }
-
-            // Show the overlay on a normal launch so the app is visibly there;
-            // stay hidden when started at login.
-            if !std::env::args().any(|a| a == AUTOSTART_ARG) {
+            // First run only: pop the overlay and hold it open (the `sticky_open`
+            // latch makes focus loss non-dismissing until the user acts) so it's
+            // unmistakable that the install finished and the app is live. Every
+            // other launch, manual or at login, starts silent in the tray and
+            // waits for the hotkey.
+            //
+            // Start-at-login is set by the installer (NSIS_HOOK_POSTINSTALL), not
+            // here — keying it off `first_run` was unreliable, since a leftover
+            // `config.yaml` (dev builds, or a prior install the uninstaller left
+            // behind) makes `first_run` false on a genuine first run.
+            if app.state::<AppState>().first_run {
                 show_overlay(&window);
             }
 
@@ -301,7 +309,10 @@ pub fn run() {
                     let dismiss = window
                         .app_handle()
                         .try_state::<AppState>()
-                        .map(|s| *s.dismiss_on_blur.lock().unwrap())
+                        .map(|s| {
+                            *s.dismiss_on_blur.lock().unwrap()
+                                && !*s.sticky_open.lock().unwrap()
+                        })
                         .unwrap_or(true);
                     if dismiss {
                         signal_overlay_hidden(window);
@@ -312,6 +323,7 @@ pub fn run() {
             // Closing just hides — the app keeps running for the next hotkey press.
             WindowEvent::CloseRequested { api, .. } if window.label() == OVERLAY_LABEL => {
                 api.prevent_close();
+                release_sticky_open(window.app_handle());
                 signal_overlay_hidden(window);
                 let _ = window.hide();
             }

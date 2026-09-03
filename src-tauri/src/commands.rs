@@ -35,6 +35,11 @@ pub struct AppState {
     pub dismiss_on_blur: Mutex<bool>,
     /// True when `config.yaml` did not exist before this launch (first run).
     pub first_run: bool,
+    /// First-run latch: while set, focus loss never dismisses the overlay, so
+    /// the window `setup` pops on first run stays put until the user explicitly
+    /// closes it (Esc, launching something, the hotkey, Alt+F4). Cleared on that
+    /// first dismiss, after which `dismiss_on_blur` governs as usual.
+    pub sticky_open: Mutex<bool>,
 }
 
 impl AppState {
@@ -56,6 +61,7 @@ impl AppState {
             apps_age_secs: Mutex::new(apps_age),
             dismiss_on_blur: Mutex::new(true),
             first_run,
+            sticky_open: Mutex::new(first_run),
         }
     }
 }
@@ -240,7 +246,9 @@ pub fn run_action(
 }
 
 #[tauri::command]
-pub fn hide_overlay(window: tauri::WebviewWindow) -> AppResult<()> {
+pub fn hide_overlay(window: tauri::WebviewWindow, state: State<'_, AppState>) -> AppResult<()> {
+    // The first explicit dismiss ends the first-run "stay open" latch.
+    *state.sticky_open.lock().unwrap() = false;
     // Mirror the backend hide paths: reset the frontend to the repo list while
     // the window is off-screen so the next show has no visible snap-back.
     let _ = window.emit("overlay:hidden", ());
@@ -259,10 +267,18 @@ pub fn get_config(state: State<'_, AppState>) -> Config {
 /// Read-only view of the merged config: which programs resolve, which rules are
 /// active, which universal actions are available.
 #[tauri::command]
-pub fn config_summary(state: State<'_, AppState>) -> AppResult<crate::rules::ConfigSummary> {
+pub async fn config_summary(
+    state: State<'_, AppState>,
+) -> AppResult<crate::rules::ConfigSummary> {
+    // `summarize` resolves every program by globbing the filesystem (plus a
+    // per-rule PATH search) — seconds on a cold cache. A sync command would run
+    // that on the UI thread and stall *all* pending IPC responses behind it
+    // (that's what lagged the Settings autostart checkbox by ~6s). Off-thread it.
     let path = config::rules_path()?.to_string_lossy().into_owned();
-    let cfg = state.config.lock().unwrap();
-    Ok(crate::rules::summarize(&cfg, path))
+    let cfg = state.config.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || crate::rules::summarize(&cfg, path))
+        .await
+        .map_err(|e| AppError::msg(format!("config summary task failed: {e}")))
 }
 
 /// Re-read `config.yaml` + `rules.yaml` from disk, forget memoized program
@@ -651,18 +667,47 @@ pub fn set_dismiss_on_blur(state: State<'_, AppState>, enabled: bool) {
 }
 
 /// Whether the app is registered to start at login (OS is the source of truth).
+/// Sync: a few registry reads, and kept in the same ordering domain as
+/// [`set_autostart`] so a read never races ahead of a pending write.
 #[tauri::command]
 pub fn get_autostart(app: AppHandle) -> bool {
     use tauri_plugin_autostart::ManagerExt;
     app.autolaunch().is_enabled().unwrap_or(false)
 }
 
+/// Sync on purpose: it must stay sync so rapid checkbox toggles apply in click
+/// order. As an async command the enable/disable calls race on the runtime pool
+/// and the last click can lose. The write is a couple of registry ops — fast on
+/// the UI thread now that `config_summary` no longer hogs it.
 #[tauri::command]
 pub fn set_autostart(app: AppHandle, enabled: bool) -> AppResult<()> {
     use tauri_plugin_autostart::ManagerExt;
     let al = app.autolaunch();
     let r = if enabled { al.enable() } else { al.disable() };
-    r.map_err(|e| AppError::msg(format!("autostart: {e}")))
+    r.map_err(|e| AppError::msg(format!("autostart: {e}")))?;
+    #[cfg(windows)]
+    if !enabled {
+        clear_startup_approved();
+    }
+    Ok(())
+}
+
+/// Delete the Task-Manager toggle-state entry Windows keeps beside a `Run` value.
+/// `auto-launch`'s `disable()` removes the `Run` value but leaves this behind,
+/// and once we're uninstalled nothing else owns it. The value name matches
+/// `productName` — what `tauri-plugin-autostart` registers the `Run` entry under.
+#[cfg(windows)]
+fn clear_startup_approved() {
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
+    use winreg::RegKey;
+
+    const APPROVED_KEY: &str =
+        r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+    if let Ok(key) =
+        RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(APPROVED_KEY, KEY_SET_VALUE)
+    {
+        let _ = key.delete_value("dev-prompt");
+    }
 }
 
 /// Reflect update availability in the tray tooltip. `version` = `None` resets it.

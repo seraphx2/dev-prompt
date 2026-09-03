@@ -857,6 +857,7 @@ dependencies = [
  "tauri-plugin-updater",
  "thiserror 2.0.20",
  "window-vibrancy 0.8.0",
+ "winreg 0.55.0",
 ]
 
 [[package]]
