@@ -579,21 +579,34 @@ pub fn run_command(
 /// Apps change rarely — a day-long freshness window keeps re-enumeration cheap.
 const APPS_TTL_SECS: u64 = 86_400;
 
+/// An `AppEntry` plus its launch count for the frontend. `uses` is derived per
+/// read from `app-usage.json` and lives only here — it's never on `AppEntry`, so
+/// it can't leak into `apps.json`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppView {
+    #[serde(flatten)]
+    entry: AppEntry,
+    uses: u32,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppsPayload {
-    pub apps: Vec<AppEntry>,
+    pub apps: Vec<AppView>,
     pub age_secs: i64,
     pub stale: bool,
 }
 
-/// Fold current launch counts into a freshly-cloned app list.
-fn apps_with_usage(mut apps: Vec<AppEntry>) -> Vec<AppEntry> {
+/// Attach each app's current launch count.
+fn apps_with_usage(apps: Vec<AppEntry>) -> Vec<AppView> {
     let counts = crate::usage::counts();
-    for a in &mut apps {
-        a.uses = counts.get(&a.exec.to_lowercase()).copied().unwrap_or(0);
-    }
-    apps
+    apps.into_iter()
+        .map(|entry| {
+            let uses = counts.get(&entry.exec.to_lowercase()).copied().unwrap_or(0);
+            AppView { entry, uses }
+        })
+        .collect()
 }
 
 /// Cache-first installed-app list for the `>` scope.
@@ -652,7 +665,6 @@ pub fn run_app(
         args: args.unwrap_or_default(),
         icon: None,
         source: String::new(),
-        uses: 0,
     };
     apps::launch(&entry)?;
     crate::usage::bump(&exec);
