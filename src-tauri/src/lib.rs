@@ -1,9 +1,11 @@
-// A lot of the app-discovery and Windows-arg-splitting machinery in `apps` /
-// `rules` is only reachable from `#[cfg(windows)]` call sites. Off Windows those
-// helpers are genuinely unreferenced — that's expected, not rot — and the
-// Windows build (local dev + release.yml's `tauri build`) still lints dead_code
-// in full.
-#![cfg_attr(not(windows), allow(dead_code))]
+// The app is Windows-first: a lot of `apps` / `rules` code (discovery, .lnk
+// handling, arg splitting) sits behind `#[cfg(windows)]`, leaving its helpers,
+// imports and `mut` bindings unreferenced off Windows. The non-Windows CI job
+// exists for fast correctness feedback on the portable code, not as a style
+// gate — the Windows build (local dev + release.yml's `tauri build`) keeps the
+// full `-D warnings`. Tighten this once real cfg(unix) code exists on the other
+// side of the split.
+#![cfg_attr(not(windows), allow(dead_code, unused_imports, unused_mut))]
 
 mod apps;
 mod cache;
