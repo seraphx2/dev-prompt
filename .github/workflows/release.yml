@@ -1,11 +1,17 @@
 name: Release
 
-# Manual trigger — go to Actions ▸ Release ▸ "Run workflow".
-# The job computes a CalVer version from today's date + existing tags, builds
-# the Windows NSIS installer and updater artifacts, and publishes a GitHub
-# Release with everything attached. Defaults to a live release; flip the inputs
-# for a run you want to review first or keep off the auto-updater.
+# Fires on every push to main — i.e. every dev->main merge — and publishes a
+# release: a CalVer version from today's date + existing tags, the Windows NSIS
+# installer and signed updater artifacts, and a GitHub Release with everything
+# attached. Doc-only merges are skipped (paths-ignore); to opt a code merge out,
+# put "[skip release]" in the merge-commit message. workflow_dispatch stays for
+# manual drafts / prereleases / re-runs.
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
   workflow_dispatch:
     inputs:
       draft:
@@ -17,33 +23,43 @@ on:
         type: boolean
         default: false
 
+# One release at a time; never cancel a run that may have already published.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
 jobs:
   release:
     runs-on: windows-latest
+    # push: skip when the merge commit opts out. dispatch: always run.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      !contains(github.event.head_commit.message, '[skip release]')
 
     steps:
-      - name: Guard — full releases only from main
+      - name: Guard — live dispatch only from main
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           if [ "${{ github.ref_name }}" != "main" ] \
             && [ "${{ inputs.draft }}" != "true" ] \
             && [ "${{ inputs.prerelease }}" != "true" ]; then
-            echo "::error::Refusing a full release from '${{ github.ref_name }}'. Re-run with 'draft' or 'prerelease' checked, or run from main."
+            echo "::error::Refusing a live release dispatched from '${{ github.ref_name }}'. Check 'draft' or 'prerelease', or dispatch from main."
             exit 1
           fi
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0 # need all tags so the CalVer build segment is correct
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -55,6 +71,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Branch protection is strict:false, so the PR's `check` ran on the PR head,
+      # not the merge result. Re-run the suite on the actual commit being shipped.
+      - name: Test
+        shell: bash
+        run: |
+          npm test
+          cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: Compute version
         id: version
@@ -71,8 +95,8 @@ jobs:
         with:
           tagName: v${{ steps.version.outputs.value }}
           releaseName: dev-prompt v${{ steps.version.outputs.value }}
-          releaseDraft: ${{ inputs.draft }}
-          prerelease: ${{ inputs.prerelease }}
+          releaseDraft: ${{ inputs.draft || false }}
+          prerelease: ${{ inputs.prerelease || false }}
           includeUpdaterJson: true
 
       - name: Package portable zip

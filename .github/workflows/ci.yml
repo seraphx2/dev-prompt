@@ -1,10 +1,11 @@
 name: CI
 
-# The dev->main PR gate. The `check` job name is the required status check
-# on main (branch protection, enforce_admins on) — keep it stable.
+# PR gate for both branches: dev->main (the release gate) and feature->dev
+# (contributor PRs). The `check` job name is the required status check on main
+# (branch protection, enforce_admins on) — keep it stable.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 # Newer commits on the PR branch supersede an in-flight run.
 concurrency:
