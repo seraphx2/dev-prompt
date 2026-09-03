@@ -17,7 +17,7 @@ Resolved items are collapsed to a one-line stub with the commit that closed them
 ### [x] 2. Hotkey (un)registration compares raw accelerator strings instead of parsed shortcuts — `42a4570`
 
 ### [ ] 3. `run_command` runs repo-token substitution over free-form typed commands
-[commands.rs:504](../../src-tauri/src/commands.rs#L504)
+[commands.rs:504](../../../src-tauri/src/commands.rs#L504)
 
 Typed commands go through `launch::launch`, which runs `{{path}}` / `{{dir}}` / `{{file}}` / `{{name}}` substitution over every arg and then drops empty args. Type `mytool --template {{file}}` → `{{file}}` becomes `""` → `.filter(|a| !a.is_empty())` deletes the arg → `mytool` gets `--template` with no value. `{{name}}` / `{{dir}}` / `{{path}}` in a typed command are silently rewritten to repo values rather than passed literally.
 
@@ -28,7 +28,7 @@ Typed commands go through `launch::launch`, which runs `{{path}}` / `{{dir}}` / 
 ## 🟡 Medium
 
 ### [ ] 4. `list_shells` returns bare `"bash"` that the launch path can't resolve
-[commands.rs:452](../../src-tauri/src/commands.rs#L452)
+[commands.rs:452](../../../src-tauri/src/commands.rs#L452)
 
 The block special-cases "Git installed but `bash` not on PATH" by locating git-bash at an absolute path — then pushes the bare name `"bash"` and discards the path. User picks it → `config.shell = "bash"` → `shell_wrap` emits `["bash","-c",...]` → `wt.exe -d <cwd> bash -c ...` → Windows Terminal can't find `bash` on PATH → command-failed tab. The one case the special-casing exists for is the one it breaks.
 
@@ -39,7 +39,7 @@ The block special-cases "Git installed but `bash` not on PATH" by locating git-b
 ### [x] 6. Frecency count is bumped before the launch is attempted — `5b09b87`
 
 ### [ ] 7. `refresh_repo_context` rewrites the entire `repos.json` on every action-menu open
-[commands.rs:220](../../src-tauri/src/commands.rs#L220)
+[commands.rs:220](../../../src-tauri/src/commands.rs#L220)
 
 `openActions` fires `refreshRepoContext` each time the menu opens. For a repo you're actively editing, `inspect` differs from the cached context → `changed` is true → `cache::save(&repos, &contexts)` serializes the whole map (hundreds of repos, each with file lists, pretty-printed) to disk — a multi-MB write on the async executor thread for a large workspace, on every menu open.
 
@@ -50,7 +50,7 @@ The block special-cases "Git installed but `bash` not on PATH" by locating git-b
 ## ⚪ Low
 
 ### [ ] 8. `which("pwsh") ? "pwsh" : "powershell"` fallback is now duplicated three times
-[commands.rs:479](../../src-tauri/src/commands.rs#L479)
+[commands.rs:479](../../../src-tauri/src/commands.rs#L479)
 
 Same pwsh/powershell preference lives here plus twice in `rules::shell_wrap` / `terminalize`. Changing the fallback needs three synchronized edits.
 
