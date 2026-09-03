@@ -197,3 +197,13 @@ cd src-tauri && cargo test    # config merge/expansion, discovery,
                               # rule evaluation, fuzzy ranking
 npm run check                 # svelte-check (types)
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+## Install note
+
+The Windows installer is unsigned, so SmartScreen shows a warning on first run —
+**More info ▸ Run anyway**. Updater artifacts are minisign-signed (public key in
+`src-tauri/tauri.conf.json`); the app verifies every update before applying it.
