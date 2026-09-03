@@ -565,7 +565,7 @@ fn terminalize(
     #[cfg(not(windows))]
     {
         // Per-emulator handling on non-Windows is its own milestone
-        // (docs/config-design.md #10); run the command directly in `cwd`.
+        // (docs/future-work.md #10); run the command directly in `cwd`.
         let _ = wrap;
         if argv.is_empty() {
             let term = resolver

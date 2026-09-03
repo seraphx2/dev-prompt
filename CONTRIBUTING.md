@@ -52,7 +52,7 @@ add a matching assertion to the `bundled_defaults` tests in
 ## Larger changes
 
 The roadmap — new providers, frontend modes, platform work — lives in
-[`docs/config-design.md`](docs/config-design.md), roughly ordered easiest to
+[`docs/future-work.md`](docs/future-work.md), roughly ordered easiest to
 hardest. For anything non-trivial, open an issue referencing the relevant item
 before you start, so we don't duplicate effort or design in opposite directions.
 
@@ -69,7 +69,7 @@ small and localized:
   corners).
 - `terminalize()` in `src-tauri/src/rules.rs` — Windows wraps commands in
   `wt.exe`; other platforms need per-emulator working-directory flags (see
-  `docs/config-design.md`).
+  `docs/future-work.md`).
 - Global hotkey on Wayland needs the XDG global-shortcuts portal; X11 and macOS
   work through the plugin as-is.
 

@@ -93,7 +93,7 @@ The discovered repo list is cached at `<OS cache dir>/dev-prompt/repos.json`.
 The architecture is platform-neutral — program paths and OS quirks are isolated
 in the `programs` config (`any` / `windows` / `linux` / `macos` candidate lists)
 and a handful of `#[cfg]` blocks. The remaining cross-platform work is tracked in
-[`docs/config-design.md`](docs/config-design.md).
+[`docs/future-work.md`](docs/future-work.md).
 
 ## Prerequisites
 
@@ -186,7 +186,7 @@ src-tauri/                  Rust backend
   src/rules_template.yaml    scaffold written to the user's rules.yaml
 scripts/version.mjs         CalVer generator for releases
 .github/workflows/          release.yml
-docs/                       configuration.md, rules-engine.md, releasing.md, config-design.md
+docs/                       configuration.md, rules-engine.md, releasing.md, future-work.md
 ```
 
 ## Tests
