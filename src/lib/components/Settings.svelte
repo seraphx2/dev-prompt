@@ -7,6 +7,7 @@
     listRepos,
     listShells,
     listTerminals,
+    openReleasesPage,
     openRulesFile,
     pickDirectories,
     reloadConfig,
@@ -19,7 +20,7 @@
   import HotkeyRecorder from "./HotkeyRecorder.svelte";
   import { icons, iconKeys } from "../icons";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-  import { currentVersion, installUpdate } from "../updater";
+  import { installUpdate } from "../updater";
   import { upd, pollUpdates } from "../updateStore.svelte";
 
   async function copyIcon(k: string) {
@@ -111,11 +112,6 @@
       autostart = false;
     }
     try {
-      appVersion = await currentVersion();
-    } catch {
-      appVersion = "";
-    }
-    try {
       traceRepos = (await listRepos()).repos.map((r) => ({
         name: r.name,
         path: r.path,
@@ -133,7 +129,7 @@
     } catch {
       shells = [];
     }
-    void pollUpdates(true);
+    void pollUpdates();
   });
 
   // Autostart applies immediately (the OS is the source of truth), not via Save.
@@ -157,7 +153,6 @@
   }
 
   // --- software update (shared store; see lib/updateStore) ---
-  let appVersion = $state("");
   let installing = $state(false);
   let installError = $state("");
 
@@ -348,6 +343,42 @@
   {#if !loaded}
     <div class="text-white/30">Loading…</div>
   {:else}
+    {#if upd.info}
+      <!-- Pending update sits at the top of the screen so the footer chip lands
+           straight on the Install button. The manual "Check for updates" button
+           stays in its own section further down. -->
+      <div
+        class="flex items-center gap-3 rounded border border-sky-400/40 bg-sky-500/[0.08] px-3 py-2"
+      >
+        <button
+          type="button"
+          onclick={applyUpdate}
+          disabled={installing}
+          class="shrink-0 rounded bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+        >
+          {installing ? "Installing…" : "Install"}
+        </button>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-baseline justify-between gap-3">
+            <span class="text-[12px] text-white/80">
+              Version <span class="font-mono text-sky-300">{upd.info.version}</span>
+              is available.
+            </span>
+            <button
+              type="button"
+              onclick={() => openReleasesPage()}
+              class="shrink-0 text-[11px] text-sky-300/70 hover:text-sky-300 hover:underline"
+            >
+              What's changed ↗
+            </button>
+          </div>
+          {#if installError}
+            <div class="mt-1 text-[11px] text-red-300">{installError}</div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
     <!-- Save floats top-right while the fields it controls are on screen, then
          scrolls away with this wrapper past the Rules section (which has its
          own buttons and doesn't use Save). The sticky strip is zero-height so
@@ -553,7 +584,7 @@
       </label>
     </div>
 
-    <div class="space-y-2 border-t border-hair pt-4">
+    <div class="space-y-2">
       <label class="flex items-center gap-2">
         <input
           type="checkbox"
@@ -875,51 +906,5 @@
         {/each}
       </div>
     </details>
-
-    <div class="space-y-2 border-t border-hair pt-4">
-      <span class="text-orange-400"
-        >Software update
-        {#if appVersion}<span class="font-mono text-white/25">— v{appVersion}</span
-          >{/if}</span
-      >
-      {#if upd.info}
-        <div class="rounded border border-sky-400/30 bg-sky-500/[0.06] px-3 py-2">
-          <div class="text-[12px] text-white/80">
-            Version <span class="font-mono text-sky-300">{upd.info.version}</span> is
-            available.
-          </div>
-          {#if upd.info.notes}
-            <div class="mt-1 whitespace-pre-line text-[11px] text-white/45">
-              {upd.info.notes}
-            </div>
-          {/if}
-          <button
-            type="button"
-            onclick={applyUpdate}
-            disabled={installing}
-            class="mt-2 rounded bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
-          >
-            {installing ? "Installing…" : "Install & restart"}
-          </button>
-          {#if installError}
-            <div class="mt-1 text-[11px] text-red-300">{installError}</div>
-          {/if}
-        </div>
-      {:else}
-        <div class="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onclick={() => pollUpdates(true)}
-            disabled={upd.checking}
-            class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
-          >
-            {upd.checking ? "Checking…" : "Check for updates"}
-          </button>
-          {#if upd.note}
-            <span class="text-[11px] text-white/40">{upd.note}</span>
-          {/if}
-        </div>
-      {/if}
-    </div>
   {/if}
 </div>

@@ -1,3 +1,12 @@
+// The app is Windows-first: a lot of `apps` / `rules` code (discovery, .lnk
+// handling, arg splitting) sits behind `#[cfg(windows)]`, leaving its helpers,
+// imports and `mut` bindings unreferenced off Windows. The non-Windows CI job
+// exists for fast correctness feedback on the portable code, not as a style
+// gate — the Windows build (local dev + release.yml's `tauri build`) keeps the
+// full `-D warnings`. Tighten this once real cfg(unix) code exists on the other
+// side of the split.
+#![cfg_attr(not(windows), allow(dead_code, unused_imports, unused_mut))]
+
 mod apps;
 mod cache;
 mod commands;
@@ -374,6 +383,7 @@ pub fn run() {
             commands::rescan_apps,
             commands::run_app,
             commands::open_rules_file,
+            commands::open_releases_page,
             commands::set_dismiss_on_blur,
             commands::set_update_hint,
             commands::get_autostart,

@@ -136,6 +136,11 @@ export function openRulesFile(): Promise<void> {
   return invoke<void>("open_rules_file");
 }
 
+/** Open the GitHub releases page in the default browser. */
+export function openReleasesPage(): Promise<void> {
+  return invoke<void>("open_releases_page");
+}
+
 /** Native folder picker; returns the chosen directories (empty if cancelled). */
 export async function pickDirectories(): Promise<string[]> {
   const res = await openDialog({

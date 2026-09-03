@@ -1,10 +1,12 @@
 name: CI
 
-# The dev->main PR gate. The `check` job name is the required status check
-# on main (branch protection, enforce_admins on) — keep it stable.
+# PR gate for both branches: dev->main (the release gate) and feature->dev
+# (contributor PRs). The `check` job aggregates the parallel frontend/rust jobs
+# and is the required status check on main (branch protection, enforce_admins
+# on) — keep its name stable.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 # Newer commits on the PR branch supersede an in-flight run.
 concurrency:
@@ -15,11 +17,23 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    runs-on: windows-latest
+  frontend:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/ci-frontend
 
-      - name: Build + test
-        uses: ./.github/actions/ci
+  # Linux for speed. This compiles the cross-platform bulk + all non-cfg tests;
+  # the Windows-only modules (registry, vswhere, .lnk, vibrancy) are verified by
+  # local dev and by release.yml's `tauri build` before every publish.
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/ci-rust
+
+  check:
+    needs: [frontend, rust]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "frontend + rust passed"

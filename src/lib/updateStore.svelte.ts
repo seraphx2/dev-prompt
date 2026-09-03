@@ -7,30 +7,31 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
-import { checkForUpdate, type UpdateInfo } from "./updater";
+import { checkForUpdate, currentVersion, type UpdateInfo } from "./updater";
 
 export const upd = $state<{
   info: UpdateInfo | null;
+  /** The running version, shown in the footer. Filled on the first poll. */
+  current: string;
   checking: boolean;
-  /** Result text for the manual check ("" when quiet / an update is pending). */
-  note: string;
-}>({ info: null, checking: false, note: "" });
+}>({ info: null, current: "", checking: false });
 
 /** Version we've already toasted about this session — don't repeat. */
 let notified: string | null = null;
 
 /**
- * Check GitHub for a newer release. `loud` surfaces a "you're up to date" /
- * error note for the manual button; the silent path only updates `upd.info`.
+ * Check GitHub for a newer release and update `upd.info`. Failures (offline,
+ * GitHub down, a missing/malformed `latest.json`) aren't surfaced in the UI —
+ * they're transient or a release-pipeline bug the user can't act on — but they
+ * are logged for debugging. The next launch / daily poll retries.
  */
-export async function pollUpdates(loud = false): Promise<void> {
+export async function pollUpdates(): Promise<void> {
   if (upd.checking) return;
   upd.checking = true;
-  if (loud) upd.note = "";
   try {
+    if (!upd.current) upd.current = await currentVersion().catch(() => "");
     const info = await checkForUpdate();
     upd.info = info;
-    if (loud) upd.note = info ? "" : "You're on the latest version.";
 
     void invoke("set_update_hint", { version: info?.version ?? null }).catch(
       () => {},
@@ -40,7 +41,7 @@ export async function pollUpdates(loud = false): Promise<void> {
       void toast(info.version);
     }
   } catch (e) {
-    if (loud) upd.note = `${e}`;
+    console.warn("update check failed:", e);
   } finally {
     upd.checking = false;
   }

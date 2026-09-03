@@ -19,11 +19,16 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    runs-on: windows-latest
+  frontend:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/ci-frontend
 
-      - name: Build + test
-        uses: ./.github/actions/ci
+  # Linux for speed — see the note in ci.yml. Windows compile is covered by
+  # local dev and release.yml.
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/ci-rust

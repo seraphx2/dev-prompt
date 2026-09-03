@@ -455,7 +455,11 @@ pub fn launch(entry: &AppEntry) -> AppResult<()> {
     }
 }
 
-#[cfg(test)]
+// Windows-only: every case drives the discovery scoring (`keep_entry`,
+// `prune_scanned`, `dedupe*`, `into_scored`, `looks_like_main_binary`) with
+// `C:\`-style paths and `.exe` semantics. The code under test never runs off
+// Windows, and some of the folder/stem parsing assumes `\` separators.
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
 

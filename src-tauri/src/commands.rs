@@ -805,3 +805,25 @@ pub fn open_rules_file(window: tauri::WebviewWindow) -> AppResult<()> {
     let _ = window.set_always_on_top(false);
     Ok(())
 }
+
+/// Open the GitHub releases page in the user's browser. The update box links
+/// here rather than carrying in-app release notes.
+#[tauri::command]
+pub fn open_releases_page(window: tauri::WebviewWindow) -> AppResult<()> {
+    const URL: &str = "https://github.com/seraphx2/dev-prompt/releases";
+
+    #[cfg(windows)]
+    let program = "explorer";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let program = "xdg-open";
+
+    std::process::Command::new(program)
+        .arg(URL)
+        .spawn()
+        .map_err(|e| AppError::msg(format!("could not open {URL}: {e}")))?;
+
+    let _ = window.set_always_on_top(false);
+    Ok(())
+}

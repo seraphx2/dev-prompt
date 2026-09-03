@@ -47,6 +47,12 @@ winreg = "0.55"
 
 [profile.dev]
 incremental = true
+# Windows linking is dominated by debuginfo size; line tables keep panic
+# locations readable while cutting the link step for `cargo build`/`clippy`.
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
 
 [profile.release]
 codegen-units = 1

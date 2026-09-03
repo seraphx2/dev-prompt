@@ -1,0 +1,25 @@
+name: CI — frontend
+description: >
+  npm ci, svelte-check + vite build, and the vitest unit suite. Runs on Linux,
+  in parallel with the Rust job. Assumes the repo is already checked out.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v5
+      with:
+        node-version: 22
+        cache: npm
+
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Build + typecheck
+      shell: bash
+      run: npm run build
+
+    - name: Unit tests
+      shell: bash
+      run: npm test
