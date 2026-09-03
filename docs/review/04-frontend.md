@@ -6,31 +6,17 @@
 **Date:** 2026-09-01
 
 Tick each item as you address it. Severity: 🔴 high · 🟡 medium · ⚪ low.
+Resolved items are collapsed to a one-line stub with the commit that closed them; `git show <hash>` for the detail.
 
 ---
 
 ## 🔴 High
 
-### [ ] 1. `npm test` does not run at all — the new suites execute zero tests and exit 1
-[vite.config.ts:36](../../vite.config.ts#L36)
+### [x] 1. `npm test` does not run at all — the new suites execute zero tests and exit 1 — `7bd4b5d`
 
-`vitest@4.1.11` fails to load every test file: `src/lib/fuzzy.test.ts` and `src/lib/hotkeys.test.ts` both report `(0 test)` with `TypeError: Cannot read properties of undefined (reading 'config')` at the first `describe()`; `vitest run` exits 1. Reproduced with an isolated minimal config and a trivial inline test, so vitest 4.1.11 itself is non-functional here (Windows + Node 22.22, no `engines` pin). The diff also adds a `Frontend unit tests: npm test` step to `.github/workflows/ci.yml`, so the next `dev→main` PR's CI fails at that step — and the commit "Add test coverage for the app launcher + hotkey helpers" currently delivers **no** coverage for `fuzzy.ts` / `hotkeys.ts`.
+### [x] 2. Background repo rescan in `>` app scope yanks the selection to the top mid-navigation — `f57947c`
 
-**Fix:** pin `vitest` (and `@vitest/*`) to a version that works on this Node/OS — try the 2.x or 3.x line — and add an `engines.node` pin to `package.json`. Verify `npm test` is green locally and in CI before the next PR. Overlaps pass 5 (CI).
-
-### [ ] 2. Background repo rescan in `>` app scope yanks the selection to the top mid-navigation
-[App.svelte:546](../../src/App.svelte#L546)
-
-Open the launcher when the repo cache is older than `cache_ttl_secs` (default 900s). `onOverlayShown` sets `query='>'` and `loadInitial()` starts a background `rescan()`. Arrow down to app #6 (`selected=5`). When `rescan()` finishes it calls `refresh()` directly *and* emits `repos:updated → onReposUpdated → refresh()`; `refresh()` runs `searchRepos('>chr')`, which matches no repos (`>` can't occur in Windows paths/names), sets `results=[]`, and runs `selected = Math.max(0, results.length - 1) = 0`. The app highlight jumps to row 0; an **Enter in that ~1s window launches the wrong app**. The `query` `$effect` guards this with `if (appScope) return`, but `onReposUpdated`, `rescan()`, and `loadInitial()` all call `refresh()` without that guard.
-
-**Fix:** guard every `refresh()` caller (not just the `$effect`) with `if (appScope) return`, or route app-scope refreshes through a dedicated `refreshApps()` that never touches `results`/`selected` for the repo list.
-
-### [ ] 3. The main "Save" button silently discards an uncommitted manual hotkey entry
-[Settings.svelte:279](../../src/lib/components/Settings.svelte#L279)
-
-Open Settings → "type it manually" → type `CmdOrCtrl+Shift+K` → click the top-right "Save". `persist()` (which replaced `save()`) omits `hotkey`/`apps_hotkey` from the `saveConfig` payload — the old `save()` sent `hotkey: hotkey.trim()`. `HotkeyRecorder`'s manual input binds only to its local `typed` state; nothing propagates to the parent unless the user presses Enter or the adjacent "Set". Result: "Saved." is shown, everything else persists, the hotkey edit is lost with no indication.
-
-**Fix:** either have `persist()` include the current effective `hotkey`/`apps_hotkey`, or have `HotkeyRecorder` propagate `typed` to the parent on change (and have the parent Save flush it). Part of the hotkey-save cluster — see cross-pass note.
+### [x] 3. The main "Save" button silently discards an uncommitted manual hotkey entry — `42a4570` (manual entry removed; recorder always commits)
 
 ---
 
@@ -61,12 +47,7 @@ With `apps.enabled: false`: `onMount` still calls `loadApps()` unconditionally; 
 
 ## ⚪ Low
 
-### [ ] 7. `HotkeyRecorder` "turn off" button is not `disabled={busy}`
-[HotkeyRecorder.svelte:98](../../src/lib/components/HotkeyRecorder.svelte#L98)
-
-While a save is in flight (`busy=true`), the `{#if clearable && value}` "turn off" button stays clickable and fires `onsave('') → persistHotkey({apps_hotkey:''}) → ` a second overlapping `saveConfig()`. Backend mutexes serialize them so no corruption, but the two races on `load_user()`/state and the "Hotkey saved." feedback can reflect the wrong one. Sibling "Set" / "Use it anyway" buttons are already `disabled={busy}`.
-
-**Fix:** add `disabled={busy}` to the "turn off" button.
+### [x] 7. `HotkeyRecorder` "turn off" button is not `disabled={busy}` — `42a4570`
 
 ### [ ] 8. `AppList` selection-scroll `$effect` is a third verbatim copy
 [AppList.svelte:25](../../src/lib/components/AppList.svelte#L25)
@@ -77,15 +58,6 @@ The ~10-line `skipScroll`/`scrollIntoView` effect (its own comment says "see the
 
 ---
 
-## Cross-pass note — the hotkey-save subsystem needs one coherent pass
+## Cross-pass note — the hotkey-save subsystem
 
-Four findings across the review touch the same `save_config` / hotkey flow, and fixing them piecemeal will leave gaps:
-
-| Pass | Finding | Symptom |
-|---|---|---|
-| 1 | [#1](01-rules-config-engine.md) — `commands.rs:367` | `new_apps_hotkey` missing fallback → Save kills the default hotkey |
-| 2 | [#2](02-trust-boundary.md) — `commands.rs:388` | raw-string `!=` instead of `shortcut_is` → equivalent spelling tears down the key |
-| 2 | [#5](02-trust-boundary.md) — `commands.rs:389` | register/unregister before persist → app & config disagree on failure |
-| 4 | #3 — `Settings.svelte:279` | main Save omits `hotkey`/`apps_hotkey` → uncommitted manual entry lost |
-
-Recommend redesigning the save path as: parse+validate both accelerators → diff by parsed `Shortcut` → `save_user` → apply register/unregister only on success → roll back on failure. The frontend should always send the effective hotkey values (or the recorder should propagate on change).
+All four findings that touched the `save_config` / hotkey flow (P1 #1, P2 #2, P2 #5, P4 #3) were redesigned together in **`42a4570`**: parse+validate both accelerators → diff by parsed `Shortcut` → `save_user` → apply register/unregister only on success → roll back on failure; the frontend's manual-entry path was dropped so the recorder always commits.

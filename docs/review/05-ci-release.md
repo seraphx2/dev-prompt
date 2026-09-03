@@ -6,33 +6,15 @@
 **Date:** 2026-09-01
 
 Tick each item as you address it. Severity: 🔴 high · 🟡 medium · ⚪ low.
+Resolved items are collapsed to a one-line stub with the commit that closed them; `git show <hash>` for the detail.
 
 ---
 
 ## 🔴 High
 
-### [ ] 1. The new `npm test` CI step runs zero tests and exits 1
-[ci.yml:47](../../.github/workflows/ci.yml#L47) · supersedes [pass 4 #1](04-frontend.md)
+### [x] 1. The new `npm test` CI step runs zero tests and exits 1 — `7bd4b5d`
 
-Root cause, now isolated: `vitest@4.1.11`'s default `forks` pool (and `threads`) crashes with `TypeError: Cannot read properties of undefined (reading 'config')` / "Vitest failed to find the current suite" when the working directory resolves with a **lowercase Windows drive letter** — e.g. `d:\git\dev-prompt`, the maintainer's own checkout path. `cd D:\git\dev-prompt` (uppercase) or `--pool=vmThreads` runs the same **13 assertions green**. `npm test` is therefore broken for typical Windows dev checkouts on the project's only supported OS, and the CI step fails for any runner whose workspace path resolves with a lowercase drive.
-
-The test files themselves are **correct** — all 13 assertions pass against `fuzzy.ts` / `hotkeys.ts` under `--pool=vmThreads`. This is purely a runner/pool defect.
-
-**Fix (pick one, prefer the first):**
-- Add `test: { pool: 'vmThreads' }` to `vite.config.ts`.
-- Or pin `vitest` to a working `3.x` line (see #2).
-- Belt-and-braces: also normalize the drive letter in the test script, but the pool fix is the real one.
-
-Verify `npm test` is green **locally and in a CI run** before the next `dev→main` PR.
-
-### [ ] 2. `"test": "vitest run"` rides an unpinned, non-functional major
-[package.json:12](../../package.json#L12)
-
-`vitest@^4.1.11` with nothing setting `test.pool`, so `npm test` always hits the broken default `forks` pool. `--pool=threads` / `--pool=forks --singleFork` / `--no-isolate` all fail identically (0 tests, exit 1), reproduced even with a trivial inline test and a plugin-free minimal config; only `--pool=vmThreads` works. No `engines.node` pin, and a `^` range on a brand-new major means `npm update` can drift the behavior further.
-
-**Fix:**
-- Set the pool in `vite.config.ts` (as in #1) **and** pin `vitest` + `@vitest/*` to an exact working version (drop the `^`).
-- Add `"engines": { "node": ">=20 <23" }` (or whatever you actually test against) to `package.json`.
+### [x] 2. `"test": "vitest run"` rides an unpinned, non-functional major — `7bd4b5d`
 
 ---
 

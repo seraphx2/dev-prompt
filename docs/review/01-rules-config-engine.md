@@ -6,24 +6,15 @@
 **Date:** 2026-09-01
 
 Tick each item as you address it. Severity: 🔴 high (wrong behaviour / silent breakage) · 🟡 medium (feature silently dead / misleading) · ⚪ low (cleanup / perf / docs).
+Resolved items are collapsed to a one-line stub with the commit that closed them; `git show <hash>` for the detail.
 
 ---
 
 ## 🔴 High
 
-### [ ] 1. Saving unrelated settings kills the default app-launcher hotkey until restart
-[commands.rs:367](../../src-tauri/src/commands.rs#L367)
+### [x] 1. Saving unrelated settings kills the default app-launcher hotkey until restart — `42a4570`
 
-`new_hotkey` falls back to `old_hotkey` via `unwrap_or_else`, but `new_apps_hotkey` has **no equivalent fallback**. On a fresh install `apps_hotkey:` is absent from `config.yaml` (omitted by `skip_serializing_if`), so the bundled default `CmdOrCtrl+Shift+Period` is active. Opening Settings and clicking the main Save sends every field *except* `apps_hotkey` → `new_apps_hotkey` is `None` → the diff block runs, skips register (None), and calls `unregister("CmdOrCtrl+Shift+Period")`. `config::load()` re-merges the default so `state.config` and the UI still show it enabled, but the OS shortcut is dead until the app restarts.
-
-**Fix:** give `new_apps_hotkey` the same `unwrap_or_else(|| old_apps_hotkey.clone())` fallback as `new_hotkey`, or have `persist()` always send the effective `apps_hotkey`.
-
-### [ ] 2. `shell_wrap` breaks on an absolute `argv[0]` containing a space
-[rules.rs:352](../../src-tauri/src/rules.rs#L352)
-
-`shell_wrap` drops an absolute `argv[0]` into `pwsh -Command` / `cmd /k` / `bash -c` with no call operator (`&`) and no quoting. On the common Windows layout `C:\Users\First Last`, the python provider builds `argv[0] = C:\Users\First Last\proj\.venv\Scripts/python.exe` ([rules.rs:696](../../src-tauri/src/rules.rs#L696)); PowerShell parses the command string and tries to run `C:\Users\First`. The `cmd` (`cmd /k <argv.join(' ')>`) and `bash` (`bash -c "<join>; exec bash"`) branches fail the same way. Also hits flutter-android when it uses the bundled `gradlew.bat` ([rules.rs:889](../../src-tauri/src/rules.rs#L889)), which `flutter create` always places under the user's home. Tests use space-free paths (`C:\svc`) so they miss it.
-
-**Fix:** in the pwsh branch prefix with the call operator and single-quote argv[0] (`& '<path>'`); for cmd/bash, quote each argv element rather than a bare `join(" ")`.
+### [x] 2. `shell_wrap` breaks on an absolute `argv[0]` containing a space — `a661a03`
 
 ### [ ] 3. Provider action-id collision → the wrong module's command runs
 [rules.rs:822](../../src-tauri/src/rules.rs#L822)
@@ -32,12 +23,7 @@ go-work / maven-modules / gradle-modules / flutter-android derive the action-id 
 
 **Fix:** lift dotnet's `used` dedupe into a shared helper and apply it in all five providers.
 
-### [ ] 4. `terminalize` `{{cmd}}` expansion corrupts argv elements with spaces
-[rules.rs:411](../../src-tauri/src/rules.rs#L411)
-
-The `terminal_template` branch expands `{{cmd}}` as `argv.join(" ")` and then re-splits the **whole line** with `shell_split`. With `terminal_template: "kitty --directory {{dir}} -- {{cmd}}"` and an argv holding an absolute path with a space (`["dotnet","build","C:\\Users\\First Last\\proj\\App.csproj"]`), the emulator receives `--directory`, `C:\Users\First`, `Last\proj`, `--`, `dotnet`, `build`, `C:\Users\First`, `Last\proj\App.csproj` — both the working dir and the project path shatter.
-
-**Fix:** substitute `{{cmd}}` *after* splitting the template — split the template on whitespace first, then replace the `{{cmd}}` token with the argv vector (splice, don't re-parse). Same for `{{dir}}`.
+### [x] 4. `terminalize` `{{cmd}}` expansion corrupts argv elements with spaces — `a661a03`
 
 ---
 
@@ -94,4 +80,3 @@ The doc comment says "Shared by scan.rs (finding repos) and inspect.rs", but `sc
 ## Notes
 
 - `cache.rs` and `index.rs` were in scope but produced no findings this pass.
-- Findings 2 and 4 share a root cause (argv-with-spaces handling in shell/terminal wrapping) — worth fixing together.

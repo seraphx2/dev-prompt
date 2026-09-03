@@ -4,6 +4,8 @@
 **Raw findings:** 41 (10 + 8 + 12 + 8 + 3) — see `01`–`05`.
 **Consolidated:** 16 work items + 1 cleanup batch. The 41 collapse because several are one root cause seen from different call sites.
 
+**Progress:** Tier 1 (WI-1…WI-6) complete. Tier 2 (WI-7…WI-16) and the Tier-3 batch open (one Tier-3 item, P4 #7, landed with WI-2). Resolved findings in `01`–`05` are collapsed to one-line stubs with their commit hash.
+
 Per-pass detail:
 [01 — rules/config engine](01-rules-config-engine.md) ·
 [02 — trust boundary](02-trust-boundary.md) ·
@@ -13,16 +15,16 @@ Per-pass detail:
 
 ---
 
-## Tier 1 — fix before the next `dev→main` PR
+## Tier 1 — complete
 
-| # | Work item | Findings | Root fix |
+| # | Work item | Findings | Commit(s) |
 |---|---|---|---|
-| **WI-1** | `npm test` runs zero tests, exits 1 — CI step will fail | P4 #1, P5 #1, P5 #2 | `test: { pool: 'vmThreads' }` in `vite.config.ts`; pin `vitest` exact; add `engines.node` |
-| **WI-2** | Hotkey-save path — 4 defects, needs one redesign | P1 #1, P2 #2, P2 #5, P4 #3 | parse+validate both accelerators → diff by `Shortcut` (`shortcut_is`) → `save_user` → apply register/unregister only on success → roll back on failure. Frontend always sends effective `hotkey`/`apps_hotkey`. |
-| **WI-3** | Windows arg splitting/quoting — breaks `C:\Users\First Last` + `.venv` | P1 #2, P1 #4, P2 #1, P3 #7 | one `CommandLineToArgvW`-style splitter + a proper quoter; substitute `{{cmd}}`/`{{dir}}` tokens *after* splitting, not before; spawn app exes directly instead of via `cmd /c` |
-| **WI-4** | `app-usage.json` data-loss race + bump-before-launch | P3 #2, P2 #6 | `Mutex` in shared state + atomic write (temp + rename); bump only after `apps::launch` returns `Ok` |
-| **WI-5** | `dedupe_by_product` drops side-by-side installs (Python 3.11/3.12, Chrome Beta, JDKs) | P3 #1 | add a version/path discriminator to the key, or merge instead of discard |
-| **WI-6** | Wrong-app-launch race — background rescan yanks selection to row 0 | P4 #2 | guard *every* `refresh()` caller with `if (appScope) return`, or a dedicated `refreshApps()` that never touches repo `results`/`selected` |
+| **WI-1** | `npm test` runs zero tests, exits 1 | P4 #1, P5 #1, P5 #2 | `7bd4b5d` |
+| **WI-2** | Hotkey-save path — 4 defects, one redesign | P1 #1, P2 #2, P2 #5, P4 #3 (+ P4 #7) | `42a4570` |
+| **WI-3** | Windows arg splitting/quoting | P1 #2, P1 #4, P2 #1, P3 #7 | `e743bad`, `a661a03` |
+| **WI-4** | `app-usage.json` data-loss race + bump-before-launch | P3 #2, P2 #6 | `5b09b87` |
+| **WI-5** | `dedupe_by_product` drops side-by-side installs | P3 #1 | `e26e1f4` |
+| **WI-6** | Wrong-app-launch race — rescan yanks selection to row 0 | P4 #2 | `f57947c` |
 
 ## Tier 2 — should fix, not release-blocking
 
@@ -41,31 +43,28 @@ Per-pass detail:
 
 ## Tier 3 — cleanup batch (do together, low risk)
 
-| Finding | Location | Fix |
-|---|---|---|
-| P1 #8 | `config.rs:601` | correct the stale "shared by scan.rs" doc comment |
-| P1 #10 | `rules.rs:1165` | `trace()` — compute `matched_files` once; extract the shared `Resolver` builder |
-| P2 #8 | `commands.rs:479` | extract `default_shell()`; kill the 3 copies of `which("pwsh")` |
-| P3 #10 | `discover_apps.ps1:42` | dispose `$ms`/`$bmp`/`$ic` in a `finally` |
-| P3 #11 | `discover_apps.ps1:29` | invalidate the icon PNG cache (key on mtime+size, or clear on app-list refresh) |
-| P3 #12 | `apps.rs:491` | gate the `C:\` path-literal tests with `#[cfg(windows)]` |
-| P4 #7 | `HotkeyRecorder.svelte:98` | add `disabled={busy}` to the "turn off" button |
-| P4 #8 | `AppList.svelte:25` | extract `use:scrollFollow={selected}` — kill the 3rd copy of the scroll effect |
+| Finding | Location | Fix | Status |
+|---|---|---|---|
+| P1 #8 | `config.rs:601` | correct the stale "shared by scan.rs" doc comment | open |
+| P1 #10 | `rules.rs:1165` | `trace()` — compute `matched_files` once; extract the shared `Resolver` builder | open |
+| P2 #8 | `commands.rs:479` | extract `default_shell()`; kill the 3 copies of `which("pwsh")` | open |
+| P3 #10 | `discover_apps.ps1:42` | dispose `$ms`/`$bmp`/`$ic` in a `finally` | open |
+| P3 #11 | `discover_apps.ps1:29` | invalidate the icon PNG cache (key on mtime+size, or clear on app-list refresh) | open |
+| P3 #12 | `apps.rs:491` | gate the `C:\` path-literal tests with `#[cfg(windows)]` | open |
+| P4 #7 | `HotkeyRecorder.svelte:98` | add `disabled={busy}` to the "turn off" button | done — `42a4570` |
+| P4 #8 | `AppList.svelte:25` | extract `use:scrollFollow={selected}` — kill the 3rd copy of the scroll effect | open |
 
 ---
 
-## Suggested order
+## Suggested order (remaining)
 
-1. **WI-1** first — you can't trust green CI on any of the rest until `npm test` actually runs.
-2. **WI-4** and **WI-2** next — data loss and a user-facing regression, both self-contained once you commit to the redesign.
-3. **WI-3** — touches the most call sites; do it as one helper + a sweep so WI-7/WI-14 land on top of a correct splitter.
-4. **WI-5, WI-6** — finish Tier 1.
-5. Tier 2 in table order; **WI-9 + WI-11** are quick and visible in the action menu.
-6. Tier 3 as one commit.
+1. Tier 2 in table order; **WI-9 + WI-11** are quick and visible in the action menu.
+2. **WI-7** lands cleanly now that WI-3 gave it a correct splitter/quoter; **WI-14** likewise.
+3. Tier 3 as one commit.
 
 ## Themes worth carrying forward
 
-- **Windows argv handling** is the single most repeated defect — POSIX-style `shell_split` / `join(" ")` on Windows paths. A tested splitter/quoter pair pays for itself.
-- **Silent fallbacks** — unresolvable terminal pin, missing shell, dropped hotkey, discarded app install. Several findings are "the feature does nothing and says nothing." Prefer surfacing the failure.
-- **New providers skipped guards the dotnet provider already had** (dedupe, `requires`). Worth a checklist for the next provider.
-- **`repos.json` is on a lot of hot paths** (every scan, every menu open, every startup) and keeps accreting fields — treat its shape and write frequency as a budget.
+- **Windows argv handling** was the single most repeated defect — POSIX-style `shell_split` / `join(" ")` on Windows paths. WI-3 added the tested splitter/quoter pair; new call sites should use it.
+- **Silent fallbacks** — unresolvable terminal pin, missing shell, dropped hotkey, discarded app install. Several findings are "the feature does nothing and says nothing." Prefer surfacing the failure. (WI-10, WI-11 remain.)
+- **New providers skipped guards the dotnet provider already had** (dedupe, `requires`). Worth a checklist for the next provider. (WI-7, WI-13 remain.)
+- **`repos.json` is on a lot of hot paths** (every scan, every menu open, every startup) and keeps accreting fields — treat its shape and write frequency as a budget. (WI-12 remains.)

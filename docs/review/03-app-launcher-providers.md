@@ -6,24 +6,15 @@
 **Date:** 2026-09-01
 
 Tick each item as you address it. Severity: 🔴 high · 🟡 medium · ⚪ low.
+Resolved items are collapsed to a one-line stub with the commit that closed them; `git show <hash>` for the detail.
 
 ---
 
 ## 🔴 High
 
-### [ ] 1. `dedupe_by_product` silently drops distinct side-by-side installs
-[apps.rs:265](../../src-tauri/src/apps.rs#L265)
+### [x] 1. `dedupe_by_product` silently drops distinct side-by-side installs — `e26e1f4`
 
-Keyed on `(norm(company), norm(product))`. Python 3.11 and 3.12 both carry ProductName "Python" / CompanyName "Python Software Foundation" and both source "scan" → equal source rank → `source_rank(s) > source_rank(out[i])` is false → the second is **discarded with no merge**. The later exec-path `dedupe()` can't recover it. Same for Chrome + Chrome Beta/Dev (all ProductName "Google Chrome"), multiple JDKs, etc. The `>` launcher shows one; the others are unreachable.
-
-**Fix:** include a version or install-path discriminator in the key, or only collapse when the exec paths are actually equal. If the intent is "one row per product," merge rather than drop (keep all exec paths, pick a display target).
-
-### [ ] 2. `bump()` does an unsynchronized read-modify-write of `app-usage.json`
-[usage.rs:49](../../src-tauri/src/usage.rs#L49)
-
-No lock, non-atomic `std::fs::write`. `run_app` takes no `State` and nothing serializes it, so two launches close together (double-click, or two fast launches) both `read()` the same map, both increment, the second `write()` wins — an increment is lost. If the writes interleave, the file is left truncated/overlapping; the next `read()` fails to parse and `unwrap_or_default()` **silently discards all frecency history**.
-
-**Fix:** serialize writes behind a `Mutex` in shared state, and write atomically (temp file + rename). Consider holding the usage map in memory and flushing, rather than re-reading per bump.
+### [x] 2. `bump()` does an unsynchronized read-modify-write of `app-usage.json` — `5b09b87`
 
 ### [ ] 3. `tag_attr` assumes double-quoted values and matches the attribute name as a substring
 [dotnet.rs:148](../../src-tauri/src/dotnet.rs#L148)
@@ -57,12 +48,7 @@ A `go.work` whose `use(` block closes as `\t./b)` or `./b )` → the line isn't 
 
 **Fix:** trim the line and check `ends_with(')')` to close the block (and strip a trailing `)` off the last path); or use a real tokenizer.
 
-### [ ] 7. `.lnk` Arguments split with `rules::shell_split` eats an unquoted apostrophe
-[apps.rs:398](../../src-tauri/src/apps.rs#L398)
-
-`shell_split` treats an unquoted `'` as an opening quote it never closes — drops the quote, concatenates the rest. A shortcut with Arguments `--user=O'Brien` (or an unquoted path through `C:\Users\O'Neil\…`) launches (and relaunches from cache) with `--user=OBrien`.
-
-**Fix:** parse `.lnk` Arguments with Windows `CommandLineToArgvW` semantics, not the POSIX-ish `shell_split`. Related to pass 1 findings #2/#4 — same helper, different symptom; a Windows-correct arg splitter would resolve all three.
+### [x] 7. `.lnk` Arguments split with `rules::shell_split` eats an unquoted apostrophe — `e743bad`
 
 ### [ ] 8. A bare `venv/` / `.venv/` dir is enough to surface a zero-action Python sub-project
 [inspect.rs:208](../../src-tauri/src/inspect.rs#L208)
@@ -107,5 +93,4 @@ On a non-Windows `cargo test`, `Path::parent()`/`file_stem()` treat `C:\a\GitHub
 
 ## Cross-pass links
 
-- **#7** ties to pass 1 **#2 / #4** (pass 1) — POSIX-style arg splitting/joining on Windows paths. One Windows-correct arg splitter/quoter resolves the cluster.
 - **#5** and **#8** produce the same user-visible bug: empty "Detected · <dir>" groups in the action menu.

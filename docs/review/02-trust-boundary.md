@@ -6,24 +6,15 @@
 **Date:** 2026-09-01
 
 Tick each item as you address it. Severity: 🔴 high · 🟡 medium · ⚪ low.
+Resolved items are collapsed to a one-line stub with the commit that closed them; `git show <hash>` for the detail.
 
 ---
 
 ## 🔴 High
 
-### [ ] 1. `cmd /c` quote-stripping corrupts app launches when an argument also needs quoting
-[launch.rs:58](../../src-tauri/src/launch.rs#L58)
+### [x] 1. `cmd /c` quote-stripping corrupts app launches when an argument also needs quoting — `e743bad`
 
-`spawn_detached` builds `cmd /c "C:\Program Files\Foo\foo.exe" --data "C:\Some Path"`. `cmd` sees more than two quote characters on the line and applies its fallback rule — strip the first and last quote — then tries to execute `C:\Program`. The app fails to start. App discovery already yields fully resolved absolute paths, so the `cmd /c` PATHEXT shim buys nothing here.
-
-**Fix:** spawn `entry.exec` directly (with its arg vector) instead of routing through `cmd /c`. Keep `cmd /c` only for the cases that genuinely need PATHEXT resolution, if any remain.
-
-### [ ] 2. Hotkey (un)registration compares raw accelerator strings instead of parsed shortcuts
-[commands.rs:388](../../src-tauri/src/commands.rs#L388)
-
-`save_config` decides register/unregister with `new_hotkey != old_hotkey` on the raw strings. Stored `CmdOrCtrl+Shift+Space`, user types the equivalent `Shift+CmdOrCtrl+Space` → strings differ → `register(new)` (plugin parses to the same `Shortcut`) then `unregister(old_hotkey)` tears that same OS shortcut back down. Result: no working hotkey until restart, or a misleading "already in use by another app" error for the user's own key. Same raw-string compare for `apps_hotkey` at [commands.rs:392](../../src-tauri/src/commands.rs#L392) / [commands.rs:397](../../src-tauri/src/commands.rs#L397).
-
-**Fix:** compare with the existing `shortcut_is` helper (parsed-`Shortcut` equality), not `!=` on strings.
+### [x] 2. Hotkey (un)registration compares raw accelerator strings instead of parsed shortcuts — `42a4570`
 
 ### [ ] 3. `run_command` runs repo-token substitution over free-form typed commands
 [commands.rs:504](../../src-tauri/src/commands.rs#L504)
@@ -43,19 +34,9 @@ The block special-cases "Git installed but `bash` not on PATH" by locating git-b
 
 **Fix:** carry the resolved absolute path (store it as the shell value, or return a `{label, path}` pair) so downstream spawning can use it.
 
-### [ ] 5. Live shortcut registration is mutated before the config is persisted
-[commands.rs:389](../../src-tauri/src/commands.rs#L389)
+### [x] 5. Live shortcut registration is mutated before the config is persisted — `42a4570`
 
-Doc comment claims "a bad accelerator is rejected before anything is persisted." Actual order: `register(&new_hotkey)?` + `unregister(old_hotkey)`, *then* `register(apps_hotkey)?`. If the apps-hotkey register fails (claimed by another app), the function returns `Err` having already live-changed the repo hotkey, and `save_user` / `config::load` never run — running app and `config.yaml` now disagree until restart. Same exposure if `save_user` or `config::load` fails after the register calls.
-
-**Fix:** validate/parse both accelerators up front; only apply register/unregister after `save_user` succeeds, or roll back on failure.
-
-### [ ] 6. Frecency count is bumped before the launch is attempted
-[commands.rs:586](../../src-tauri/src/commands.rs#L586)
-
-`crate::usage::bump(&exec)` runs unconditionally, then `apps::launch(&entry)` may return `Err` (exe removed since scan, or the `cmd /c` bug above). The failed entry's count in `app-usage.json` still rises, so a broken/stale app floats up the `>` list on every open.
-
-**Fix:** bump only after `apps::launch` returns `Ok`.
+### [x] 6. Frecency count is bumped before the launch is attempted — `5b09b87`
 
 ### [ ] 7. `refresh_repo_context` rewrites the entire `repos.json` on every action-menu open
 [commands.rs:220](../../src-tauri/src/commands.rs#L220)
