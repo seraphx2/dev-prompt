@@ -135,6 +135,11 @@ fn resolve_path_candidate(raw: &str) -> Option<String> {
 
 #[cfg(windows)]
 fn resolve_vswhere(args: &str) -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    // Without this the console window pops for a frame — visible as a flicker on
+    // the first overlay show, when program resolution first runs.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
     let vswhere = ["ProgramFiles(x86)", "ProgramFiles"]
         .iter()
         .filter_map(|v| std::env::var(v).ok())
@@ -142,6 +147,7 @@ fn resolve_vswhere(args: &str) -> Option<String> {
         .find(|p| Path::new(p).is_file())?;
     let out = Command::new(vswhere)
         .args(args.split_whitespace())
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;
     let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
