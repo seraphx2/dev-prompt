@@ -621,9 +621,13 @@ pub fn config_dir() -> AppResult<PathBuf> {
 }
 
 pub fn cache_dir() -> AppResult<PathBuf> {
+    // A dedicated `cache/` subdir, not `<APP_DIR>/` directly: on a currentUser
+    // Windows install that top-level dir *is* `$INSTDIR`, so caches written
+    // there land next to the exe where the uninstaller can't sweep them.
     let base = dirs::cache_dir()
         .ok_or_else(|| AppError::msg("no OS cache directory"))?
-        .join(APP_DIR);
+        .join(APP_DIR)
+        .join("cache");
     std::fs::create_dir_all(&base)?;
     Ok(base)
 }

@@ -196,7 +196,11 @@ pub fn discover(cfg: &Config) -> Vec<AppEntry> {
         .collect::<Vec<_>>()
         .join(", ");
 
+    let icon_dir = crate::config::cache_dir()
+        .map(|p| p.join("app-icons"))
+        .unwrap_or_else(|_| std::path::PathBuf::from(r"dev-prompt\cache\app-icons"));
     let script = DISCOVER_PS1
+        .replace("__ICON_DIR__", &icon_dir.to_string_lossy())
         .replace("__EXTRA_DIRS__", &extra)
         .replace("__ICON_CAP__", "320");
 

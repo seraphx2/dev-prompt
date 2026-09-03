@@ -26,4 +26,9 @@
   ; Task-Manager toggle-state entry, on uninstall.
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "${PRODUCTNAME}"
+
+  ; The app writes its caches to <cache_dir>/cache, which on a currentUser
+  ; install resolves under $INSTDIR. Tauri's uninstaller only removes files it
+  ; recorded installing, so this runtime-written tree is left behind — clear it.
+  RMDir /r "$INSTDIR\cache"
 !macroend
