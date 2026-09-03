@@ -883,27 +883,31 @@
           >{/if}</span
       >
       {#if upd.info}
-        <div class="rounded border border-sky-400/30 bg-sky-500/[0.06] px-3 py-2">
-          <div class="text-[12px] text-white/80">
-            Version <span class="font-mono text-sky-300">{upd.info.version}</span> is
-            available.
-          </div>
-          {#if upd.info.notes}
-            <div class="mt-1 whitespace-pre-line text-[11px] text-white/45">
-              {upd.info.notes}
-            </div>
-          {/if}
+        <div
+          class="flex items-start gap-3 rounded border border-sky-400/30 bg-sky-500/[0.06] px-3 py-2"
+        >
           <button
             type="button"
             onclick={applyUpdate}
             disabled={installing}
-            class="mt-2 rounded bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+            class="shrink-0 rounded bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
           >
-            {installing ? "Installing…" : "Install & restart"}
+            {installing ? "Installing…" : "Install"}
           </button>
-          {#if installError}
-            <div class="mt-1 text-[11px] text-red-300">{installError}</div>
-          {/if}
+          <div class="min-w-0">
+            <div class="text-[12px] text-white/80">
+              Version <span class="font-mono text-sky-300">{upd.info.version}</span>
+              is available.
+            </div>
+            {#if upd.info.notes}
+              <div class="mt-1 whitespace-pre-line text-[11px] text-white/45">
+                {upd.info.notes}
+              </div>
+            {/if}
+            {#if installError}
+              <div class="mt-1 text-[11px] text-red-300">{installError}</div>
+            {/if}
+          </div>
         </div>
       {:else}
         <div class="flex flex-wrap items-center gap-3">
