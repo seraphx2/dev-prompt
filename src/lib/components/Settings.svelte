@@ -7,6 +7,7 @@
     listRepos,
     listShells,
     listTerminals,
+    openReleasesPage,
     openRulesFile,
     pickDirectories,
     reloadConfig,
@@ -362,11 +363,13 @@
             Version <span class="font-mono text-sky-300">{upd.info.version}</span>
             is available.
           </div>
-          {#if upd.info.notes}
-            <div class="mt-1 whitespace-pre-line text-[11px] text-white/45">
-              {upd.info.notes}
-            </div>
-          {/if}
+          <button
+            type="button"
+            onclick={() => openReleasesPage()}
+            class="mt-0.5 text-[11px] text-sky-300/70 hover:text-sky-300 hover:underline"
+          >
+            What's changed ↗
+          </button>
           {#if installError}
             <div class="mt-1 text-[11px] text-red-300">{installError}</div>
           {/if}

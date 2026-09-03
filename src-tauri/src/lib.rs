@@ -374,6 +374,7 @@ pub fn run() {
             commands::rescan_apps,
             commands::run_app,
             commands::open_rules_file,
+            commands::open_releases_page,
             commands::set_dismiss_on_blur,
             commands::set_update_hint,
             commands::get_autostart,
