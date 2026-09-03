@@ -43,10 +43,10 @@ pub struct AppEntry {
     pub icon: Option<String>,
     /// `start-menu` | `store` | `uninstall` | `scan` | `extra`.
     pub source: String,
-    /// Times launched from dev-prompt (merged from `app-usage.json`).
-    #[serde(default)]
-    pub uses: u32,
 }
+// Launch frecency is *not* a field here — it's derived per read from
+// `app-usage.json` and carried only on `commands::AppView`, so it never touches
+// `apps.json`.
 
 /// Source ranking for dedupe — a curated Start Menu entry beats a raw scan hit.
 fn source_rank(source: &str) -> u8 {
@@ -196,7 +196,11 @@ pub fn discover(cfg: &Config) -> Vec<AppEntry> {
         .collect::<Vec<_>>()
         .join(", ");
 
+    let icon_dir = crate::config::cache_dir()
+        .map(|p| p.join("app-icons"))
+        .unwrap_or_else(|_| std::path::PathBuf::from(r"dev-prompt\cache\app-icons"));
     let script = DISCOVER_PS1
+        .replace("__ICON_DIR__", &icon_dir.to_string_lossy())
         .replace("__EXTRA_DIRS__", &extra)
         .replace("__ICON_CAP__", "320");
 
@@ -424,7 +428,6 @@ impl RawApp {
                 args,
                 icon,
                 source,
-                uses: 0,
             },
             product: self.product.unwrap_or_default().trim().to_string(),
             company: self.company.unwrap_or_default().trim().to_string(),
@@ -464,7 +467,6 @@ mod tests {
             args: vec![],
             icon: icon.map(String::from),
             source: source.into(),
-            uses: 0,
         }
     }
 

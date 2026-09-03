@@ -29,7 +29,8 @@ style rather than running `cargo fmt`.)
 
 Most support — a new editor, build tool, or language ecosystem — is **pure data
 in [`src-tauri/src/default_config.yaml`](src-tauri/src/default_config.yaml)**, no
-Rust required. That file has inline docs; the shape is:
+Rust required. That file has inline docs, and every field is spelled out in
+[`docs/rules-engine.md`](docs/rules-engine.md); the shape is:
 
 - **`markers`** — filenames/globs that make a directory show up as a repo.
 - **`programs`** — how to find an executable, with per-OS candidate lists
@@ -51,7 +52,7 @@ add a matching assertion to the `bundled_defaults` tests in
 ## Larger changes
 
 The roadmap — new providers, frontend modes, platform work — lives in
-[`docs/config-design.md`](docs/config-design.md), roughly ordered easiest to
+[`docs/future-work.md`](docs/future-work.md), roughly ordered easiest to
 hardest. For anything non-trivial, open an issue referencing the relevant item
 before you start, so we don't duplicate effort or design in opposite directions.
 
@@ -68,7 +69,7 @@ small and localized:
   corners).
 - `terminalize()` in `src-tauri/src/rules.rs` — Windows wraps commands in
   `wt.exe`; other platforms need per-emulator working-directory flags (see
-  `docs/config-design.md`).
+  `docs/future-work.md`).
 - Global hotkey on Wayland needs the XDG global-shortcuts portal; X11 and macOS
   work through the plugin as-is.
 

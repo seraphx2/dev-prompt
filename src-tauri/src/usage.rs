@@ -1,14 +1,18 @@
-//! App-launch frecency. A tiny JSON map in the cache dir records how often each
-//! app is launched from dev-prompt so the `>` scope can float favourites to the
-//! top. `last` is stored for a future recency decay; ranking currently uses
-//! `count` alone.
+//! App-launch frecency. A tiny JSON map records how often each app is launched
+//! from dev-prompt so the `>` scope can float favourites to the top. `last` is
+//! stored for a future recency decay; ranking currently uses `count` alone.
+//!
+//! Lives in the *config* dir, not the cache dir: it's accumulated user history,
+//! not a regenerable index, so it must survive an uninstall/reinstall (and the
+//! cache-dir wipe on uninstall). Keyed on the executable path, which is stable
+//! across app-list rescans.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::cache_dir;
+use crate::config::config_dir;
 
 const USAGE_FILE: &str = "app-usage.json";
 
@@ -32,7 +36,7 @@ fn now_secs() -> u64 {
 }
 
 fn path() -> Option<std::path::PathBuf> {
-    cache_dir().ok().map(|d| d.join(USAGE_FILE))
+    config_dir().ok().map(|d| d.join(USAGE_FILE))
 }
 
 fn read() -> HashMap<String, Hit> {

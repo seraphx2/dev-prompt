@@ -2,14 +2,14 @@
 # Invoked by src/apps.rs via `powershell -Command -` (script on stdin). Emits a
 # single compressed JSON array of
 #   { name, exec, kind, args, icon, source, product, company, size }
-# `__EXTRA_DIRS__` and `__ICON_CAP__` are substituted by the Rust caller.
+# `__EXTRA_DIRS__`, `__ICON_CAP__` and `__ICON_DIR__` are substituted by the Rust caller.
 # Rust does the noise filtering / dedupe; this script just gathers.
 
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.Drawing | Out-Null
 
-$iconDir = Join-Path $env:LOCALAPPDATA 'dev-prompt\cache\app-icons'
+$iconDir = '__ICON_DIR__'
 New-Item -ItemType Directory -Force -Path $iconDir | Out-Null
 $script:iconCap = __ICON_CAP__
 $script:iconCount = 0

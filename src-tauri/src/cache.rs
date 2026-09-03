@@ -185,7 +185,6 @@ mod tests {
             args: vec![],
             icon: Some("data:image/png;base64,AAAA".into()),
             source: "start-menu".into(),
-            uses: 3,
         };
         let file = AppsCacheFile {
             written_at: 100,

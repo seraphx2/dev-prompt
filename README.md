@@ -62,11 +62,11 @@ First run creates two files in your OS config directory (`%APPDATA%\dev-prompt\`
   `rules`, and `universal` actions layered over the bundled defaults. Hand-edited
   (Settings ▸ Rules ▸ Open rules file), ships as a commented scaffold.
 
-The full reference — merge rules, every field, and worked examples (pin an editor
-path, add a build rule, disable a built-in, change the Enter action) — is in
-[`docs/configuration.md`](docs/configuration.md); the canonical schema with
-inline docs is
-[`src-tauri/src/default_config.yaml`](src-tauri/src/default_config.yaml).
+Settings reference: [`docs/configuration.md`](docs/configuration.md). The rule
+engine — merge rules, every field, and worked examples (pin an editor path, add a
+build rule, disable a built-in, change the Enter action) —
+[`docs/rules-engine.md`](docs/rules-engine.md); the canonical schema with inline
+docs is [`src-tauri/src/default_config.yaml`](src-tauri/src/default_config.yaml).
 
 The discovered repo list is cached at `<OS cache dir>/dev-prompt/repos.json`.
 
@@ -93,7 +93,7 @@ The discovered repo list is cached at `<OS cache dir>/dev-prompt/repos.json`.
 The architecture is platform-neutral — program paths and OS quirks are isolated
 in the `programs` config (`any` / `windows` / `linux` / `macos` candidate lists)
 and a handful of `#[cfg]` blocks. The remaining cross-platform work is tracked in
-[`docs/config-design.md`](docs/config-design.md).
+[`docs/future-work.md`](docs/future-work.md).
 
 ## Prerequisites
 
@@ -186,7 +186,7 @@ src-tauri/                  Rust backend
   src/rules_template.yaml    scaffold written to the user's rules.yaml
 scripts/version.mjs         CalVer generator for releases
 .github/workflows/          release.yml
-docs/                       configuration.md, releasing.md, config-design.md
+docs/                       configuration.md, rules-engine.md, releasing.md, future-work.md
 ```
 
 ## Tests
@@ -197,3 +197,13 @@ cd src-tauri && cargo test    # config merge/expansion, discovery,
                               # rule evaluation, fuzzy ranking
 npm run check                 # svelte-check (types)
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+## Install note
+
+The Windows installer is unsigned, so SmartScreen shows a warning on first run —
+**More info ▸ Run anyway**. Updater artifacts are minisign-signed (public key in
+`src-tauri/tauri.conf.json`); the app verifies every update before applying it.

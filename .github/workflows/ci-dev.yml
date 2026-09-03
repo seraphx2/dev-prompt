@@ -1,0 +1,29 @@
+name: CI (dev)
+
+# Per-commit coverage on the long-lived dev branch, so a break is pinned to
+# the commit that caused it instead of surfacing across a whole delta at PR
+# time. Separate workflow (not the `check` context) so it never touches the
+# dev->main PR gate. Skips doc-only pushes.
+on:
+  push:
+    branches: [dev]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+
+concurrency:
+  group: ci-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build + test
+        uses: ./.github/actions/ci

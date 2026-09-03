@@ -541,10 +541,10 @@ pub fn load_user() -> AppResult<UserConfig> {
 
 pub fn save_user(u: &UserConfig) -> AppResult<()> {
     let path = config_path()?;
-    let header = "# dev-prompt settings — managed by the Settings screen. Rule\n\
-                  # overrides (markers / programs / rules / universal) live in\n\
-                  # rules.yaml. Reference:\n\
-                  # https://github.com/seraphx2/dev-prompt/blob/main/docs/configuration.md\n\n";
+    let header = "# dev-prompt settings — managed by the Settings screen.\n\
+                  #   https://github.com/seraphx2/dev-prompt/blob/main/docs/configuration.md\n\
+                  # Rule overrides (markers / programs / rules / universal) live in rules.yaml:\n\
+                  #   https://github.com/seraphx2/dev-prompt/blob/main/docs/rules-engine.md\n\n";
     let body = serde_yaml_ng::to_string(u)?;
     std::fs::write(&path, format!("{header}{body}"))?;
     Ok(())
@@ -621,9 +621,13 @@ pub fn config_dir() -> AppResult<PathBuf> {
 }
 
 pub fn cache_dir() -> AppResult<PathBuf> {
+    // A dedicated `cache/` subdir, not `<APP_DIR>/` directly: on a currentUser
+    // Windows install that top-level dir *is* `$INSTDIR`, so caches written
+    // there land next to the exe where the uninstaller can't sweep them.
     let base = dirs::cache_dir()
         .ok_or_else(|| AppError::msg("no OS cache directory"))?
-        .join(APP_DIR);
+        .join(APP_DIR)
+        .join("cache");
     std::fs::create_dir_all(&base)?;
     Ok(base)
 }
