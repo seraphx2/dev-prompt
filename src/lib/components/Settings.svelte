@@ -348,6 +348,38 @@
   {#if !loaded}
     <div class="text-white/30">Loading…</div>
   {:else}
+    {#if upd.info}
+      <!-- Pending update sits at the top of the screen so the footer chip lands
+           straight on the Install button. The manual "Check for updates" button
+           stays in its own section further down. -->
+      <div
+        class="flex items-start gap-3 rounded border border-sky-400/40 bg-sky-500/[0.08] px-3 py-2"
+      >
+        <button
+          type="button"
+          onclick={applyUpdate}
+          disabled={installing}
+          class="shrink-0 rounded bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+        >
+          {installing ? "Installing…" : "Install"}
+        </button>
+        <div class="min-w-0">
+          <div class="text-[12px] text-white/80">
+            Version <span class="font-mono text-sky-300">{upd.info.version}</span>
+            is available.
+          </div>
+          {#if upd.info.notes}
+            <div class="mt-1 whitespace-pre-line text-[11px] text-white/45">
+              {upd.info.notes}
+            </div>
+          {/if}
+          {#if installError}
+            <div class="mt-1 text-[11px] text-red-300">{installError}</div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
     <!-- Save floats top-right while the fields it controls are on screen, then
          scrolls away with this wrapper past the Rules section (which has its
          own buttons and doesn't use Save). The sticky strip is zero-height so
@@ -882,48 +914,23 @@
         {#if appVersion}<span class="font-mono text-white/25">— v{appVersion}</span
           >{/if}</span
       >
-      {#if upd.info}
-        <div
-          class="flex items-start gap-3 rounded border border-sky-400/30 bg-sky-500/[0.06] px-3 py-2"
+      <div class="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onclick={() => pollUpdates(true)}
+          disabled={upd.checking}
+          class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
         >
-          <button
-            type="button"
-            onclick={applyUpdate}
-            disabled={installing}
-            class="shrink-0 rounded bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+          {upd.checking ? "Checking…" : "Check for updates"}
+        </button>
+        {#if upd.info}
+          <span class="text-[11px] text-sky-300/70"
+            >v{upd.info.version} ready — controls are at the top of this screen.</span
           >
-            {installing ? "Installing…" : "Install"}
-          </button>
-          <div class="min-w-0">
-            <div class="text-[12px] text-white/80">
-              Version <span class="font-mono text-sky-300">{upd.info.version}</span>
-              is available.
-            </div>
-            {#if upd.info.notes}
-              <div class="mt-1 whitespace-pre-line text-[11px] text-white/45">
-                {upd.info.notes}
-              </div>
-            {/if}
-            {#if installError}
-              <div class="mt-1 text-[11px] text-red-300">{installError}</div>
-            {/if}
-          </div>
-        </div>
-      {:else}
-        <div class="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onclick={() => pollUpdates(true)}
-            disabled={upd.checking}
-            class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
-          >
-            {upd.checking ? "Checking…" : "Check for updates"}
-          </button>
-          {#if upd.note}
-            <span class="text-[11px] text-white/40">{upd.note}</span>
-          {/if}
-        </div>
-      {/if}
+        {:else if upd.note}
+          <span class="text-[11px] text-white/40">{upd.note}</span>
+        {/if}
+      </div>
     </div>
   {/if}
 </div>

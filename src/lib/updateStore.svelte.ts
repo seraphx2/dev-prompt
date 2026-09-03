@@ -7,14 +7,16 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
-import { checkForUpdate, type UpdateInfo } from "./updater";
+import { checkForUpdate, currentVersion, type UpdateInfo } from "./updater";
 
 export const upd = $state<{
   info: UpdateInfo | null;
+  /** The running version, shown in the footer. Filled on the first poll. */
+  current: string;
   checking: boolean;
   /** Result text for the manual check ("" when quiet / an update is pending). */
   note: string;
-}>({ info: null, checking: false, note: "" });
+}>({ info: null, current: "", checking: false, note: "" });
 
 /** Version we've already toasted about this session — don't repeat. */
 let notified: string | null = null;
@@ -28,6 +30,7 @@ export async function pollUpdates(loud = false): Promise<void> {
   upd.checking = true;
   if (loud) upd.note = "";
   try {
+    if (!upd.current) upd.current = await currentVersion().catch(() => "");
     const info = await checkForUpdate();
     upd.info = info;
     if (loud) upd.note = info ? "" : "You're on the latest version.";

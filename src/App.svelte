@@ -696,23 +696,25 @@
           ><kbd>Ctrl+R</kbd>rescan</span
         >
       {/if}
-      {#if upd.info && mode !== "settings"}
-        <button
-          type="button"
-          onclick={() => (mode = "settings")}
-          title={`Update ${upd.info.version} available`}
-          class="inline-flex shrink-0 items-center rounded-[3px] border border-sky-400/50
-                 bg-sky-400/10 px-1 py-0.5 text-[10px] font-medium leading-none text-sky-200
-                 hover:bg-sky-400/20"
-        >
-          ↑ {upd.info.version}
-        </button>
-      {/if}
     </span>
     <span class="flex shrink-0 items-center gap-3.5">
       {#each hints as [key, label] (label)}
         <span class="inline-flex items-center gap-1"><kbd>{key}</kbd>{label}</span>
       {/each}
+      {#if upd.info && mode !== "settings"}
+        <button
+          type="button"
+          onclick={() => (mode = "settings")}
+          title={`Update ${upd.info.version} available — open Settings`}
+          class="inline-flex shrink-0 items-center rounded-[3px] border border-sky-400/50
+                 bg-sky-400/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-sky-200
+                 hover:bg-sky-400/20"
+        >
+          ↑ {upd.info.version}
+        </button>
+      {:else if upd.current}
+        <span class="shrink-0 tabular-nums text-white/25">v{upd.current}</span>
+      {/if}
     </span>
   </footer>
 </main>
