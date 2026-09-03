@@ -19,7 +19,7 @@
   import HotkeyRecorder from "./HotkeyRecorder.svelte";
   import { icons, iconKeys } from "../icons";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-  import { currentVersion, installUpdate } from "../updater";
+  import { installUpdate } from "../updater";
   import { upd, pollUpdates } from "../updateStore.svelte";
 
   async function copyIcon(k: string) {
@@ -111,11 +111,6 @@
       autostart = false;
     }
     try {
-      appVersion = await currentVersion();
-    } catch {
-      appVersion = "";
-    }
-    try {
       traceRepos = (await listRepos()).repos.map((r) => ({
         name: r.name,
         path: r.path,
@@ -133,7 +128,7 @@
     } catch {
       shells = [];
     }
-    void pollUpdates(true);
+    void pollUpdates();
   });
 
   // Autostart applies immediately (the OS is the source of truth), not via Save.
@@ -157,7 +152,6 @@
   }
 
   // --- software update (shared store; see lib/updateStore) ---
-  let appVersion = $state("");
   let installing = $state(false);
   let installError = $state("");
 
@@ -907,30 +901,5 @@
         {/each}
       </div>
     </details>
-
-    <div class="space-y-2 border-t border-hair pt-4">
-      <span class="text-orange-400"
-        >Software update
-        {#if appVersion}<span class="font-mono text-white/25">— v{appVersion}</span
-          >{/if}</span
-      >
-      <div class="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onclick={() => pollUpdates(true)}
-          disabled={upd.checking}
-          class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
-        >
-          {upd.checking ? "Checking…" : "Check for updates"}
-        </button>
-        {#if upd.info}
-          <span class="text-[11px] text-sky-300/70"
-            >v{upd.info.version} ready — controls are at the top of this screen.</span
-          >
-        {:else if upd.note}
-          <span class="text-[11px] text-white/40">{upd.note}</span>
-        {/if}
-      </div>
-    </div>
   {/if}
 </div>
