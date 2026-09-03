@@ -348,7 +348,7 @@
            straight on the Install button. The manual "Check for updates" button
            stays in its own section further down. -->
       <div
-        class="flex items-start gap-3 rounded border border-sky-400/40 bg-sky-500/[0.08] px-3 py-2"
+        class="flex items-center gap-3 rounded border border-sky-400/40 bg-sky-500/[0.08] px-3 py-2"
       >
         <button
           type="button"
@@ -358,18 +358,20 @@
         >
           {installing ? "Installing…" : "Install"}
         </button>
-        <div class="min-w-0">
-          <div class="text-[12px] text-white/80">
-            Version <span class="font-mono text-sky-300">{upd.info.version}</span>
-            is available.
+        <div class="min-w-0 flex-1">
+          <div class="flex items-baseline justify-between gap-3">
+            <span class="text-[12px] text-white/80">
+              Version <span class="font-mono text-sky-300">{upd.info.version}</span>
+              is available.
+            </span>
+            <button
+              type="button"
+              onclick={() => openReleasesPage()}
+              class="shrink-0 text-[11px] text-sky-300/70 hover:text-sky-300 hover:underline"
+            >
+              What's changed ↗
+            </button>
           </div>
-          <button
-            type="button"
-            onclick={() => openReleasesPage()}
-            class="mt-0.5 text-[11px] text-sky-300/70 hover:text-sky-300 hover:underline"
-          >
-            What's changed ↗
-          </button>
           {#if installError}
             <div class="mt-1 text-[11px] text-red-300">{installError}</div>
           {/if}
