@@ -4,7 +4,7 @@
 # Your settings — hotkey, roots, scan depth, cache lifetime — are NOT here; they
 # live in the Settings screen. This file only teaches dev-prompt about tools and
 # projects. Full reference:
-# https://github.com/seraphx2/dev-prompt/blob/main/docs/configuration.md
+# https://github.com/seraphx2/dev-prompt/blob/main/docs/rules-engine.md
 #
 # Uncomment a section and fill it in. Anything omitted keeps the default. Then
 # run Settings ▸ Reload config (or restart) to apply.

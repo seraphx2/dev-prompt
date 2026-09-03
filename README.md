@@ -62,11 +62,11 @@ First run creates two files in your OS config directory (`%APPDATA%\dev-prompt\`
   `rules`, and `universal` actions layered over the bundled defaults. Hand-edited
   (Settings ▸ Rules ▸ Open rules file), ships as a commented scaffold.
 
-The full reference — merge rules, every field, and worked examples (pin an editor
-path, add a build rule, disable a built-in, change the Enter action) — is in
-[`docs/configuration.md`](docs/configuration.md); the canonical schema with
-inline docs is
-[`src-tauri/src/default_config.yaml`](src-tauri/src/default_config.yaml).
+Settings reference: [`docs/configuration.md`](docs/configuration.md). The rule
+engine — merge rules, every field, and worked examples (pin an editor path, add a
+build rule, disable a built-in, change the Enter action) —
+[`docs/rules-engine.md`](docs/rules-engine.md); the canonical schema with inline
+docs is [`src-tauri/src/default_config.yaml`](src-tauri/src/default_config.yaml).
 
 The discovered repo list is cached at `<OS cache dir>/dev-prompt/repos.json`.
 
@@ -186,7 +186,7 @@ src-tauri/                  Rust backend
   src/rules_template.yaml    scaffold written to the user's rules.yaml
 scripts/version.mjs         CalVer generator for releases
 .github/workflows/          release.yml
-docs/                       configuration.md, releasing.md, config-design.md
+docs/                       configuration.md, rules-engine.md, releasing.md, config-design.md
 ```
 
 ## Tests

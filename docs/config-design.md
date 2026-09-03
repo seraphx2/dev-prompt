@@ -185,7 +185,7 @@ Possible directions (pick one, keep it small):
   whose values are only bound when their referenced path exists.
 
 Files: `rules.rs` (`expand` + `build_action`), `config.rs` (schema),
-`docs/configuration.md`.
+`docs/rules-engine.md`.
 
 ---
 

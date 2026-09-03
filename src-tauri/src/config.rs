@@ -541,10 +541,10 @@ pub fn load_user() -> AppResult<UserConfig> {
 
 pub fn save_user(u: &UserConfig) -> AppResult<()> {
     let path = config_path()?;
-    let header = "# dev-prompt settings — managed by the Settings screen. Rule\n\
-                  # overrides (markers / programs / rules / universal) live in\n\
-                  # rules.yaml. Reference:\n\
-                  # https://github.com/seraphx2/dev-prompt/blob/main/docs/configuration.md\n\n";
+    let header = "# dev-prompt settings — managed by the Settings screen.\n\
+                  #   https://github.com/seraphx2/dev-prompt/blob/main/docs/configuration.md\n\
+                  # Rule overrides (markers / programs / rules / universal) live in rules.yaml:\n\
+                  #   https://github.com/seraphx2/dev-prompt/blob/main/docs/rules-engine.md\n\n";
     let body = serde_yaml_ng::to_string(u)?;
     std::fs::write(&path, format!("{header}{body}"))?;
     Ok(())

@@ -1,11 +1,13 @@
 # dev-prompt bundled defaults.
 #
-# Embedded in the binary. Two user files layer on top (see docs/configuration.md):
+# Embedded in the binary. Two user files layer on top:
 #   config.yaml (Settings screen)  — hotkey / roots / scan / cache_ttl_secs: replace
+#                                    docs/configuration.md
 #   rules.yaml  (hand-authored)    — markers  : appended (markers_replace: true to reset)
 #                                    programs : merged by key
 #                                    rules    : prepended; rules_disable: [id] drops built-ins
 #                                    universal: universal.disable / .add / .default
+#                                    docs/rules-engine.md
 #
 # Every rules[].match also acts as a discovery marker, so adding a rule for an
 # ecosystem makes those repos show up in the list as well as gain actions.

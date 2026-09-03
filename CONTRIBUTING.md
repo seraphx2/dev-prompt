@@ -29,7 +29,8 @@ style rather than running `cargo fmt`.)
 
 Most support — a new editor, build tool, or language ecosystem — is **pure data
 in [`src-tauri/src/default_config.yaml`](src-tauri/src/default_config.yaml)**, no
-Rust required. That file has inline docs; the shape is:
+Rust required. That file has inline docs, and every field is spelled out in
+[`docs/rules-engine.md`](docs/rules-engine.md); the shape is:
 
 - **`markers`** — filenames/globs that make a directory show up as a repo.
 - **`programs`** — how to find an executable, with per-OS candidate lists
