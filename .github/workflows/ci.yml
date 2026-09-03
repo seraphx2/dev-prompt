@@ -23,8 +23,11 @@ jobs:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/ci-frontend
 
+  # Linux for speed. This compiles the cross-platform bulk + all non-cfg tests;
+  # the Windows-only modules (registry, vswhere, .lnk, vibrancy) are verified by
+  # local dev and by release.yml's `tauri build` before every publish.
   rust:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/ci-rust

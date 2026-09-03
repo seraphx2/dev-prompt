@@ -1,12 +1,24 @@
 name: CI — Rust
 description: >
-  Clippy (-D warnings) and the cargo test suite on Windows. Builds the frontend
-  bundle first because `tauri::generate_context!` embeds dist/. Assumes the repo
-  is already checked out.
+  Clippy (-D warnings) and the cargo test suite. Builds the frontend bundle
+  first because `tauri::generate_context!` embeds dist/. Runs on Linux for
+  speed; the caller is responsible for Windows-specific coverage. Assumes the
+  repo is already checked out.
 
 runs:
   using: composite
   steps:
+    # The `tauri` crate links webkit2gtk / GTK / libappindicator on Linux — none
+    # of it ships on the runner. (No-op on other runners.)
+    - name: Install Linux WebKit deps
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          libwebkit2gtk-4.1-dev libsoup-3.0-dev libgtk-3-dev \
+          librsvg2-dev libayatana-appindicator3-dev
+
     - name: Setup Node
       uses: actions/setup-node@v5
       with:
