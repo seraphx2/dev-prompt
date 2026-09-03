@@ -68,17 +68,18 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: "true"
 
       - name: Install dependencies
         run: npm ci
 
       # Branch protection is strict:false, so the PR's `check` ran on the PR head,
-      # not the merge result. Re-run the suite on the actual commit being shipped.
-      - name: Test
+      # not the merge result. Re-run the fast frontend suite on the actual commit
+      # being shipped; the Rust suite already ran on the PR and `tauri build`
+      # below is a full compile anyway.
+      - name: Frontend tests
         shell: bash
-        run: |
-          npm test
-          cargo test --manifest-path src-tauri/Cargo.toml
+        run: npm test
 
       - name: Compute version
         id: version

@@ -19,11 +19,14 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/ci-frontend
+
+  rust:
     runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Build + test
-        uses: ./.github/actions/ci
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/ci-rust
