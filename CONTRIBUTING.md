@@ -61,9 +61,10 @@ Rust lives in `src-tauri/src/` (see the layout in the README), the Svelte UI in
 
 ## Platforms
 
-Windows is built, packaged, and tested. Linux and macOS share the same codebase
-and compile; fixes for them are very welcome. The platform-specific seams are
-small and localized:
+Windows and Linux are built and packaged by the release workflow (Linux:
+`deb` / `rpm` / `AppImage`); Windows is the most exercised. macOS shares the same
+codebase and compiles but isn't packaged yet. Fixes for any platform are very
+welcome. The platform-specific seams are small and localized:
 
 - `#[cfg(windows)]` blocks in `src-tauri/src/lib.rs` (acrylic blur, rounded
   corners).

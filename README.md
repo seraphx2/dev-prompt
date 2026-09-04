@@ -87,7 +87,7 @@ The discovered repo list is cached at `<OS cache dir>/dev-prompt/repos.json`.
 |                   | Status                                                                                                                                                                                                                                                                                                                     |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Windows 10/11** | Built, packaged (NSIS installer + portable zip), and tested. Acrylic blur + rounded corners, Windows Terminal integration, Visual Studio / Rider detection.                                                                                                                                                                |
-| **Linux**         | Same codebase, compiles. Hotkey works on X11; Wayland needs the XDG global-shortcuts portal (tray-click fallback otherwise). Terminal-command actions need per-emulator working-dir flags (in progress) — plain "open a terminal" works. Panel is translucent but unblurred (no compositor backing yet), so it paints a little more solid than on Windows. Packaging (`deb`/`rpm`/`AppImage`) not yet in CI. |
+| **Linux**         | Same codebase, compiles. Built and packaged (`deb` / `rpm` / `AppImage`) by the release workflow; AppImage installs auto-update, deb/rpm update via the package. Hotkey works on X11; Wayland needs the XDG global-shortcuts portal (tray-click fallback otherwise). Terminal-command actions need per-emulator working-dir flags (in progress) — plain "open a terminal" works. Panel is translucent but unblurred (no compositor backing yet), so it paints a little more solid than on Windows. |
 | **macOS**         | Same codebase, compiles; not yet run on a Mac. Global hotkey and process launching are supported by the underlying plugins; vibrancy and `.dmg` packaging are unimplemented.                                                                                                                                               |
 
 The architecture is platform-neutral — program paths and OS quirks are isolated
@@ -119,8 +119,10 @@ hotkey). The tray icon appears immediately.
 npm run tauri build
 ```
 
-Produces a Windows NSIS installer today; other platform bundles are wired up in
-the release workflow (see [`docs/releasing.md`](docs/releasing.md)).
+Produces a Windows NSIS installer, or the Linux `deb` / `rpm` / `AppImage`
+bundles, depending on the host OS. The release workflow builds both (macOS is
+still pending) — see [`docs/releasing.md`](docs/releasing.md), which also has a
+recipe for smoke-testing a Linux bundle locally.
 
 ## Usage
 

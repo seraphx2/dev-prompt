@@ -1,11 +1,12 @@
 name: Release
 
 # Fires on every push to main — i.e. every dev->main merge — and publishes a
-# release: a CalVer version from today's date + existing tags, the Windows NSIS
-# installer and signed updater artifacts, and a GitHub Release with everything
-# attached. Doc-only merges are skipped (paths-ignore); to opt a code merge out,
-# put "[skip release]" in the merge-commit message. workflow_dispatch stays for
-# manual drafts / prereleases / re-runs.
+# release: a CalVer version from today's date + existing tags, the platform
+# installers (Windows NSIS; Linux deb/rpm/AppImage) and signed updater
+# artifacts, and a GitHub Release with everything attached. Doc-only merges are
+# skipped (paths-ignore); to opt a code merge out, put "[skip release]" in the
+# merge-commit message. workflow_dispatch stays for manual drafts / prereleases
+# / re-runs.
 on:
   push:
     branches: [main]
@@ -33,7 +34,16 @@ permissions:
 
 jobs:
   release:
-    runs-on: windows-latest
+    # One leg per OS. tauri-action creates the tag + release on whichever leg
+    # lands first; the other uploads into it and merges its platform keys into
+    # latest.json. fail-fast off so a flaky leg can't strand a half-built one.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, portable: true }
+          - { os: ubuntu-22.04, portable: false } # 22.04 for glibc back-compat
+    runs-on: ${{ matrix.os }}
     # push: skip when the merge commit opts out. dispatch: always run.
     if: >-
       github.event_name == 'workflow_dispatch' ||
@@ -63,6 +73,17 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      # webkit2gtk / GTK / libappindicator aren't on the runner; patchelf is
+      # needed by the AppImage packaging step. (Mirrors .github/actions/ci-rust.)
+      - name: Install Linux bundle deps
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libsoup-3.0-dev libgtk-3-dev \
+            librsvg2-dev libayatana-appindicator3-dev patchelf
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
@@ -100,13 +121,17 @@ jobs:
           prerelease: ${{ inputs.prerelease || false }}
           includeUpdaterJson: true
 
+      # Windows only: ship the bare .exe as a no-install option. The Linux
+      # AppImage already is that, so there's no equivalent step for it.
       - name: Package portable zip
+        if: matrix.portable
         shell: bash
         run: |
           cd src-tauri/target/release
           7z a "dev-prompt_${{ steps.version.outputs.value }}_x64-portable.zip" dev-prompt.exe
 
       - name: Attach portable zip to release
+        if: matrix.portable
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
