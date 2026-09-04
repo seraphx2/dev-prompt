@@ -48,6 +48,15 @@
   }
 }
 
+/* Windows paints acrylic behind the window, so the panel's 0.82 fill sits on a
+   dark blurred backing. Linux has no such backing — WebKitGTK cannot blur the
+   desktop through a transparent window, so backdrop-blur is a no-op and the
+   fill lands straight on the wallpaper, reading far more see-through. Carry a
+   little more of the panel colour there. */
+:root[data-os="linux"] .panel-surface {
+  background-color: rgb(20 20 24 / 0.9);
+}
+
 /* Thin, unobtrusive scrollbar for the results list. */
 .scroll-thin::-webkit-scrollbar {
   width: 8px;
