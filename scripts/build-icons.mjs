@@ -27,6 +27,17 @@ const BRAND = {
   helix: "helix",
   claude: "claude",
   eclipse: "eclipseide",
+  // AI coding CLIs / AI editors / extra VS Code-family editors. Only slugs that
+  // exist in simple-icons land here; the rest (OpenAI/Codex, Aider, Amazon Q,
+  // Crush, Goose, Pulsar) have no CC0 glyph and fall back to a neutral icon.
+  gemini: "googlegemini",
+  copilot: "githubcopilot",
+  opencode: "opencode",
+  qwen: "qwen",
+  windsurf: "windsurf",
+  trae: "trae",
+  vscodium: "vscodium",
+  lapce: "lapce",
   git: "git",
   github: "github",
   gitlab: "gitlab",

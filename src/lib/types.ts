@@ -87,6 +87,7 @@ export interface ConfigSummary {
   universal: {
     id: string;
     label: string;
+    icon: string | null;
     default: boolean;
     available: boolean;
     disabled: boolean;

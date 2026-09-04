@@ -87,11 +87,65 @@ programs:
     any: [claude]
     windows: [claude.cmd]
 
+  # AI coding CLIs (terminal agents). npm-published ones expose a `.cmd` shim on
+  # Windows; the pip / Go / native ones just land on PATH. Missing tool -> the
+  # matching "Launch …" action is hidden.
+  aider:
+    any: [aider]
+  amazonq:
+    any: [q]
+  codex:
+    any: [codex]
+    windows: [codex.cmd]
+  crush:
+    any: [crush]
+  cursoragent:
+    any: [cursor-agent]
+  gemini:
+    any: [gemini]
+    windows: [gemini.cmd]
+  copilot:
+    any: [copilot]
+    windows: [copilot.cmd]
+  goose:
+    # Collides with pressly/goose (the DB-migration tool): if that's the `goose`
+    # on PATH, "Launch Goose" runs it instead.
+    any: [goose]
+  opencode:
+    any: [opencode]
+    windows: [opencode.cmd]
+  qwen:
+    any: [qwen]
+    windows: [qwen.cmd]
+
   # editors
   cursor:
     any: [cursor]
     windows:
       - "%LOCALAPPDATA%/Programs/cursor/Cursor.exe"
+  windsurf:
+    any: [windsurf]
+    windows:
+      - "%LOCALAPPDATA%/Programs/Windsurf/Windsurf.exe"
+  trae:
+    any: [trae]
+    windows:
+      - "%LOCALAPPDATA%/Programs/Trae/Trae.exe"
+  codium:
+    any: [codium]
+    windows:
+      - codium.cmd
+      - "%LOCALAPPDATA%/Programs/VSCodium/bin/codium.cmd"
+      - "%ProgramFiles%/VSCodium/bin/codium.cmd"
+  lapce:
+    any: [lapce]
+    windows:
+      - "%LOCALAPPDATA%/Programs/Lapce/lapce.exe"
+      - "%ProgramFiles%/Lapce/lapce.exe"
+  pulsar:
+    any: [pulsar]
+    windows:
+      - "%LOCALAPPDATA%/Programs/Pulsar/Pulsar.exe"
   zed:
     any: [zed]
     windows:
@@ -358,8 +412,9 @@ rules:
         icon: eclipse
 
 # --- universal actions -------------------------------------------------
-# The first three work on every system; everything below is an app that may or
-# may not be installed (and is hidden via `needs:` when it isn't).
+# The first four work on every system; everything below is an app that may or
+# may not be installed (and is hidden via `needs:` when it isn't). Grouped:
+# AI CLIs, then AI editors, then editors/IDEs, then git tools.
 universal:
   default: terminal
   actions:
@@ -368,15 +423,38 @@ universal:
     - { id: copy-path, name: "Copy path", client: true, icon: copy }
     - { id: run-command, name: "Run command…", prompt: true, terminal: true, icon: run }
 
+    # AI coding CLIs (terminal agents), alphabetical. `icon:` names the intended
+    # brand key even where no glyph ships yet — it lights up if one is added.
+    - { id: aider, name: "Launch Aider", terminal: true, run: "aider", needs: [aider], icon: aider }
+    - { id: amazon-q, name: "Launch Amazon Q", terminal: true, run: "q chat", needs: [amazonq], icon: amazonq }
     - { id: claude-code, name: "Launch Claude Code", terminal: true, run: "claude", needs: [claude], icon: claude }
-    - { id: vscode, name: "Open in VS Code", program: "{{code}}", args: ["{{path}}"], needs: [code], icon: vscode }
+    - { id: codex, name: "Launch Codex", terminal: true, run: "codex", needs: [codex], icon: codex }
+    - { id: crush, name: "Launch Crush", terminal: true, run: "crush", needs: [crush], icon: crush }
+    - { id: cursor-agent, name: "Launch Cursor Agent", terminal: true, run: "cursor-agent", needs: [cursoragent], icon: cursor }
+    - { id: gemini, name: "Launch Gemini CLI", terminal: true, run: "gemini", needs: [gemini], icon: gemini }
+    - { id: github-copilot, name: "Launch GitHub Copilot CLI", terminal: true, run: "copilot", needs: [copilot], icon: copilot }
+    - { id: goose, name: "Launch Goose", terminal: true, run: "goose", needs: [goose], icon: goose }
+    - { id: opencode, name: "Launch opencode", terminal: true, run: "opencode", needs: [opencode], icon: opencode }
+    - { id: qwen, name: "Launch Qwen Code", terminal: true, run: "qwen", needs: [qwen], icon: qwen }
+
+    # AI editors (GUI), alphabetical.
     - { id: cursor, name: "Open in Cursor", program: "{{cursor}}", args: ["{{path}}"], needs: [cursor], icon: cursor }
-    - { id: zed, name: "Open in Zed", program: "{{zed}}", args: ["{{path}}"], needs: [zed], icon: zed }
-    - { id: sublime, name: "Open in Sublime Text", program: "{{subl}}", args: ["{{path}}"], needs: [subl], icon: sublime }
-    - { id: idea, name: "Open in IntelliJ IDEA", program: "{{idea}}", args: ["{{path}}"], needs: [idea], icon: intellij }
-    - { id: webstorm, name: "Open in WebStorm", program: "{{webstorm}}", args: ["{{path}}"], needs: [webstorm], icon: webstorm }
-    - { id: pycharm, name: "Open in PyCharm", program: "{{pycharm}}", args: ["{{path}}"], needs: [pycharm], icon: pycharm }
+    - { id: trae, name: "Open in Trae", program: "{{trae}}", args: ["{{path}}"], needs: [trae], icon: trae }
+    - { id: windsurf, name: "Open in Windsurf", program: "{{windsurf}}", args: ["{{path}}"], needs: [windsurf], icon: windsurf }
+
+    # Editors / IDEs, alphabetical.
     - { id: goland, name: "Open in GoLand", program: "{{goland}}", args: ["{{path}}"], needs: [goland], icon: goland }
+    - { id: idea, name: "Open in IntelliJ IDEA", program: "{{idea}}", args: ["{{path}}"], needs: [idea], icon: intellij }
+    - { id: lapce, name: "Open in Lapce", program: "{{lapce}}", args: ["{{path}}"], needs: [lapce], icon: lapce }
+    - { id: pulsar, name: "Open in Pulsar", program: "{{pulsar}}", args: ["{{path}}"], needs: [pulsar], icon: code }
+    - { id: pycharm, name: "Open in PyCharm", program: "{{pycharm}}", args: ["{{path}}"], needs: [pycharm], icon: pycharm }
+    - { id: sublime, name: "Open in Sublime Text", program: "{{subl}}", args: ["{{path}}"], needs: [subl], icon: sublime }
+    - { id: vscode, name: "Open in VS Code", program: "{{code}}", args: ["{{path}}"], needs: [code], icon: vscode }
+    - { id: vscodium, name: "Open in VSCodium", program: "{{codium}}", args: ["{{path}}"], needs: [codium], icon: vscodium }
+    - { id: webstorm, name: "Open in WebStorm", program: "{{webstorm}}", args: ["{{path}}"], needs: [webstorm], icon: webstorm }
+    - { id: zed, name: "Open in Zed", program: "{{zed}}", args: ["{{path}}"], needs: [zed], icon: zed }
+
+    # Git GUIs / TUIs.
     - { id: fork, name: "Open in Fork", program: "{{fork}}", args: ["{{path}}"], needs: [fork], icon: git }
     - { id: gitkraken, name: "Open in GitKraken", program: "{{gitkraken}}", args: ["-p", "{{path}}"], needs: [gitkraken], icon: gitkraken }
     - { id: sublime-merge, name: "Open in Sublime Merge", program: "{{smerge}}", args: ["{{path}}"], needs: [smerge], icon: git }
