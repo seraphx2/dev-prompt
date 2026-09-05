@@ -137,7 +137,8 @@ Notes:
 
 ## Later
 
-- Linux: Flatpak / Snap / an AUR `PKGBUILD` are each a separate pipeline.
+- Linux distribution beyond GitHub Releases (AUR, apt/rpm repo, Flatpak, Snap):
+  phased roadmap in [`linux-distribution/`](linux-distribution/README.md).
 - macOS: add `macos-latest` to the matrix; produces `.dmg` + updater
   `.app.tar.gz` (also needs vibrancy + signing).
 - Store: upload the `.exe` to the Microsoft Store (Store handles signing) — no
