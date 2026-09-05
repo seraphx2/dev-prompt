@@ -32,3 +32,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/ci-rust
+
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/ci-packaging

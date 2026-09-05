@@ -19,6 +19,7 @@
   import type { ConfigSummary, RepoTrace, TerminalOption } from "../types";
   import HotkeyRecorder from "./HotkeyRecorder.svelte";
   import { icons, iconKeys } from "../icons";
+  import { glyphFor, glyphDim } from "../glyph";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { installUpdate } from "../updater";
   import { upd, pollUpdates } from "../updateStore.svelte";
@@ -728,14 +729,23 @@
               </div>
               <div class="space-y-0.5">
                 {#each summary.universal as u (u.id)}
-                  <div class="flex items-baseline gap-2">
-                    <span
-                      class={u.disabled
-                        ? "text-white/40"
-                        : u.available
-                          ? "text-white/70"
-                          : "text-white/30"}>{u.label}</span
+                  {@const g = glyphFor(u.icon)}
+                  <div
+                    class="flex items-center gap-2 {u.disabled
+                      ? 'text-white/40'
+                      : u.available
+                        ? 'text-white/70'
+                        : 'text-white/30'}"
+                  >
+                    <svg
+                      class="h-3.5 w-3.5 shrink-0"
+                      viewBox={g.vb ?? "0 0 24 24"}
+                      fill="currentColor"
+                      fill-rule="evenodd"
                     >
+                      {#if g.raw}{@html g.raw}{:else}<path d={g.d} />{/if}
+                    </svg>
+                    <span>{u.label}</span>
                     {#if u.default}<span class="text-sky-300/70">default</span>{/if}
                     {#if u.disabled}
                       <span class="text-red-300/70">disabled</span>
@@ -887,10 +897,11 @@
             class="flex flex-col items-center gap-1.5 rounded px-1 py-2.5 hover:bg-white/[0.06]"
           >
             <svg
-              class="h-5 w-5 {icons[k].hex ? '' : 'text-white/45'}"
+              class="h-5 w-5 {icons[k].hex && !glyphDim(icons[k]) ? '' : 'text-white/45'}"
               viewBox={icons[k].vb ?? "0 0 24 24"}
               fill="currentColor"
-              style={icons[k].hex ? `color:${icons[k].hex}` : ""}
+              fill-rule="evenodd"
+              style={icons[k].hex && !glyphDim(icons[k]) ? `color:${icons[k].hex}` : ""}
             >
               {#if icons[k].raw}
                 {@html icons[k].raw}

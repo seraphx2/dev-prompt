@@ -1,7 +1,9 @@
 # Releasing
 
 Releases are built by GitHub Actions and published to the repo's **Releases** page.
-Windows only for now (NSIS installer + portable zip + auto-update artifacts).
+Windows (NSIS installer + portable zip) and Linux (`deb` / `rpm` / `AppImage`)
+are built in one matrixed run, each with its auto-update artifacts. macOS is
+still pending.
 
 ## Cutting a release
 
@@ -68,17 +70,76 @@ auto-update to a build signed with the **same** key they were installed with.)
 
 ## What users get
 
+Windows:
+
 - **`dev-prompt_<version>_x64-setup.exe`** — NSIS installer, per-user, no admin
   prompt. Recommended.
 - **`dev-prompt_<version>_x64-portable.zip`** — just the `.exe`, no install.
   Portable builds do **not** auto-update.
-- **`latest.json`** + **`*.nsis.zip`** + **`*.sig`** — consumed by the in-app
-  updater; ignore them.
+
+Linux:
+
+- **`dev-prompt_<version>_amd64.deb`** / **`dev-prompt-<version>-1.x86_64.rpm`** —
+  native packages for Debian/Ubuntu and Fedora/RHEL. The in-app updater points
+  at the AppImage artifact, so treat these as updating through the system package
+  manager (or a fresh download) rather than in-app.
+- **`dev-prompt_<version>_amd64.AppImage`** — no-install, runs on any glibc
+  distro (Arch/CachyOS included). This is the artifact the in-app updater
+  installs, so an AppImage install **does** auto-update in place.
+
+Shared:
+
+- **`latest.json`** + the `*.nsis.zip` / `*.AppImage.tar.gz` archives + `*.sig` —
+  consumed by the in-app updater; ignore them. `latest.json` carries a key per
+  platform (`windows-x86_64`, `linux-x86_64`, …); each matrix leg merges its own
+  key into the file the other leg wrote.
+
+## Test a Linux build locally (CachyOS / Arch)
+
+`.deb` / `.rpm` won't install on Arch, but the **AppImage** is the same artifact
+other-distro users get, so it's the one to smoke-test.
+
+```sh
+# one-time: AppImage tooling (patchelf) + optional deb/rpm inspectors
+sudo pacman -S --needed patchelf fuse2 file binutils dpkg rpm-tools
+
+# fastest loop — the dev build, no packaging:
+npm run tauri dev
+
+# build the real AppImage. -c disables the updater artifacts so the build
+# doesn't need the signing key (drop it if you've exported the key — see below).
+npm run tauri build -- --bundles appimage -c '{"bundle":{"createUpdaterArtifacts":false}}'
+
+BIN=$(ls src-tauri/target/release/bundle/appimage/dev-prompt_*_amd64.AppImage)
+chmod +x "$BIN"
+"$BIN"                       # launches the packaged app — check tray + hotkey
+
+# optional: peek inside the deb/rpm payloads without installing
+npm run tauri build -- --bundles deb,rpm -c '{"bundle":{"createUpdaterArtifacts":false}}'
+dpkg-deb -c src-tauri/target/release/bundle/deb/*.deb
+rpm -qlp   src-tauri/target/release/bundle/rpm/*.rpm
+```
+
+Notes:
+
+- The Linux targets come from `src-tauri/tauri.linux.conf.json`, which Tauri
+  auto-merges over `tauri.conf.json` on Linux (arrays replace, so its
+  `bundle.targets` wins). `--bundles` on the CLI overrides both.
+- The base config sets `createUpdaterArtifacts: true`, which makes `tauri build`
+  **fail** (not just warn) when `TAURI_SIGNING_PRIVATE_KEY` isn't in the env —
+  the bundles are still written, but the command exits non-zero. The `-c`
+  override above turns that off for a local smoke-test. To exercise the updater
+  path instead, `export TAURI_SIGNING_PRIVATE_KEY="$(cat
+  path/to/devprompt-updater.key)"` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=`,
+  and drop the `-c` flag.
+- `npm run version:calver` rewrites the three manifests to the CalVer value;
+  `git checkout` them afterwards if you were only previewing.
 
 ## Later
 
-- Linux: add `ubuntu-22.04` to the job matrix and `deb`/`rpm`/`appimage` to
-  `bundle.targets`; Flatpak is a separate pipeline.
-- macOS: add `macos-latest`, produces `.dmg` + updater `.app.tar.gz`.
+- Linux distribution beyond GitHub Releases (AUR, apt/rpm repo, Flatpak, Snap):
+  phased roadmap in [`linux-distribution/`](linux-distribution/README.md).
+- macOS: add `macos-latest` to the matrix; produces `.dmg` + updater
+  `.app.tar.gz` (also needs vibrancy + signing).
 - Store: upload the `.exe` to the Microsoft Store (Store handles signing) — no
   MSIX authoring needed.

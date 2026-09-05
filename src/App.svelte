@@ -592,8 +592,8 @@
 />
 
 <main
-  class="relative mx-auto flex h-[480px] w-[720px] flex-col overflow-hidden rounded
-         border border-hair bg-panel/[0.82] backdrop-blur-xl"
+  class="panel-surface relative mx-auto flex h-[480px] w-[720px] flex-col overflow-hidden
+         rounded border border-hair bg-panel/[0.82] backdrop-blur-xl"
 >
   {#if mode === "repo-list"}
     <SearchInput

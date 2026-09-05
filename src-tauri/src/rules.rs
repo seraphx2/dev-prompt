@@ -1341,6 +1341,8 @@ pub struct RuleStatus {
 pub struct UniversalStatus {
     pub id: String,
     pub label: String,
+    /// `icon:` key from the action def, for the settings preview.
+    pub icon: Option<String>,
     pub default: bool,
     pub available: bool,
     /// The user turned this built-in off (`universal.disable`).
@@ -1402,6 +1404,7 @@ pub fn summarize(config: &Config, rules_path: String) -> ConfigSummary {
             available: !disabled
                 && (a.client || a.needs.iter().all(|k| resolver.resolve(k).is_some())),
             label: a.name.clone(),
+            icon: a.icon.clone(),
             id,
             disabled,
         }
