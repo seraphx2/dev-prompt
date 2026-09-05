@@ -32,8 +32,16 @@ jobs:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/ci-rust
 
-  check:
-    needs: [frontend, rust]
+  # Lint the Linux packaging metadata (AppStream metainfo + desktop entry) that
+  # the release bundles ship and the AUR/Flatpak/Snap recipes reuse.
+  packaging:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "frontend + rust passed"
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/ci-packaging
+
+  check:
+    needs: [frontend, rust, packaging]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "frontend + rust + packaging passed"

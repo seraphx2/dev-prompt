@@ -10,7 +10,7 @@ reuse groundwork from earlier ones.
 
 | Phase | Channel | Reach | Lift | Needs from maintainer | Status |
 |---|---|---|---|---|---|
-| [1](phase-1-groundwork.md) | In-repo packaging groundwork | all channels | S | nothing | **not started** |
+| [1](phase-1-groundwork.md) | In-repo packaging groundwork | all channels | S | nothing | **in progress** — files landed; screenshot + CI validate outstanding |
 | [2](phase-2-aur.md) | AUR | Arch / CachyOS / Manjaro / EndeavourOS | S | AUR account + SSH key | not started |
 | [3](phase-3-apt-rpm-repo.md) | Own apt + rpm repo | Debian/Ubuntu, Fedora/RHEL | M | OBS account **or** a GPG repo key | not started |
 | [4](phase-4-flatpak.md) | Flatpak / Flathub | every distro (sandboxed) | L | Flathub PR review | not started |

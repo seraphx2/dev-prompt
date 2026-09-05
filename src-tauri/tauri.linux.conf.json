@@ -2,6 +2,25 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "targets": ["deb", "rpm", "appimage"],
-    "category": "DeveloperTool"
+    "category": "DeveloperTool",
+    "linux": {
+      "deb": {
+        "desktopTemplate": "../packaging/linux/dev-prompt.desktop",
+        "files": {
+          "/usr/share/metainfo/io.github.seraphx2.devprompt.metainfo.xml": "../packaging/linux/io.github.seraphx2.devprompt.metainfo.xml"
+        }
+      },
+      "rpm": {
+        "desktopTemplate": "../packaging/linux/dev-prompt.desktop",
+        "files": {
+          "/usr/share/metainfo/io.github.seraphx2.devprompt.metainfo.xml": "../packaging/linux/io.github.seraphx2.devprompt.metainfo.xml"
+        }
+      },
+      "appimage": {
+        "files": {
+          "usr/share/metainfo/io.github.seraphx2.devprompt.metainfo.xml": "../packaging/linux/io.github.seraphx2.devprompt.metainfo.xml"
+        }
+      }
+    }
   }
 }

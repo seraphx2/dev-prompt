@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=dev-prompt
+Comment=Command-palette overlay for launching dev repositories
+Exec=dev-prompt
+Icon=dev-prompt
+Categories=Development;
+Terminal=false
+StartupWMClass=dev-prompt
+Keywords=launcher;palette;repository;repositories;projects;git;

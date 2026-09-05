@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metainfo. Consumed by:
+    - Flathub (required)                     -> phase-4-flatpak.md
+    - GNOME Software / KDE Discover           -> shown for apt/rpm/AUR installs
+    - `appstreamcli validate` (CI, phase 1)
+
+  Before the first Flathub submission the maintainer must:
+    - commit a real screenshot at docs/img/overlay.png (see <screenshots> below)
+    - keep the top <release> in sync with the shipped version (the release
+      workflow should prepend a <release> entry at tag time)
+-->
+<component type="desktop-application">
+  <id>io.github.seraphx2.devprompt</id>
+
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>dev-prompt</name>
+  <summary>Command-palette overlay for launching dev repositories</summary>
+
+  <description>
+    <p>
+      dev-prompt is a global-hotkey overlay that finds the git repositories on
+      your machine and opens them in the editor, terminal, or tool of your
+      choice. Press the hotkey, type a few letters, hit Enter.
+    </p>
+    <p>
+      It stays out of the way the rest of the time: no window, a single tray
+      icon, and a rules file that maps each project to the actions that make
+      sense for it.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">dev-prompt.desktop</launchable>
+
+  <url type="homepage">https://github.com/seraphx2/dev-prompt</url>
+  <url type="bugtracker">https://github.com/seraphx2/dev-prompt/issues</url>
+  <url type="vcs-browser">https://github.com/seraphx2/dev-prompt</url>
+
+  <developer id="io.github.seraphx2">
+    <name>seraphx2</name>
+  </developer>
+
+  <content_rating type="oars-1.1"/>
+
+  <categories>
+    <category>Development</category>
+    <category>Utility</category>
+  </categories>
+
+  <keywords>
+    <keyword>launcher</keyword>
+    <keyword>palette</keyword>
+    <keyword>repositories</keyword>
+    <keyword>git</keyword>
+  </keywords>
+
+  <screenshots>
+    <!-- TODO(phase 1): commit docs/img/overlay.png before Phase 4.
+         Flathub requires >=1 screenshot; PNG/JPEG, <=2000px wide. -->
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/seraphx2/dev-prompt/main/docs/img/overlay.png</image>
+      <caption>The overlay searching repositories</caption>
+    </screenshot>
+  </screenshots>
+
+  <releases>
+    <!-- Placeholder. The release workflow should prepend the real entry:
+         <release version="2026.905.1" date="2026-09-05"/> -->
+    <release version="0.0.0" date="1970-01-01"/>
+  </releases>
+</component>

@@ -1,0 +1,27 @@
+name: CI — packaging
+description: >
+  Validate the Linux packaging metadata that ships in the deb/rpm/AppImage and
+  is copied by the AUR/Flatpak/Snap recipes: the AppStream metainfo and the
+  desktop entry. Fast, no build. Assumes the repo is already checked out.
+
+runs:
+  using: composite
+  steps:
+    - name: Install validators
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          appstream desktop-file-utils
+
+    - name: Validate desktop entry
+      shell: bash
+      run: desktop-file-validate packaging/linux/dev-prompt.desktop
+
+    - name: Validate AppStream metainfo
+      shell: bash
+      # No --pedantic: fail on errors, tolerate warnings/infos (e.g. the
+      # placeholder <release> and the screenshot URL that 404s until Phase 4).
+      run: |
+        appstreamcli validate --no-net --explain \
+          packaging/linux/io.github.seraphx2.devprompt.metainfo.xml

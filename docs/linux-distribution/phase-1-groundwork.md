@@ -14,146 +14,77 @@ one working `PKGBUILD` lived in a scratch dir and was lost. Consolidate it into
 
 ## Deliverables
 
-### 1. `packaging/linux/io.github.seraphx2.devprompt.desktop`
+### 1. `packaging/linux/dev-prompt.desktop`
 
-One canonical desktop entry. Base it on what Tauri generates plus the ad-hoc
-Arch one:
-
-```ini
-[Desktop Entry]
-Type=Application
-Name=dev-prompt
-Comment=Command-palette overlay for launching dev repositories
-Exec=dev-prompt
-Icon=io.github.seraphx2.devprompt
-Categories=Development;Utility;
-Terminal=false
-StartupWMClass=dev-prompt
-Keywords=launcher;palette;repositories;projects;
-```
-
-Notes:
-- `Icon=` uses the app-id so themed icons resolve; install icon files as
-  `io.github.seraphx2.devprompt.png` in `hicolor/<size>/apps/`.
-- Wire it into `tauri.conf.json` so the bundlers use this file instead of
-  generating one: `bundle.linux.deb.desktopTemplate` /
-  `bundle.linux.rpm.desktopTemplate` (and the AppImage picks up the deb one).
-  Confirm the template placeholders Tauri expects (`{{exec}}`, `{{icon}}`, …)
-  or ship it as a static file via `bundle.linux.*.files`.
+**Built:** `packaging/linux/dev-prompt.desktop`. Literal values (no Handlebars
+vars) so the one file doubles as the deb/rpm `desktopTemplate` *and* the
+verbatim file that hand-install channels copy. `Categories=Development;` only
+(a second main category makes menus list the app twice). See
+`packaging/README.md`.
 
 ### 2. `packaging/linux/io.github.seraphx2.devprompt.metainfo.xml`
 
-AppStream metainfo. Minimum Flathub-acceptable set:
+**Built.** `<id>` is the reverse-DNS app-id; `<launchable>` is
+`dev-prompt.desktop` (the basename Tauri's bundler installs — it can't be
+renamed without renaming the binary). Passes `appstreamcli validate`.
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<component type="desktop-application">
-  <id>io.github.seraphx2.devprompt</id>
-  <metadata_license>MIT</metadata_license>
-  <project_license>MIT</project_license>
-  <name>dev-prompt</name>
-  <summary>Command-palette overlay for launching dev repositories</summary>
-  <description>
-    <p>
-      dev-prompt is a global-hotkey overlay that finds your local git
-      repositories and launches them in the editor, terminal, or tool of your
-      choice.
-    </p>
-  </description>
-  <launchable type="desktop-id">io.github.seraphx2.devprompt.desktop</launchable>
-  <url type="homepage">https://github.com/seraphx2/dev-prompt</url>
-  <url type="bugtracker">https://github.com/seraphx2/dev-prompt/issues</url>
-  <developer id="io.github.seraphx2"><name>seraphx2</name></developer>
-  <content_rating type="oars-1.1"/>
-  <screenshots>
-    <screenshot type="default">
-      <image>https://raw.githubusercontent.com/seraphx2/dev-prompt/main/docs/img/overlay.png</image>
-      <caption>The overlay searching repositories</caption>
-    </screenshot>
-  </screenshots>
-  <releases>
-    <release version="0.0.0" date="1970-01-01"/>
-  </releases>
-</component>
-```
-
-- Needs at least one **screenshot** at a stable public URL — capture one, commit
-  it under `docs/img/`.
-- The `<releases>` block should be regenerated at release time (script in CI:
-  prepend `<release version="$VERSION" date="$(date -I)"/>`). Flathub lints
+Outstanding:
+- one **screenshot** at `docs/img/overlay.png` — the metainfo already references
+  it; it 404s until committed (see `docs/img/README.md`). Flathub build fails
+  without it; `appstreamcli validate` doesn't care.
+- `<releases>`: the release workflow should prepend
+  `<release version="$VERSION" date="$(date -I)"/>` at tag time. Flathub lints
   that the top release matches the built version.
-- Validate with `appstreamcli validate` (or `flatpak run
-  org.freedesktop.appstream-glib validate`) in CI.
+- wire `appstreamcli validate` + `desktop-file-validate` into CI.
 
 ### 3. `packaging/arch/PKGBUILD` + `packaging/arch/PKGBUILD-bin`
 
-Two variants (both used in Phase 2):
+**Built** (both used in Phase 2). See the files — summary:
 
-**`PKGBUILD`** — build from a release tag:
+- **`PKGBUILD`** (AUR `dev-prompt`): `source` = release tag archive; `build()`
+  runs `npm ci` + `npm run tauri build -- --no-bundle -c
+  '{"bundle":{"createUpdaterArtifacts":false}}'`; `package()` installs the
+  binary + `packaging/linux/dev-prompt.desktop` + the metainfo + hicolor icons
+  (32/128/256, named `dev-prompt.png`) + `LICENSE`.
+- **`PKGBUILD-bin`** (AUR `dev-prompt-bin`): `source` = the release `.deb`;
+  `package()` is just `bsdtar -xf …deb` then `bsdtar -xf data.tar.* -C
+  $pkgdir`. The `.deb` already carries the desktop file, icons, and metainfo
+  (via `bundle.linux.deb.files`), so nothing to relocate.
+- Both: `depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3' 'libayatana-appindicator'
+  'hicolor-icon-theme')`, placeholder `pkgver=0.0.0` / `sha256sums=('SKIP')`
+  that the Phase 2 workflow rewrites per tag.
 
-```bash
-pkgname=dev-prompt
-pkgver=0.0.0          # pkgver() overrides from the tag; keep a placeholder
-pkgrel=1
-pkgdesc="Command-palette overlay for launching dev repositories"
-arch=('x86_64')
-url="https://github.com/seraphx2/dev-prompt"
-license=('MIT')
-depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3' 'libayatana-appindicator')
-makedepends=('rust' 'nodejs' 'npm' 'git')
-source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')   # real sum injected by the release job
+The ad-hoc prebuilt PKGBUILD verified working on CachyOS earlier used
+`libappindicator` (what was installed) — the committed version pins
+`libayatana-appindicator` (canonical; the old shim doesn't reliably show a tray
+on KDE/Wayland).
 
-build() {
-  cd "$srcdir/$pkgname-$pkgver"
-  npm ci
-  npm run tauri build -- --no-bundle \
-    -c '{"bundle":{"createUpdaterArtifacts":false}}'
-}
+### 4. release checklist
 
-package() {
-  cd "$srcdir/$pkgname-$pkgver"
-  install -Dm755 src-tauri/target/release/dev-prompt \
-    "$pkgdir/usr/bin/dev-prompt"
-  install -Dm644 packaging/linux/io.github.seraphx2.devprompt.desktop \
-    "$pkgdir/usr/share/applications/io.github.seraphx2.devprompt.desktop"
-  install -Dm644 packaging/linux/io.github.seraphx2.devprompt.metainfo.xml \
-    "$pkgdir/usr/share/metainfo/io.github.seraphx2.devprompt.metainfo.xml"
-  for s in 32 128; do
-    install -Dm644 "src-tauri/icons/${s}x${s}.png" \
-      "$pkgdir/usr/share/icons/hicolor/${s}x${s}/apps/io.github.seraphx2.devprompt.png"
-  done
-  install -Dm644 "src-tauri/icons/128x128@2x.png" \
-    "$pkgdir/usr/share/icons/hicolor/256x256/apps/io.github.seraphx2.devprompt.png"
-  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-}
-```
-
-**`PKGBUILD-bin`** — repackage the release `.deb` (no compile for the user):
-`source=(...download the _amd64.deb...)`, `package()` runs
-`bsdtar -xf data.tar.gz -C "$pkgdir"` then fixes the `.desktop`/icon names to the
-app-id. `depends` same as above minus `makedepends`.
-
-Reference (the ad-hoc prebuilt version that was verified working on CachyOS):
-`depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3' 'libappindicator')`, installed
-`/usr/bin/dev-prompt` + `.desktop` + hicolor 32/128/256 + `LICENSE`, built with
-`makepkg` and installed via `pacman -U`. Switch the dep to
-`libayatana-appindicator` for the committed version (canonical; provides the
-same `libappindicator3.so.1`).
-
-### 4. `docs/linux-distribution/` release checklist
-
-Add a `CHECKLIST.md` (or a section in `README.md`) enumerating, per release,
-which channels need a manual nudge vs. which the workflow handles. Keep it in
-sync as phases land.
+Deferred to Phase 2 — the first channel with per-release automation. Track it in
+`docs/linux-distribution/README.md` for now.
 
 ## Definition of done
 
-- [ ] `packaging/linux/` holds the `.desktop` + `metainfo.xml` + a committed
-      screenshot, and `appstreamcli validate` passes in CI.
-- [ ] `tauri.conf.json` bundlers use the committed `.desktop` (verify a local
-      `deb`/`rpm`/`appimage` build ships `io.github.seraphx2.devprompt.desktop`
-      and the metainfo).
-- [ ] `packaging/arch/PKGBUILD` + `PKGBUILD-bin` committed; `makepkg` builds
-      each clean on a current Arch box.
-- [ ] `docs/releasing.md` "Later" list points here.
+- [x] `packaging/linux/` holds `dev-prompt.desktop` + the metainfo.
+      `appstreamcli validate` and `desktop-file-validate` pass locally.
+- [ ] a real screenshot committed at `docs/img/overlay.png` (metainfo points at
+      it; currently 404s — see `docs/img/README.md`).
+- [ ] `appstreamcli validate` + `desktop-file-validate` wired into CI.
+- [x] `tauri.linux.conf.json` bundlers ship the canonical `.desktop` (verbatim
+      via `desktopTemplate`) and the metainfo (via `linux.*.files`). Verified a
+      local `deb` + `rpm` + `appimage` build: all three carry
+      `/usr/share/applications/dev-prompt.desktop` and
+      `/usr/share/metainfo/io.github.seraphx2.devprompt.metainfo.xml`.
+- [x] `packaging/arch/PKGBUILD` + `PKGBUILD-bin` committed. **Not yet
+      `makepkg`-tested** — `PKGBUILD` sources a release tag archive and none
+      exists yet; `PKGBUILD-bin` sources a release `.deb` asset. Both get a real
+      `pkgver`/`sha256sums` from the Phase 2 workflow. Test on the first tagged
+      release.
+- [x] `docs/releasing.md` "Later" list points here.
+
+**Note on naming:** kept the installed `.desktop` / icon basename as
+`dev-prompt` (what Tauri's bundler emits — it can't be renamed without also
+renaming the binary). The metainfo `<id>` is the reverse-DNS app-id;
+`<launchable>` points at `dev-prompt.desktop`. Flatpak (Phase 4) builds its own
+file tree and can use app-id naming throughout there.
