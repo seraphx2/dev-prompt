@@ -1,0 +1,23 @@
+Architectures: amd64
+Codename: stable
+Components: main
+Date: Sun, 06 Sep 2026 03:03:48 +0000
+Label: dev-prompt
+Origin: dev-prompt
+Suite: stable
+MD5Sum:
+ 3004fc7e64c92089489a237f8b817b9e              144 Release
+ 5139cd82c3fee798d3e7690651e88faf              659 main/binary-amd64/Packages
+ 2c7265c032fbad5a4c8d8ce05b1c4708              483 main/binary-amd64/Packages.gz
+SHA1:
+ 16751543ccc5c61b2cf375aa310c089404c1e152              144 Release
+ bfbf999a31d1d46ec5bc3a13b51596e7bb3d288a              659 main/binary-amd64/Packages
+ f789fac6b73b6498e2a3062515ddc9e632a345f4              483 main/binary-amd64/Packages.gz
+SHA256:
+ eebc9488bee087ee1703eaa1939b81c7b35267bb7291f675ca6c3314d9159d0a              144 Release
+ 4dedbabf2caa8f553961854be73b5277be69d16636eafc2250845141450248ea              659 main/binary-amd64/Packages
+ 26867d82c3092ed7eb6e8718040d755212efd620dd4e56db0a1ed8195295e022              483 main/binary-amd64/Packages.gz
+SHA512:
+ 5ccbf8eb1c458035541b3963de6243ea545aef10b8ecd1024e4bb58d82adf64cd805bb13e211d781f71bd29c4b224ece202df58639e3e9938bd31a194e1bc002              144 Release
+ e0bafcedc8600fea562806dd66eeae04b1373706532bca12eac32ef5eb0dd8fbd2094262acacc77c53c3c21b879f6e778b0e314724df946adcb6c92e09b057db              659 main/binary-amd64/Packages
+ 7bee889d61bb7e0eba0bf4bc823992dec728586f66e73b9ef226c11db5e4b015eac0e6a660303e77c9a1f112d58be6bdc2ca9f707b904e21ae9a2b8b5c29da1a              483 main/binary-amd64/Packages.gz
