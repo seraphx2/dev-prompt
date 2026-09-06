@@ -37,6 +37,7 @@
   let scanDepth = $state(4);
   // Bound to the <select>; serialises to `true` / `false` / `"auto"` on save.
   let collapseNested = $state<"true" | "false" | "auto">("true");
+  let dismiss = $state<"always" | "keep_on_blur" | "manual">("always");
   // "" = auto, "__custom__" = raw template, else a terminal id.
   let terminalSel = $state("");
   let terminalTemplate = $state("");
@@ -199,6 +200,7 @@
     roots: string[];
     scan: { max_depth: number; collapse_nested?: boolean | "auto" };
     cache_ttl_secs: number;
+    dismiss?: "always" | "keep_on_blur" | "manual";
     terminal?: string | null;
     terminal_template?: string | null;
     shell?: string | null;
@@ -213,6 +215,7 @@
       c.scan?.collapse_nested === undefined
         ? "true"
         : (String(c.scan.collapse_nested) as "true" | "false" | "auto");
+    dismiss = c.dismiss ?? "always";
     terminalTemplate = c.terminal_template ?? "";
     terminalSel = terminalTemplate ? "__custom__" : (c.terminal ?? "");
     shellSel = c.shell ?? "";
@@ -277,6 +280,7 @@
         cache_ttl_secs: Math.max(60, Math.round(ttlMin * 60)),
         scan_max_depth: Math.max(1, Math.round(scanDepth)),
         collapse_nested: collapseNested === "auto" ? "auto" : collapseNested === "true",
+        dismiss,
         terminal: terminalSel === "__custom__" ? "" : terminalSel,
         terminal_template:
           terminalSel === "__custom__" ? terminalTemplate.trim() : "",
@@ -449,6 +453,19 @@
         <span class="font-mono">›</span> installed-apps view.
       </p>
     </div>
+
+    <label class="block space-y-1.5">
+      <span class="text-orange-400">Overlay dismissal</span>
+      <select
+        bind:value={dismiss}
+        title="When the overlay closes itself"
+        class="w-72 rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+      >
+        <option value="always">On focus loss &amp; after an action (default)</option>
+        <option value="keep_on_blur">Keep open on focus loss; close after an action</option>
+        <option value="manual">Keep open until Esc</option>
+      </select>
+    </label>
 
     <div class="space-y-1.5">
       <span class="text-orange-400"

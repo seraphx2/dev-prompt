@@ -52,6 +52,9 @@ impl AppState {
             age_secs: -1,
         });
         let (apps, apps_age) = cache::load_apps().unwrap_or((Vec::new(), -1));
+        // Seed blur-dismiss from the saved preference; the frontend re-asserts it
+        // per screen (off for Settings / run-command) once it mounts.
+        let dismiss_on_blur = config.dismiss == config::DismissMode::Always;
         AppState {
             config: Mutex::new(config),
             repos: Mutex::new(loaded.repos),
@@ -59,7 +62,7 @@ impl AppState {
             age_secs: Mutex::new(loaded.age_secs),
             apps: Mutex::new(apps),
             apps_age_secs: Mutex::new(apps_age),
-            dismiss_on_blur: Mutex::new(true),
+            dismiss_on_blur: Mutex::new(dismiss_on_blur),
             first_run,
             sticky_open: Mutex::new(first_run),
         }
@@ -277,6 +280,17 @@ pub async fn run_action(
     .map_err(|e| AppError::msg(format!("launch task failed: {e}")))?
 }
 
+/// Keep the overlay's taskbar presence in step with the `dismiss` setting: a
+/// self-dismissing overlay (`always`) stays out of the taskbar; a persistent one
+/// (`keep_on_blur` / `manual`) gets a button so you can click back to it after
+/// it loses focus. No-op on Wayland, which gives clients no taskbar control.
+pub fn sync_taskbar_visibility(app: &AppHandle, cfg: &Config) {
+    use tauri::Manager;
+    if let Some(w) = app.get_webview_window("overlay") {
+        let _ = w.set_skip_taskbar(cfg.dismiss == config::DismissMode::Always);
+    }
+}
+
 #[tauri::command]
 pub fn hide_overlay(window: tauri::WebviewWindow, state: State<'_, AppState>) -> AppResult<()> {
     // The first explicit dismiss ends the first-run "stay open" latch.
@@ -331,6 +345,7 @@ pub struct ConfigPatch {
     pub apps_hotkey: Option<String>,
     pub roots: Option<Vec<String>>,
     pub cache_ttl_secs: Option<u64>,
+    pub dismiss: Option<config::DismissMode>,
     pub scan_max_depth: Option<usize>,
     pub collapse_nested: Option<config::CollapseNested>,
     /// `Some("")` clears the pin / template / shell back to auto.
@@ -374,6 +389,9 @@ pub fn save_config(
     }
     if let Some(ttl) = patch.cache_ttl_secs {
         user.cache_ttl_secs = Some(ttl);
+    }
+    if let Some(d) = patch.dismiss {
+        user.dismiss = Some(d);
     }
     if patch.scan_max_depth.is_some() || patch.collapse_nested.is_some() {
         let mut scan = user.scan.clone().unwrap_or_default();
@@ -507,6 +525,7 @@ pub fn save_config(
 
     let merged = config::load()?;
     *state.config.lock().unwrap() = merged.clone();
+    sync_taskbar_visibility(&app, &merged);
     Ok(merged)
 }
 

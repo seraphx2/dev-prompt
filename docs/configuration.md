@@ -144,9 +144,24 @@ scan:
                               #   ancestor's .gitmodules, not under vendor/ …)
 cache_ttl_secs: 900           # how long the discovered repo list stays fresh
                               #   before the next open triggers a background rescan
+dismiss: always               # when the overlay closes itself — Settings ▸
+                              #   Overlay dismissal:
+                              #   always       = on focus loss, and after an action
+                              #   keep_on_blur = ignore focus loss; still close
+                              #                  after an action or on Esc
+                              #   manual       = only Esc / the hotkey / the tray
 ```
 
 The discovered list is cached at `<OS cache dir>/dev-prompt/repos.json`.
+
+With `dismiss: manual`, launching an action from the menu leaves the overlay open
+on that repo (filter cleared) so you can fire several in a row; `Esc` steps back
+out as usual.
+
+`keep_on_blur` and `manual` also give the overlay a **taskbar button** (so you
+can click back to it after it loses focus); `always` keeps it out of the
+taskbar. On Wayland this is a no-op — the overlay is always in the taskbar there
+regardless.
 
 ---
 

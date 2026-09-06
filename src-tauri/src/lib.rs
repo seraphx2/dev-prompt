@@ -223,6 +223,12 @@ pub fn run() {
 
             apply_overlay_effects(&window);
 
+            // Taskbar presence follows the `dismiss` setting (see the fn docs).
+            {
+                let cfg = app.state::<AppState>().config.lock().unwrap().clone();
+                commands::sync_taskbar_visibility(app.handle(), &cfg);
+            }
+
             // Register the configured global hotkey(s).
             let (hotkey, apps_hotkey) = {
                 let state = app.state::<AppState>();

@@ -9,6 +9,7 @@
   import {
     buildActions,
     copyPath,
+    getConfig,
     hideOverlay,
     listApps,
     listRepos,
@@ -190,10 +191,25 @@
     }
   }
 
-  // Settings + the run-command input are forms — a click-away mustn't nuke them.
+  // `dismiss` from config: "always" | "keep_on_blur" | "manual". Loaded on mount
+  // and refreshed after a settings save.
+  let dismissMode = $state<"always" | "keep_on_blur" | "manual">("always");
+  getConfig().then((c) => (dismissMode = c.dismiss ?? "always"));
+
+  // Blur only dismisses in "always" mode. Settings + the run-command input are
+  // forms, so a click-away mustn't nuke them regardless.
   $effect(() => {
-    void setDismissOnBlur(mode !== "settings" && mode !== "run-command");
+    void setDismissOnBlur(
+      dismissMode === "always" &&
+        mode !== "settings" &&
+        mode !== "run-command",
+    );
   });
+
+  /** Hide after a successful launch — unless the user pinned the overlay open. */
+  async function dismissAfterLaunch() {
+    if (dismissMode !== "manual") await hideOverlay();
+  }
 
   // Footer key hints, per screen. `[key, description]`.
   const hints = $derived<[string, string][]>(
@@ -373,7 +389,12 @@
       } else {
         await runAction(action.id, repoPath);
       }
-      await hideOverlay();
+      await dismissAfterLaunch();
+      // Pinned open: reset the menu so the next action in this repo is one keypress.
+      if (dismissMode === "manual" && mode === "action-menu") {
+        actionQuery = "";
+        actionSel = 0;
+      }
     } catch (e) {
       status = `Launch failed: ${e}`;
     } finally {
@@ -386,7 +407,8 @@
     running = true;
     try {
       await runCommand(path, cmd, shell);
-      await hideOverlay();
+      if (dismissMode === "manual") backToList();
+      else await hideOverlay();
     } catch (e) {
       status = `Run failed: ${e}`;
     } finally {
@@ -399,7 +421,7 @@
     running = true;
     try {
       await runApp(app);
-      await hideOverlay();
+      await dismissAfterLaunch();
     } catch (e) {
       appStatus = `Launch failed: ${e}`;
     } finally {
@@ -654,7 +676,13 @@
       onback={() => (mode = "action-menu")}
     />
   {:else if mode === "settings"}
-    <Settings onback={backToList} onsaved={() => rescan()} />
+    <Settings
+      onback={backToList}
+      onsaved={() => {
+        rescan();
+        void getConfig().then((c) => (dismissMode = c.dismiss ?? "always"));
+      }}
+    />
   {/if}
 
   <footer

@@ -77,6 +77,7 @@ export function saveConfig(patch: {
   apps_hotkey?: string;
   roots?: string[];
   cache_ttl_secs?: number;
+  dismiss?: "always" | "keep_on_blur" | "manual";
   scan_max_depth?: number;
   collapse_nested?: boolean | "auto";
   /** "" clears the pin / template / shell back to auto. */

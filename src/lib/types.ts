@@ -55,6 +55,8 @@ export interface AppConfig {
   /** `collapse_nested`: `true` collapse, `false` list all, `"auto"` keep independent. */
   scan: { max_depth: number; collapse_nested: boolean | "auto" };
   cache_ttl_secs: number;
+  /** When the overlay closes itself. */
+  dismiss?: "always" | "keep_on_blur" | "manual";
   /** Pinned terminal emulator (name / path); absent = auto-probe. */
   terminal?: string | null;
   /** Raw `{{dir}}` / `{{cmd}}` invocation for an unknown terminal. */
