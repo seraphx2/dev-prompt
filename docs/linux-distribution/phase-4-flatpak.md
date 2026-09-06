@@ -105,21 +105,29 @@ SNI stack). Add `--talk-name=org.kde.StatusNotifierWatcher` and
       shows a "use your desktop's autostart" note instead. (Background-portal
       `RequestBackground` is the eventual real fix — deferred; needs `ashpd`
       or raw zbus and a sandbox to test.)
-- [x] Manifest written — `packaging/flatpak/io.github.seraphx2.devprompt.yaml`
-      with `finish-args`, the app module, desktop/metainfo/icon install rebased
-      to the app-id. Offline source generators + the tray module documented in
-      `packaging/flatpak/README.md`.
+- [x] Manifest written **and built** —
+      `packaging/flatpak/io.github.seraphx2.devprompt.yaml`, `flatpak-builder`
+      against GNOME 48. Clean through `npm ci` / `svelte-check` / `vite build` /
+      `cargo build --release` / the `libayatana-appindicator` tray module
+      (flathub/shared-modules submodule at `packaging/flatpak/shared-modules/`) /
+      every install step. `finish-args` + app-id-rebased desktop/metainfo/icons.
+- [x] Sandbox checks — `flatpak-spawn --host` executes host commands (the
+      launcher's core mechanism), `libayatana-appindicator3.so.1` is bundled,
+      exported `.desktop` + metainfo pass `desktop-file-validate` /
+      `appstreamcli validate`.
 
-**Pending a `flatpak-builder` run** (needs `flatpak-builder` + the multi-GB
-GNOME SDK; not on the dev box):
+**Pending** (needs an interactive session and/or a Flathub account):
 
-- [ ] Generate `cargo-sources.json` / `node-sources.json`; pin the
-      `libayatana-appindicator` module.
-- [ ] Build succeeds; `flatpak run` launches; tray shows on a non-GNOME distro.
-- [ ] Global hotkey via the `GlobalShortcuts` portal actually registers
-      (confirm `tauri-plugin-global-shortcut` supports it — may need an upstream
-      bump). Tray ▸ Show is the documented fallback.
-- [ ] Flathub PR: manifest passes `flatpak-builder --lint`, screenshots reachable
-      (merge `dev` → `main` first), permissions justified in the PR body.
+- [ ] Interactive smoke test — tray icon visible, overlay opens, launching a
+      host editor/terminal from the overlay works, on a non-GNOME desktop.
+- [ ] Global hotkey via the `GlobalShortcuts` portal actually registers (confirm
+      `tauri-plugin-global-shortcut` supports it — may need an upstream bump).
+      Tray ▸ Show is the documented fallback.
+- [ ] Bump `runtime-version` off EOL 48 → 49/50.
+- [ ] Generate `cargo-sources.json` / `node-sources.json` (needs
+      `flatpak-cargo-generator` / `flatpak-node-generator`); flip the manifest
+      back to `--offline` (it already is — just uncomment the source lines).
+- [ ] Flathub PR: `flatpak-builder --lint` clean, screenshots reachable (merge
+      `dev` → `main` first), permissions justified in the PR body.
 
 - [x] `docs/linux-distribution/README.md` status updated.

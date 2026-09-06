@@ -11,3 +11,7 @@ src-tauri/gen/
 .DS_Store
 Thumbs.db
 *.log
+
+# flatpak-builder local build (packaging/flatpak/)
+/.flatpak-builder/
+/build-dir/

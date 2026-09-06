@@ -9,9 +9,20 @@ io.github.seraphx2.devprompt.yaml   the manifest
 
 ## Status
 
-Written, **not yet built** — the dev box has `flatpak` but not
-`flatpak-builder`, and the GNOME SDK + rust/node extensions are a multi-GB
-pull. The app-code side is done and lives in the main tree:
+**Builds and installs locally** (`flatpak-builder`, GNOME 48). Verified:
+
+- full build is clean — `npm ci`, `svelte-check` (0 errors), `vite build`,
+  `cargo build --release`, the `libayatana-appindicator` tray module, and every
+  install step.
+- inside the sandbox: `flatpak-spawn --host` runs host commands (the core
+  mechanism), `libayatana-appindicator3.so.1` is bundled, and the exported
+  `.desktop` / metainfo pass `desktop-file-validate` + `appstreamcli validate`.
+
+Not yet done: an **interactive** smoke test (tray icon visible, global hotkey via
+the portal, launching a host editor from the overlay), the offline source
+generators, the runtime bump off EOL 48, and the Flathub PR.
+
+App-code side (in the main tree, active whether or not it ever runs sandboxed):
 
 - `flatpak-spawn --host` wrapping — `src-tauri/src/launch.rs` (`in_flatpak()`).
 - updater disabled under Flatpak — `updater_mode` returns `managed`.
@@ -31,11 +42,14 @@ pull. The app-code side is done and lives in the main tree:
    Uncomment the two `- *-sources.json` lines in the manifest. Regenerate both
    whenever `Cargo.lock` / `package-lock.json` change (worth a CI check).
 
-2. **Tray module** — add `libayatana-appindicator` (+ `libdbusmenu`,
-   `libayatana-indicator`). Easiest: reference
-   `shared-modules/libappindicator/libappindicator-gtk3-12.10.json` from
-   [flathub/shared-modules](https://github.com/flathub/shared-modules) as a git
-   submodule, or vendor the three tarballs with sha256s.
+2. **Tray module** — done: `packaging/flatpak/shared-modules/` is the
+   [flathub/shared-modules](https://github.com/flathub/shared-modules) submodule,
+   and the manifest pulls
+   `shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json`.
+   `git submodule update --init` after a fresh clone.
+
+3. **Runtime** — `runtime-version: '48'` is EOL; bump to `49` / `50` (the
+   `rust-stable` / `node22` extension versions follow the SDK automatically).
 
 ## Local build + test
 
