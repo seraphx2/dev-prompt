@@ -92,9 +92,10 @@ always the default when the overlay opens the normal way. Enter launches the
 selected app; `Ctrl+R` re-enumerates. Frecency: apps you launch from dev-prompt
 float to the top of the empty-query list.
 
-**Windows only.** On other platforms the `>` scope shows an empty list.
+Supported on **Windows** and **Linux**; on macOS the `>` scope shows an empty
+list.
 
-Discovery unions four sources and de-duplicates by executable path:
+**Windows** discovery unions four sources and de-duplicates by executable path:
 
 - **Start Menu** shortcuts (both the machine and per-user `Programs` trees)
 - **Store apps** (`Get-StartApps` AppUserModelIDs)
@@ -103,6 +104,16 @@ Discovery unions four sources and de-duplicates by executable path:
 
 Icons are extracted from the executables and cached under
 `%LOCALAPPDATA%\dev-prompt\cache\app-icons\`.
+
+**Linux** parses freedesktop `.desktop` entries from `$XDG_DATA_HOME/applications`,
+every `$XDG_DATA_DIRS/*/applications`, the Flatpak and Snap export directories,
+and any `extra_dirs`. Entries with `NoDisplay=true`, `Hidden=true`, a missing
+`TryExec`, or a non-`Application` type are skipped; a user override in
+`~/.local/share` shadows the system copy of the same id. Icons are resolved
+against the current icon theme (then Adwaita / breeze / Papirus / hicolor, then
+`pixmaps`) and embedded in `apps.json`. Launch goes through `gtk-launch`, so
+`Exec` field codes, `Terminal=true` and D-Bus activation are handled by the
+platform.
 
 ```yaml
 # config.yaml — managed from Settings ▸ "Index installed apps"

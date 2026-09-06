@@ -693,9 +693,11 @@ pub async fn run_app(
     exec: String,
     kind: String,
     args: Option<Vec<String>>,
+    terminal: Option<bool>,
 ) -> AppResult<()> {
     let kind = match kind.as_str() {
         "aumid" => crate::apps::AppKind::Aumid,
+        "desktop" => crate::apps::AppKind::Desktop,
         _ => crate::apps::AppKind::Exe,
     };
     let entry = AppEntry {
@@ -704,6 +706,7 @@ pub async fn run_app(
         kind,
         args: args.unwrap_or_default(),
         icon: None,
+        terminal: terminal.unwrap_or(false),
         source: String::new(),
     };
     tauri::async_runtime::spawn_blocking(move || apps::launch(&entry))

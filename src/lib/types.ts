@@ -129,13 +129,18 @@ export interface RepoListPayload {
 /** An installed application for the `>` launcher scope. */
 export interface AppEntry {
   name: string;
-  /** Executable path (`exe`) or AppUserModelID (`aumid`). */
+  /**
+   * Executable path (`exe`), AppUserModelID (`aumid`), or absolute `.desktop`
+   * file path (`desktop`, Linux).
+   */
   exec: string;
-  kind: "exe" | "aumid";
+  kind: "exe" | "aumid" | "desktop";
   args?: string[];
-  /** `data:image/png;base64,…` when an icon was extracted. */
+  /** `desktop` only: the entry declared `Terminal=true`. */
+  terminal?: boolean;
+  /** `data:image/png;base64,…` / `data:image/svg+xml;base64,…` icon. */
   icon?: string | null;
-  /** "start-menu" | "store" | "uninstall" | "scan". */
+  /** "start-menu" | "store" | "uninstall" | "scan" | "desktop". */
   source: string;
   /** Times launched from dev-prompt (frecency). */
   uses: number;

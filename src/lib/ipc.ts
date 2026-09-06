@@ -123,6 +123,7 @@ export function runApp(e: AppEntry): Promise<void> {
     exec: e.exec,
     kind: e.kind,
     args: e.args ?? null,
+    terminal: e.terminal ?? null,
   });
 }
 

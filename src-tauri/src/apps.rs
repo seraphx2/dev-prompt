@@ -1,18 +1,21 @@
 //! Installed-application discovery for the `>` app-launcher scope.
 //!
-//! Windows only. Enumeration is done by one embedded PowerShell script
-//! (`DISCOVER_PS1`) that unions four sources — `Get-StartApps` (Win32 + Store),
-//! Start Menu `.lnk` targets, the three Uninstall registry hives, and a bounded
-//! `*.exe` scan of `%LOCALAPPDATA%\Programs` plus any user `extra_dirs`. The
-//! script also extracts and disk-caches each app's icon.
+//! **Windows:** enumeration is one embedded PowerShell script (`DISCOVER_PS1`)
+//! that unions four sources — `Get-StartApps` (Win32 + Store), Start Menu `.lnk`
+//! targets, the three Uninstall registry hives, and a bounded `*.exe` scan of
+//! `%LOCALAPPDATA%\Programs` plus any user `extra_dirs`. The script also extracts
+//! and disk-caches each app's icon. Rust does the culling: [`keep_entry`] drops
+//! installer/updater/helper noise, [`prune_scanned`] keeps only the "main
+//! binary" per folder for the raw-scan tiers, [`dedupe_by_product`] collapses
+//! same-vendor duplicates, and [`dedupe`] merges entries that point at the same
+//! executable.
 //!
-//! Rust does the culling: [`keep_entry`] drops installer/updater/helper noise,
-//! [`prune_scanned`] keeps only the "main binary" per folder for the raw-scan
-//! tiers, [`dedupe_by_product`] collapses same-vendor duplicates, and [`dedupe`]
-//! merges entries that point at the same executable.
+//! **Linux:** [`discover`] parses freedesktop `.desktop` entries from the XDG
+//! application directories (plus Flatpak / Snap exports and `extra_dirs`); see
+//! the `linux` submodule. Launch goes through `gtk-launch` so `Exec` field
+//! codes, `Terminal=true` and D-Bus activation are handled by the platform.
 //!
-//! On non-Windows [`discover`] returns an empty list — the `>` scope simply
-//! shows nothing.
+//! **Other platforms:** [`discover`] returns an empty list.
 
 use serde::{Deserialize, Serialize};
 
@@ -27,21 +30,32 @@ pub enum AppKind {
     Exe,
     /// `exec` is an AppUserModelID, launched via `explorer shell:AppsFolder\…`.
     Aumid,
+    /// `exec` is an absolute path to a freedesktop `.desktop` file (Linux).
+    /// Launched via `gtk-launch` by its id; `args` holds the parsed `Exec`
+    /// line (field codes stripped) as a fallback, `terminal` mirrors
+    /// `Terminal=` for that fallback.
+    Desktop,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppEntry {
     pub name: String,
-    /// Executable path (`Exe`) or AppUserModelID (`Aumid`).
+    /// Executable path (`Exe`), AppUserModelID (`Aumid`) or `.desktop` path
+    /// (`Desktop`).
     pub exec: String,
     pub kind: AppKind,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
-    /// `data:image/png;base64,…` when an icon was extracted.
+    /// `data:image/png;base64,…` / `data:image/svg+xml;base64,…` when an icon
+    /// was resolved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
-    /// `start-menu` | `store` | `uninstall` | `scan` | `extra`.
+    /// `Desktop` only: the entry declared `Terminal=true`. Ignored unless the
+    /// `gtk-launch` / `gio` fallbacks are all unavailable.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub terminal: bool,
+    /// `start-menu` | `store` | `uninstall` | `scan` | `extra` | `desktop`.
     pub source: String,
 }
 // Launch frecency is *not* a field here — it's derived per read from
@@ -52,7 +66,7 @@ pub struct AppEntry {
 fn source_rank(source: &str) -> u8 {
     match source {
         "start-menu" => 4,
-        "store" => 3,
+        "store" | "desktop" => 3,
         "uninstall" => 2,
         _ => 1, // "scan" / "extra"
     }
@@ -147,6 +161,7 @@ pub fn dedupe(entries: Vec<AppEntry>) -> Vec<AppEntry> {
         let key = match e.kind {
             AppKind::Exe => format!("exe:{}", e.exec.replace('/', "\\").to_lowercase()),
             AppKind::Aumid => format!("aumid:{}", e.exec.to_lowercase()),
+            AppKind::Desktop => format!("desktop:{}", e.exec.to_lowercase()),
         };
         match best.get_mut(&key) {
             None => {
@@ -339,9 +354,687 @@ fn run_powershell(script: &str) -> AppResult<String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+pub fn discover(cfg: &Config) -> Vec<AppEntry> {
+    if !cfg.apps.enabled {
+        return Vec::new();
+    }
+    linux::discover(cfg)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn discover(_cfg: &Config) -> Vec<AppEntry> {
     Vec::new()
+}
+
+// --- Linux: freedesktop .desktop discovery ------------------------------
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use super::{AppEntry, AppKind};
+    use crate::config::Config;
+    use crate::error::{AppError, AppResult};
+    use crate::rules::which;
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    /// Skip embedding an icon file larger than this — keeps `apps.json` bounded
+    /// when a theme only ships an oversized PNG. Themed SVGs are far smaller.
+    const ICON_MAX_BYTES: u64 = 256 * 1024;
+
+    /// The `Exec` field codes (see the Desktop Entry spec §"The Exec key").
+    /// All are dropped — dev-prompt launches apps with no document/URI argument.
+    const FIELD_CODES: &[&str] = &[
+        "%f", "%F", "%u", "%U", "%i", "%c", "%k", "%d", "%D", "%n", "%N", "%v", "%m",
+    ];
+
+    pub fn discover(cfg: &Config) -> Vec<AppEntry> {
+        let excludes: Vec<String> = cfg
+            .apps
+            .exclude
+            .iter()
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        // id -> entry; directories are walked in precedence order and the first
+        // writer of an id wins (an `~/.local/share` override shadows `/usr`).
+        let mut by_id: BTreeMap<String, AppEntry> = BTreeMap::new();
+        for dir in app_dirs(cfg) {
+            for (id, file) in desktop_files(&dir) {
+                if by_id.contains_key(&id) {
+                    continue;
+                }
+                let Some(entry) = parse_entry(&file, &id) else {
+                    continue;
+                };
+                let hay = format!("{}\n{}", entry.name.to_lowercase(), id.to_lowercase());
+                if excludes.iter().any(|x| hay.contains(x)) {
+                    continue;
+                }
+                by_id.insert(id, entry);
+            }
+        }
+
+        let mut out: Vec<AppEntry> = by_id.into_values().collect();
+        out.sort_by_key(|a| a.name.to_lowercase());
+        out
+    }
+
+    /// Launch a `.desktop` entry. Prefers `gtk-launch` (part of gtk3, already a
+    /// hard runtime dep) so `Exec` field codes, `Terminal=true`, D-Bus
+    /// activation and startup notification are all the platform's problem, not
+    /// ours. Falls back to `gio launch`, then to spawning the parsed `Exec`.
+    pub fn launch(entry: &AppEntry) -> AppResult<()> {
+        let id = Path::new(&entry.exec)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        if !id.is_empty() && which("gtk-launch").is_some() {
+            return crate::launch::spawn("gtk-launch", &[id], "");
+        }
+        if which("gio").is_some() {
+            return crate::launch::spawn("gio", &["launch".into(), entry.exec.clone()], "");
+        }
+
+        // Last resort: run the parsed Exec ourselves.
+        let (prog, rest) = entry
+            .args
+            .split_first()
+            .ok_or_else(|| AppError::msg("desktop entry has no runnable Exec"))?;
+        if entry.terminal {
+            let term = std::env::var("TERMINAL")
+                .ok()
+                .filter(|t| !t.is_empty() && which(t).is_some())
+                .or_else(|| {
+                    [
+                        "x-terminal-emulator",
+                        "alacritty",
+                        "kitty",
+                        "foot",
+                        "wezterm",
+                        "gnome-terminal",
+                        "konsole",
+                        "xterm",
+                    ]
+                    .iter()
+                    .find(|t| which(t).is_some())
+                    .map(|s| s.to_string())
+                })
+                .ok_or_else(|| AppError::msg("no terminal emulator for a Terminal=true app"))?;
+            let mut a = vec!["-e".to_string()];
+            a.push(prog.clone());
+            a.extend(rest.iter().cloned());
+            crate::launch::spawn(&term, &a, "")
+        } else {
+            crate::launch::spawn(prog, rest, "")
+        }
+    }
+
+    /// XDG application directories, highest precedence first: user `extra_dirs`,
+    /// then `$XDG_DATA_HOME` (+ its Flatpak exports), then each `$XDG_DATA_DIRS`,
+    /// then the system Flatpak and Snap export roots.
+    fn app_dirs(cfg: &Config) -> Vec<PathBuf> {
+        let mut dirs: Vec<PathBuf> = Vec::new();
+
+        for d in &cfg.apps.extra_dirs {
+            let d = d.trim();
+            if !d.is_empty() {
+                push_dir(&mut dirs, crate::config::expand_path(d));
+            }
+        }
+
+        let home = dirs::home_dir();
+        let data_home = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| home.as_ref().map(|h| h.join(".local/share")));
+        if let Some(dh) = &data_home {
+            push_dir(&mut dirs, dh.join("applications"));
+            push_dir(&mut dirs, dh.join("flatpak/exports/share/applications"));
+        }
+
+        let data_dirs = std::env::var("XDG_DATA_DIRS")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+        for base in data_dirs.split(':').filter(|s| !s.is_empty()) {
+            push_dir(&mut dirs, Path::new(base).join("applications"));
+        }
+
+        push_dir(
+            &mut dirs,
+            PathBuf::from("/var/lib/flatpak/exports/share/applications"),
+        );
+        push_dir(
+            &mut dirs,
+            PathBuf::from("/var/lib/snapd/desktop/applications"),
+        );
+        dirs
+    }
+
+    fn push_dir(dirs: &mut Vec<PathBuf>, p: PathBuf) {
+        if p.is_dir() && !dirs.iter().any(|d| d == &p) {
+            dirs.push(p);
+        }
+    }
+
+    /// `(desktop-file id, path)` for every `*.desktop` under `root`. The id is
+    /// the path relative to `root` with `/` turned into `-` (spec §"Desktop File
+    /// ID"); subdirectories are walked a few levels deep.
+    fn desktop_files(root: &Path) -> Vec<(String, PathBuf)> {
+        let mut out = Vec::new();
+        walk(root, root, 0, &mut out);
+        out
+    }
+
+    fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<(String, PathBuf)>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for ent in rd.flatten() {
+            let Ok(ft) = ent.file_type() else { continue };
+            let path = ent.path();
+            if ft.is_dir() {
+                if depth < 3 {
+                    walk(root, &path, depth + 1, out);
+                }
+            } else if path.extension().and_then(|e| e.to_str()) == Some("desktop") {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    let id = rel
+                        .to_string_lossy()
+                        .strip_suffix(".desktop")
+                        .unwrap_or_default()
+                        .replace('/', "-");
+                    if !id.is_empty() {
+                        out.push((id, path));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Parse one `.desktop` file's `[Desktop Entry]` group into an [`AppEntry`],
+    /// or `None` if it isn't a launchable, visible application.
+    fn parse_entry(file: &Path, id: &str) -> Option<AppEntry> {
+        let text = std::fs::read_to_string(file).ok()?;
+        let mut kv: BTreeMap<String, String> = BTreeMap::new();
+        let mut in_group = false;
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if line.starts_with('[') && line.ends_with(']') {
+                in_group = line == "[Desktop Entry]";
+                continue;
+            }
+            if !in_group {
+                continue;
+            }
+            if let Some((k, v)) = line.split_once('=') {
+                kv.insert(k.trim().to_string(), v.trim().to_string());
+            }
+        }
+
+        if kv.get("Type").map(|s| s.as_str()) != Some("Application") {
+            return None;
+        }
+        if is_true(kv.get("NoDisplay")) || is_true(kv.get("Hidden")) {
+            return None;
+        }
+        let exec_line = kv.get("Exec").map(String::as_str).unwrap_or("").trim();
+        if exec_line.is_empty() {
+            return None;
+        }
+        if let Some(te) = kv.get("TryExec").map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            let ok = if te.contains('/') {
+                Path::new(te).is_file()
+            } else {
+                which(te).is_some()
+            };
+            if !ok {
+                return None;
+            }
+        }
+
+        let name = localized(&kv, "Name")
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| id.to_string());
+        let args = parse_exec(exec_line);
+        if args.is_empty() {
+            return None;
+        }
+
+        Some(AppEntry {
+            name,
+            exec: file.to_string_lossy().into_owned(),
+            kind: AppKind::Desktop,
+            args,
+            icon: kv
+                .get("Icon")
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .and_then(resolve_icon),
+            terminal: is_true(kv.get("Terminal")),
+            source: "desktop".into(),
+        })
+    }
+
+    fn is_true(v: Option<&String>) -> bool {
+        v.map(|s| s.trim().eq_ignore_ascii_case("true")).unwrap_or(false)
+    }
+
+    /// `Name`, preferring a `Name[xx]` / `Name[xx_YY]` that matches `$LANG`.
+    fn localized(kv: &BTreeMap<String, String>, key: &str) -> Option<String> {
+        let lang = std::env::var("LC_MESSAGES")
+            .or_else(|_| std::env::var("LANG"))
+            .unwrap_or_default();
+        let lang = lang.split('.').next().unwrap_or("").trim();
+        if !lang.is_empty() {
+            if let Some(v) = kv.get(&format!("{key}[{lang}]")) {
+                return Some(v.clone());
+            }
+            if let Some((short, _)) = lang.split_once('_') {
+                if let Some(v) = kv.get(&format!("{key}[{short}]")) {
+                    return Some(v.clone());
+                }
+            }
+        }
+        kv.get(key).cloned()
+    }
+
+    /// Split an `Exec` value into argv, honouring the spec's double-quote
+    /// quoting (`\\` and `\"` escapes inside quotes) and dropping field codes.
+    /// `%%` becomes a literal `%`; any other `%x` is stripped.
+    fn parse_exec(s: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let mut cur = String::new();
+        let mut chars = s.chars().peekable();
+        let mut in_quote = false;
+        let mut has_tok = false;
+
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => {
+                    in_quote = !in_quote;
+                    has_tok = true;
+                }
+                '\\' if in_quote => {
+                    if let Some(&n) = chars.peek() {
+                        if n == '"' || n == '\\' || n == '`' || n == '$' {
+                            cur.push(n);
+                            chars.next();
+                        } else {
+                            cur.push('\\');
+                        }
+                    } else {
+                        cur.push('\\');
+                    }
+                }
+                c if c.is_whitespace() && !in_quote => {
+                    if has_tok {
+                        out.push(std::mem::take(&mut cur));
+                        has_tok = false;
+                    }
+                }
+                _ => {
+                    cur.push(c);
+                    has_tok = true;
+                }
+            }
+        }
+        if has_tok {
+            out.push(cur);
+        }
+
+        out.into_iter()
+            .filter_map(|tok| {
+                if FIELD_CODES.contains(&tok.as_str()) {
+                    return None;
+                }
+                let cleaned = strip_field_codes(&tok);
+                if cleaned.is_empty() && !tok.is_empty() {
+                    None
+                } else {
+                    Some(cleaned)
+                }
+            })
+            .collect()
+    }
+
+    /// Replace `%%` → `%` and remove any remaining `%<char>` inside a token.
+    fn strip_field_codes(tok: &str) -> String {
+        if !tok.contains('%') {
+            return tok.to_string();
+        }
+        let mut out = String::with_capacity(tok.len());
+        let mut chars = tok.chars();
+        while let Some(c) = chars.next() {
+            if c == '%' {
+                // `%%` is a literal percent; any other `%x` is a field code — drop it.
+                if let Some('%') = chars.next() {
+                    out.push('%');
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    // --- icon resolution --------------------------------------------------
+
+    /// Resolve an `Icon=` value to a `data:` URI: an absolute path is used
+    /// directly, otherwise the icon-theme search path is walked (current theme,
+    /// then Adwaita / breeze / Papirus, then hicolor, then `pixmaps`).
+    fn resolve_icon(name: &str) -> Option<String> {
+        if name.is_empty() {
+            return None;
+        }
+        let p = Path::new(name);
+        if p.is_absolute() {
+            return p.is_file().then(|| encode_icon(p)).flatten();
+        }
+
+        for cand in icon_candidates(name) {
+            if cand.is_file() {
+                if let Some(uri) = encode_icon(&cand) {
+                    return Some(uri);
+                }
+            }
+        }
+        None
+    }
+
+    fn icon_roots() -> Vec<PathBuf> {
+        let mut roots = Vec::new();
+        if let Some(h) = dirs::home_dir() {
+            roots.push(h.join(".local/share/icons"));
+            roots.push(h.join(".icons"));
+        }
+        let data_dirs = std::env::var("XDG_DATA_DIRS")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+        for base in data_dirs.split(':').filter(|s| !s.is_empty()) {
+            roots.push(Path::new(base).join("icons"));
+        }
+        roots.push(PathBuf::from("/usr/share/pixmaps"));
+        roots
+    }
+
+    fn icon_themes() -> Vec<String> {
+        let mut themes: Vec<String> = Vec::new();
+        if let Some(t) = configured_icon_theme() {
+            themes.push(t);
+        }
+        for d in ["Adwaita", "breeze", "Papirus", "hicolor", "gnome"] {
+            if !themes.iter().any(|t| t == d) {
+                themes.push(d.to_string());
+            }
+        }
+        themes
+    }
+
+    /// The GTK icon theme from `settings.ini`, else `gsettings`, else `None`.
+    fn configured_icon_theme() -> Option<String> {
+        let cfg = dirs::config_dir()?;
+        for f in ["gtk-4.0/settings.ini", "gtk-3.0/settings.ini"] {
+            if let Ok(text) = std::fs::read_to_string(cfg.join(f)) {
+                for line in text.lines() {
+                    if let Some(v) = line.trim().strip_prefix("gtk-icon-theme-name") {
+                        let v = v.trim_start_matches([' ', '=']).trim();
+                        if !v.is_empty() {
+                            return Some(v.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        let out = std::process::Command::new("gsettings")
+            .args(["get", "org.gnome.desktop.interface", "icon-theme"])
+            .output()
+            .ok()?;
+        let s = String::from_utf8_lossy(&out.stdout);
+        let s = s.trim().trim_matches(['\'', '"']).trim();
+        (!s.is_empty()).then(|| s.to_string())
+    }
+
+    fn icon_candidates(name: &str) -> Vec<PathBuf> {
+        // Mid-size rasters first (crisp at the 20px the row renders without
+        // bloating the cache), then scalable SVG, then the extremes.
+        const SIZES: &[&str] = &[
+            "48x48", "64x64", "96x96", "128x128", "scalable", "256x256", "32x32", "512x512",
+            "24x24", "16x16",
+        ];
+        const EXTS: &[&str] = &["png", "svg"];
+
+        let mut out = Vec::new();
+        let roots = icon_roots();
+        let themes = icon_themes();
+
+        for root in &roots {
+            let is_pixmaps = root.ends_with("pixmaps");
+            if is_pixmaps {
+                for ext in EXTS.iter().chain(std::iter::once(&"xpm")) {
+                    out.push(root.join(format!("{name}.{ext}")));
+                }
+                continue;
+            }
+            for theme in &themes {
+                for size in SIZES {
+                    for ext in EXTS {
+                        // freedesktop / hicolor layout
+                        out.push(root.join(theme).join(size).join("apps").join(format!("{name}.{ext}")));
+                        // breeze layout
+                        out.push(root.join(theme).join("apps").join(size).join(format!("{name}.{ext}")));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn encode_icon(path: &Path) -> Option<String> {
+        let meta = std::fs::metadata(path).ok()?;
+        if meta.len() == 0 || meta.len() > ICON_MAX_BYTES {
+            return None;
+        }
+        let mime = match path.extension().and_then(|e| e.to_str()) {
+            Some("svg") => "image/svg+xml",
+            Some("png") => "image/png",
+            _ => return None, // xpm et al. — browsers can't render these
+        };
+        let bytes = std::fs::read(path).ok()?;
+        Some(format!("data:{mime};base64,{}", b64(&bytes)))
+    }
+
+    /// Standard-alphabet base64 with padding (no dependency pulled in for this).
+    fn b64(data: &[u8]) -> String {
+        const T: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut s = String::with_capacity(data.len().div_ceil(3) * 4);
+        for chunk in data.chunks(3) {
+            let b0 = chunk[0] as u32;
+            let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+            let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+            let n = (b0 << 16) | (b1 << 8) | b2;
+            s.push(T[(n >> 18 & 63) as usize] as char);
+            s.push(T[(n >> 12 & 63) as usize] as char);
+            s.push(if chunk.len() > 1 {
+                T[(n >> 6 & 63) as usize] as char
+            } else {
+                '='
+            });
+            s.push(if chunk.len() > 2 {
+                T[(n & 63) as usize] as char
+            } else {
+                '='
+            });
+        }
+        s
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        struct TmpDir(PathBuf);
+        impl TmpDir {
+            fn new(tag: &str) -> Self {
+                let p = std::env::temp_dir().join(format!(
+                    "dev-prompt-apps-{tag}-{}-{:?}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                ));
+                std::fs::create_dir_all(&p).unwrap();
+                TmpDir(p)
+            }
+            fn write(&self, rel: &str, body: &str) -> PathBuf {
+                let f = self.0.join(rel);
+                std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+                std::fs::write(&f, body).unwrap();
+                f
+            }
+        }
+        impl Drop for TmpDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        #[test]
+        fn parse_exec_strips_field_codes_and_quotes() {
+            assert_eq!(parse_exec("/usr/bin/foo %U"), vec!["/usr/bin/foo"]);
+            assert_eq!(
+                parse_exec("foo --flag %F --bar"),
+                vec!["foo", "--flag", "--bar"]
+            );
+            assert_eq!(
+                parse_exec(r#""/opt/My App/run" --name "a b" %f"#),
+                vec!["/opt/My App/run", "--name", "a b"]
+            );
+            assert_eq!(parse_exec("env A=1 prog %U"), vec!["env", "A=1", "prog"]);
+            // %% is a literal percent
+            assert_eq!(parse_exec("prog 100%%done"), vec!["prog", "100%done"]);
+        }
+
+        #[test]
+        fn parse_entry_filters_hidden_nondisplay_wrongtype_and_missing_tryexec() {
+            let d = TmpDir::new("filter");
+            let good = d.write(
+                "ok.desktop",
+                "[Desktop Entry]\nType=Application\nName=OK\nExec=/bin/true %U\n",
+            );
+            assert!(parse_entry(&good, "ok").is_some());
+
+            let nd = d.write(
+                "nd.desktop",
+                "[Desktop Entry]\nType=Application\nName=ND\nExec=/bin/true\nNoDisplay=true\n",
+            );
+            assert!(parse_entry(&nd, "nd").is_none());
+
+            let hidden = d.write(
+                "h.desktop",
+                "[Desktop Entry]\nType=Application\nName=H\nExec=/bin/true\nHidden=true\n",
+            );
+            assert!(parse_entry(&hidden, "h").is_none());
+
+            let link = d.write(
+                "l.desktop",
+                "[Desktop Entry]\nType=Link\nName=L\nURL=https://example.com\n",
+            );
+            assert!(parse_entry(&link, "l").is_none());
+
+            let te = d.write(
+                "te.desktop",
+                "[Desktop Entry]\nType=Application\nName=TE\nExec=/bin/true\nTryExec=definitely-not-a-real-binary-xyz\n",
+            );
+            assert!(parse_entry(&te, "te").is_none());
+        }
+
+        #[test]
+        fn parse_entry_prefers_localized_name_and_reads_terminal() {
+            let d = TmpDir::new("name");
+            let f = d.write(
+                "x.desktop",
+                "[Desktop Entry]\nType=Application\nName=Plain\nName[fr]=Français\nExec=htop\nTerminal=true\n",
+            );
+            std::env::set_var("LANG", "fr_FR.UTF-8");
+            let e = parse_entry(&f, "x").unwrap();
+            assert_eq!(e.name, "Français");
+            assert!(e.terminal);
+            assert_eq!(e.kind, AppKind::Desktop);
+            std::env::remove_var("LANG");
+        }
+
+        #[test]
+        fn discover_id_precedence_first_dir_wins() {
+            let hi = TmpDir::new("hi");
+            let lo = TmpDir::new("lo");
+            hi.write(
+                "editor.desktop",
+                "[Desktop Entry]\nType=Application\nName=HiEditor\nExec=/bin/true\n",
+            );
+            lo.write(
+                "editor.desktop",
+                "[Desktop Entry]\nType=Application\nName=LoEditor\nExec=/bin/true\n",
+            );
+            let mut cfg = crate::config::bundled_defaults();
+            cfg.apps.enabled = true;
+            cfg.apps.extra_dirs = vec![
+                hi.0.to_string_lossy().into_owned(),
+                lo.0.to_string_lossy().into_owned(),
+            ];
+            let apps = discover(&cfg);
+            let e = apps.iter().find(|a| a.args == vec!["/bin/true"]).unwrap();
+            assert_eq!(e.name, "HiEditor");
+            assert_eq!(apps.iter().filter(|a| a.exec.ends_with("editor.desktop")).count(), 1);
+        }
+
+        #[test]
+        fn discover_honours_exclude() {
+            let d = TmpDir::new("excl");
+            d.write(
+                "keepme.desktop",
+                "[Desktop Entry]\nType=Application\nName=KeepMe\nExec=/bin/true\n",
+            );
+            d.write(
+                "zoomy.desktop",
+                "[Desktop Entry]\nType=Application\nName=Zoomy\nExec=/bin/true\n",
+            );
+            let mut cfg = crate::config::bundled_defaults();
+            cfg.apps.enabled = true;
+            cfg.apps.extra_dirs = vec![d.0.to_string_lossy().into_owned()];
+            cfg.apps.exclude = vec!["zoom".into()];
+            let names: Vec<_> = discover(&cfg).into_iter().map(|a| a.name).collect();
+            assert!(names.contains(&"KeepMe".to_string()));
+            assert!(!names.iter().any(|n| n == "Zoomy"));
+        }
+
+        #[test]
+        fn resolve_icon_takes_absolute_svg_path() {
+            let d = TmpDir::new("icon");
+            let svg = d.write("a/b/logo.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>");
+            let uri = resolve_icon(&svg.to_string_lossy()).unwrap();
+            assert!(uri.starts_with("data:image/svg+xml;base64,"));
+        }
+
+        #[test]
+        fn b64_matches_known_vectors() {
+            assert_eq!(b64(b""), "");
+            assert_eq!(b64(b"f"), "Zg==");
+            assert_eq!(b64(b"fo"), "Zm8=");
+            assert_eq!(b64(b"foo"), "Zm9v");
+            assert_eq!(b64(b"foob"), "Zm9vYg==");
+            assert_eq!(b64(b"foobar"), "Zm9vYmFy");
+        }
+    }
 }
 
 // --- raw JSON from the PowerShell script ----------------------------------
@@ -427,6 +1120,7 @@ impl RawApp {
                 kind,
                 args,
                 icon,
+                terminal: false,
                 source,
             },
             product: self.product.unwrap_or_default().trim().to_string(),
@@ -452,6 +1146,18 @@ pub fn launch(entry: &AppEntry) -> AppResult<()> {
             &[format!("shell:AppsFolder\\{}", entry.exec)],
             "",
         ),
+        AppKind::Desktop => {
+            #[cfg(target_os = "linux")]
+            {
+                linux::launch(entry)
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                Err(crate::error::AppError::msg(
+                    "desktop-entry launch is Linux-only",
+                ))
+            }
+        }
     }
 }
 
@@ -470,6 +1176,7 @@ mod tests {
             kind: AppKind::Exe,
             args: vec![],
             icon: icon.map(String::from),
+            terminal: false,
             source: source.into(),
         }
     }
