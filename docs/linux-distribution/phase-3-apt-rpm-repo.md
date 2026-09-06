@@ -65,8 +65,10 @@ Jobs:
      last 10 versions, `apt-ftparchive packages` → `Packages`(+`.gz`),
      `apt-ftparchive release` → `Release`, `gpg --clearsign` → `InRelease` and
      `gpg -abs` → `Release.gpg`.
-   - **rpm:** copy `.rpm` into `site/rpm/`, prune to 10, `createrepo_c
-     --update site/rpm`, `gpg --detach-sign --armor site/rpm/repodata/repomd.xml`.
+   - **rpm:** copy `.rpm` into `site/rpm/`, prune to 10, `rpm --addsign` every
+     package with the repo key (dnf's `gpgcheck=1` verifies the *package* sig,
+     not just the metadata), `createrepo_c site/rpm`, `gpg --detach-sign --armor
+     site/rpm/repodata/repomd.xml`.
    - **pacman:** copy `*.pkg.tar.zst` into `site/arch/`, prune to 10, `repo-add`
      the `.db` (via `docker run archlinux` since the runner has no `repo-add`),
      materialise the `$repo.db`/`$repo.files` symlinks into real files (Pages
@@ -146,10 +148,17 @@ own that. Apply option 1 or 2 from the roadmap README's updater section
       auto-dispatched from `release.yml` — validated end-to-end on `v2026.906.2`
       (all endpoints 200, signatures verify).
 - [x] Arch: installed on the maintainer's CachyOS box from the live repo.
-- [ ] Debian + Fedora containers: `apt`/`dnf install` then `upgrade` between two
-      published versions. One-time sanity check — the metadata is standard
-      `apt-ftparchive` / `createrepo_c` output and the sigs verify, so low risk;
-      not worth a standing CI test.
+- [x] Debian container (`debian:12`): added the repo per the README, installed
+      `dev-prompt=2026.906.1`, `apt-get install --only-upgrade` → `2026.906.2`.
+      `InRelease` GPG-verifies; file layout correct. One-time check, no CI test.
+- [x] Fedora container (`fedora:41`, dnf5): same install→upgrade cycle. **This
+      surfaced a bug** — `build-repo.sh` signed only the repo metadata, not the
+      individual `.rpm`s, so `dnf`'s `gpgcheck=1` rejected every package with
+      "The package is not signed." Fixed: `build-repo.sh` now `rpm --addsign`s
+      each package with the repo key before `createrepo_c`; `repo.yml` installs
+      `rpm` for `rpmsign`. Re-verified end-to-end (sign on `ubuntu:24.04` = the
+      runner, install+upgrade on clean `fedora:41`). apt was unaffected because
+      it trusts the signed `Release` hash-chain, not per-`.deb` signatures.
 - [x] `README.md` (repo root) — "Install" section with the three blocks.
 - [x] `docs/linux-distribution/README.md` status + key table updated.
 

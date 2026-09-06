@@ -16,7 +16,9 @@ downloads the release `.deb`/`.rpm`, imports the signing key, checks out
 
 ## Signing key
 
-One GPG keypair, **repo metadata only** — separate from the minisign updater key.
+One GPG keypair — signs the apt `Release`, the rpm `repomd.xml`, the pacman
+`.db`, **and each individual `.rpm`** (`rpm --addsign`, required for dnf's
+`gpgcheck=1`). Separate from the minisign updater key.
 
 - Public: `dev-prompt-repo.asc` here, key id `E3C07CD21A9A9BA5` (hardcoded in
   `repo.yml` and `build-repo.sh` — a key id isn't secret).
@@ -37,5 +39,6 @@ cd /path/to/repo
 GNUPGHOME=... packaging/repo/build-repo.sh /tmp/art /tmp/site E3C07CD21A9A9BA5
 ```
 
-Needs `apt-ftparchive` (apt-utils), `createrepo_c`, `gpg`; `repo-add` if present,
-else `docker`.
+Needs `apt-ftparchive` (apt-utils), `createrepo_c`, `gpg`, `rpm`/`rpmsign`
+(`rpm-sign` on Fedora, `rpm` on Debian/Ubuntu); `repo-add` if present, else
+`docker`.

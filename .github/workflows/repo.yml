@@ -83,7 +83,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            apt-utils createrepo-c gnupg
+            apt-utils createrepo-c gnupg rpm
 
       - name: Fetch release artifacts
         env:

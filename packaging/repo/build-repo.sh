@@ -9,10 +9,10 @@
 # Run from the repo root (needs packaging/repo/dev-prompt-repo.asc).
 # <site-dir> is a checkout / worktree of the gh-pages branch.
 #
-# Tools: apt-ftparchive (apt-utils), createrepo_c, gpg, and repo-add — the last
-# from `pacman`; if it isn't on PATH the script runs it in a throwaway
-# `archlinux` container via docker (so this works on a Debian CI runner and on
-# an Arch box unchanged).
+# Tools: apt-ftparchive (apt-utils), createrepo_c, gpg, rpm/rpmsign (rpm-sign on
+# Fedora, rpm on Debian/Ubuntu), and repo-add — the last from `pacman`; if it
+# isn't on PATH the script runs it in a throwaway `archlinux` container via
+# docker (so this works on a Debian CI runner and on an Arch box unchanged).
 set -euo pipefail
 
 ARTIFACTS=${1:?artifacts dir}
@@ -73,6 +73,20 @@ true
 )
 
 # ------------------------------------------------------------------------- rpm
+# Sign every package. dnf's `gpgcheck=1` (dnf4 and dnf5) verifies the *package*
+# signature, not just the repo metadata — an unsigned .rpm is refused at install
+# with "The package is not signed." Signing is embedded in the rpm header, so it
+# must happen before createrepo_c reads the checksums. Re-signing an already
+# signed package just replaces the header sig, so signing all of them every run
+# is fine (KEEP caps this at a handful of ~4 MB files).
+# Override %__gpg_sign_cmd with an absolute gpg path (rpm doesn't PATH-search it)
+# and loopback/batch flags so it never tries to prompt on a passphrase-less key.
+rpm_sign_cmd="$(command -v gpg) --no-verbose --no-armor --batch --pinentry-mode loopback -u \"%{_gpg_name}\" -sbo %{__signature_filename} --digest-algo sha256 %{__plaintext_filename}"
+for f in "$SITE"/rpm/*.rpm; do
+  rpm --define "_gpg_name $KEYID" \
+      --define "__gpg_sign_cmd $rpm_sign_cmd" \
+      --addsign "$f"
+done
 rm -rf "$SITE/rpm/repodata"
 createrepo_c "$SITE/rpm"
 "${gpg_bin[@]}" --detach-sign --armor "$SITE/rpm/repodata/repomd.xml"
