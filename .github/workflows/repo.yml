@@ -29,7 +29,7 @@ jobs:
     container: archlinux:latest
     steps:
       - name: Base tools
-        run: pacman -Sy --noconfirm --needed base-devel git pacman-contrib
+        run: pacman -Sy --noconfirm --needed base-devel git
 
       - uses: actions/checkout@v5
 
@@ -45,16 +45,14 @@ jobs:
         run: |
           set -eux
           v="${{ steps.v.outputs.value }}"
-          install -d -o nobody /tmp/build
+          useradd -m builder
+          install -d -o builder -g builder /tmp/build
           cp packaging/arch/PKGBUILD-bin /tmp/build/PKGBUILD
           sed -i "s/^pkgver=.*/pkgver=$v/" /tmp/build/PKGBUILD
-          chown -R nobody:nobody /tmp/build
-          # nobody can't write $HOME; give makepkg a scratch one
-          su nobody -s /bin/bash -c '
-            export HOME=/tmp/build
-            cd /tmp/build
-            updpkgsums
-            makepkg --noconfirm --nodeps --clean'
+          chown -R builder:builder /tmp/build
+          # PKGBUILD-bin keeps sha256sums=('SKIP'); the source is our own release
+          # over HTTPS. --nodeps: we're only repackaging the prebuilt .deb.
+          su builder -c 'cd /tmp/build && makepkg --noconfirm --nodeps --clean'
           mkdir -p out && cp /tmp/build/*.pkg.tar.zst out/
 
       - uses: actions/upload-artifact@v4
