@@ -385,6 +385,7 @@ pub fn run() {
             commands::open_rules_file,
             commands::open_releases_page,
             commands::set_dismiss_on_blur,
+            commands::updater_mode,
             commands::set_update_hint,
             commands::get_autostart,
             commands::set_autostart,

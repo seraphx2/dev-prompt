@@ -768,6 +768,32 @@ fn clear_startup_approved() {
     }
 }
 
+/// How this build receives updates — the frontend gates the in-app updater on
+/// it so a package-manager install never tries (and fails) to replace its own
+/// root-owned binary.
+///
+/// - `"self"`      the bundle can swap itself out (AppImage, NSIS/MSI, macOS .app)
+/// - `"managed"`   a package manager owns it: `.deb` / `.rpm`, or any other
+///                 non-AppImage Linux install (assume a distro / AUR package)
+/// - `"unmanaged"` nothing updates it (Windows portable zip, a bare binary)
+///
+/// Reads the `__TAURI_BUNDLE_TYPE` marker the bundler patches in; an unbundled
+/// `cargo run` reports `"managed"` on Linux / `"unmanaged"` elsewhere, which is
+/// fine — dev builds don't want the update UI either.
+#[tauri::command]
+pub fn updater_mode() -> &'static str {
+    use tauri::utils::{config::BundleType, platform::bundle_type};
+    match bundle_type() {
+        Some(
+            BundleType::AppImage | BundleType::Nsis | BundleType::Msi | BundleType::App
+            | BundleType::Dmg,
+        ) => "self",
+        Some(BundleType::Deb | BundleType::Rpm) => "managed",
+        None if cfg!(target_os = "linux") => "managed",
+        None => "unmanaged",
+    }
+}
+
 /// Reflect update availability in the tray tooltip. `version` = `None` resets it.
 #[tauri::command]
 pub fn set_update_hint(app: AppHandle, version: Option<String>) {
