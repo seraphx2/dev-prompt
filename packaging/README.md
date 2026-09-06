@@ -33,10 +33,12 @@ AppStream metainfo. Shipped in the deb/rpm/AppImage via
 packaging. `<launchable>` points at `dev-prompt.desktop` (the name Tauri
 installs), while `<id>` is the reverse-DNS app-id used everywhere else.
 
-Outstanding before Phase 4 (Flathub):
-- commit a real screenshot at `docs/img/overlay.png`
-- have the release workflow prepend a `<release>` entry at tag time
-- run `appstreamcli validate` in CI
+Done: `appstreamcli validate` + `desktop-file-validate` run in CI (the
+`packaging` job); `release.yml` stamps the real `<release>` version/date into the
+metainfo at build time.
+
+Outstanding before Phase 4 (Flathub): commit a real screenshot at
+`docs/img/overlay.png` (the metainfo references it).
 
 ## `arch/`
 

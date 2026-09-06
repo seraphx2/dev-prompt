@@ -107,6 +107,19 @@ jobs:
         shell: bash
         run: echo "value=$(node scripts/version.mjs)" >> "$GITHUB_OUTPUT"
 
+      # The checked-in metainfo carries a 0.0.0 placeholder <release>; swap it for
+      # this build's version so the bundled AppStream data (and Flathub's lint)
+      # sees the real one. Not committed back, same as scripts/version.mjs.
+      - name: Stamp AppStream release entry
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          f=packaging/linux/io.github.seraphx2.devprompt.metainfo.xml
+          sed -i \
+            "s|<release version=\"0.0.0\" date=\"1970-01-01\"/>|<release version=\"${{ steps.version.outputs.value }}\" date=\"$(date -u +%Y-%m-%d)\"/>|" \
+            "$f"
+          grep -A2 '<releases>' "$f"
+
       - name: Build and publish release
         id: tauri
         uses: tauri-apps/tauri-action@v0

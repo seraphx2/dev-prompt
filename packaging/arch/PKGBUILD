@@ -19,6 +19,13 @@ license=('MIT')
 depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3' 'libayatana-appindicator'
          'hicolor-icon-theme')
 makedepends=('rust' 'npm' 'nodejs' 'git')
+# !buildflags: build with a clean env like CI does. The `ring` crate's vendored
+#   crypto asm links wrong under a tuned makepkg.conf (`-march=native` in CFLAGS,
+#   `-C target-cpu=native` in RUSTFLAGS — CachyOS sets both), producing
+#   "undefined symbol: ring_core_*" at the final link.
+# !lto: same reason, and Cargo's release profile already enables LTO.
+# !strip/!debug: the release profile already strips; skip the debug package.
+options=('!buildflags' '!lto' '!strip' '!debug')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 

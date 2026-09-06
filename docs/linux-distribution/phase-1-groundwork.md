@@ -28,14 +28,17 @@ verbatim file that hand-install channels copy. `Categories=Development;` only
 `dev-prompt.desktop` (the basename Tauri's bundler installs — it can't be
 renamed without renaming the binary). Passes `appstreamcli validate`.
 
+Done:
+- `<releases>`: `release.yml`'s "Stamp AppStream release entry" step swaps the
+  `0.0.0` placeholder for the build's version/date (Linux leg only, not
+  committed back).
+- `appstreamcli validate` + `desktop-file-validate` run in CI (the `packaging`
+  job in `ci.yml` / `ci-dev.yml`).
+
 Outstanding:
 - one **screenshot** at `docs/img/overlay.png` — the metainfo already references
   it; it 404s until committed (see `docs/img/README.md`). Flathub build fails
   without it; `appstreamcli validate` doesn't care.
-- `<releases>`: the release workflow should prepend
-  `<release version="$VERSION" date="$(date -I)"/>` at tag time. Flathub lints
-  that the top release matches the built version.
-- wire `appstreamcli validate` + `desktop-file-validate` into CI.
 
 ### 3. `packaging/arch/PKGBUILD` + `packaging/arch/PKGBUILD-bin`
 
@@ -69,18 +72,26 @@ Deferred to Phase 2 — the first channel with per-release automation. Track it 
 - [x] `packaging/linux/` holds `dev-prompt.desktop` + the metainfo.
       `appstreamcli validate` and `desktop-file-validate` pass locally.
 - [ ] a real screenshot committed at `docs/img/overlay.png` (metainfo points at
-      it; currently 404s — see `docs/img/README.md`).
-- [ ] `appstreamcli validate` + `desktop-file-validate` wired into CI.
+      it; currently 404s — see `docs/img/README.md`). **Only remaining Phase 1
+      item; needed before Phase 4.**
+- [x] `appstreamcli validate` + `desktop-file-validate` wired into CI
+      (`packaging` job); `release.yml` stamps the real `<release>` at build time.
 - [x] `tauri.linux.conf.json` bundlers ship the canonical `.desktop` (verbatim
       via `desktopTemplate`) and the metainfo (via `linux.*.files`). Verified a
       local `deb` + `rpm` + `appimage` build: all three carry
       `/usr/share/applications/dev-prompt.desktop` and
       `/usr/share/metainfo/io.github.seraphx2.devprompt.metainfo.xml`.
-- [x] `packaging/arch/PKGBUILD` + `PKGBUILD-bin` committed. **Not yet
-      `makepkg`-tested** — `PKGBUILD` sources a release tag archive and none
-      exists yet; `PKGBUILD-bin` sources a release `.deb` asset. Both get a real
-      `pkgver`/`sha256sums` from the Phase 2 workflow. Test on the first tagged
-      release.
+- [x] `packaging/arch/PKGBUILD` + `PKGBUILD-bin` committed and **`makepkg`-tested
+      against `v2026.905.1`**:
+      - `PKGBUILD-bin` — clean; package carries the binary, `dev-prompt.desktop`,
+        the metainfo, hicolor icons, LICENSE.
+      - `PKGBUILD` — clean *after* setting `options=('!buildflags' '!lto' …)`.
+        A tuned `makepkg.conf` (`-march=native` in CFLAGS, `-C target-cpu=native`
+        in RUSTFLAGS — CachyOS sets both) makes `ring`'s vendored crypto asm link
+        wrong: `undefined symbol: ring_core_*` at the final link, the `.a` builds
+        but its objects aren't pulled in. `!buildflags` builds with a clean env
+        like CI; Cargo's release profile already sets opt-level/LTO/strip.
+      Both still take a real `pkgver`/`sha256sums` from the Phase 2 workflow.
 - [x] `docs/releasing.md` "Later" list points here.
 
 **Note on naming:** kept the installed `.desktop` / icon basename as

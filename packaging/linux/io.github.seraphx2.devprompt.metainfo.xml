@@ -66,8 +66,8 @@
   </screenshots>
 
   <releases>
-    <!-- Placeholder. The release workflow should prepend the real entry:
-         <release version="2026.905.1" date="2026-09-05"/> -->
+    <!-- Placeholder. release.yml's "Stamp AppStream release entry" step swaps
+         this line for the real version/date at build time (not committed back). -->
     <release version="0.0.0" date="1970-01-01"/>
   </releases>
 </component>

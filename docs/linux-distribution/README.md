@@ -10,9 +10,9 @@ reuse groundwork from earlier ones.
 
 | Phase | Channel | Reach | Lift | Needs from maintainer | Status |
 |---|---|---|---|---|---|
-| [1](phase-1-groundwork.md) | In-repo packaging groundwork | all channels | S | nothing | **in progress** — files landed; screenshot + CI validate outstanding |
-| [2](phase-2-aur.md) | AUR | Arch / CachyOS / Manjaro / EndeavourOS | S | AUR account + SSH key | not started |
-| [3](phase-3-apt-rpm-repo.md) | Own apt + rpm repo | Debian/Ubuntu, Fedora/RHEL | M | OBS account **or** a GPG repo key | not started |
+| [1](phase-1-groundwork.md) | In-repo packaging groundwork | all channels | S | nothing | **done** bar a screenshot (`docs/img/overlay.png`, needed for Phase 4) |
+| [2](phase-2-aur.md) | AUR | Arch / CachyOS / Manjaro / EndeavourOS | S | AUR account + SSH key | **parked** — AUR registration closed; Phase 3 covers `pacman` meanwhile |
+| [3](phase-3-apt-rpm-repo.md) | Self-hosted apt + rpm + **pacman** repo (GitHub Pages) | Debian/Ubuntu, Fedora/RHEL, Arch/CachyOS | M | a GPG key (generated in-phase) + enable Pages | **next** |
 | [4](phase-4-flatpak.md) | Flatpak / Flathub | every distro (sandboxed) | L | Flathub PR review | not started |
 | [5](phase-5-snap.md) | Snap Store | Ubuntu-centric (sandboxed) | M (after 4) | Snapcraft account | not started |
 | [6](phase-6-distro-repos.md) | Official distro repos | max trust | — | a distro maintainer adopting it | passive |
@@ -66,8 +66,8 @@ Lift: S = hours, M = a day or two, L = weeks and touches app code.
   | Key | Purpose | Where |
   |---|---|---|
   | minisign keypair | in-app updater artifact signatures | pubkey in `tauri.conf.json`; private key = repo secrets `TAURI_SIGNING_PRIVATE_KEY` (+ empty `_PASSWORD`) |
-  | GPG key | signs an apt/rpm repo's metadata | Phase 3 — new, does **not** exist yet |
-  | SSH key | pushes to `aur.archlinux.org` | Phase 2 — new |
+  | GPG key | signs the apt + rpm + pacman repo metadata (one key, all three) | Phase 3 — generated in-phase; pubkey at `packaging/repo/dev-prompt-repo.asc` (id `E3C07CD21A9A9BA5`, hardcoded in the workflow — not secret); private key = secret `REPO_GPG_PRIVATE_KEY` |
+  | SSH key | pushes to `aur.archlinux.org` | Phase 2 — parked |
   | (Flathub signs its own builds; nothing to manage) | | |
 
 ## How the in-app updater interacts with system packages
@@ -78,12 +78,18 @@ binary **at bundle time**. At runtime `bundle_type()` reads it and dispatches:
 | Install form | Marker | Updater behavior |
 |---|---|---|
 | AppImage | `appimage` | full self-update: download `.AppImage.tar.gz`, verify sig, rewrite own file, relaunch |
-| `.deb` | `deb` | download `.deb`, `dpkg -i` via pkexec/sudo prompt — **but** `tauri-action` only writes AppImage keys into `latest.json`, so nothing to fetch |
+| `.deb` | `deb` | download `.deb`, `dpkg -i` via a pkexec/sudo prompt |
 | `.rpm` | `rpm` | as deb, via `rpm -U` |
 | pacman / hand-built binary | *none* | falls through to `install_appimage` → tries to rewrite a root-owned `/usr/bin/dev-prompt` → fails |
 
-**Implication for every non-AppImage channel:** the app should not offer an
-in-app update. Options, cheapest first:
+`tauri-action` writes a `latest.json` key per format: the `v2026.905.1` release
+carries `windows-x86_64`, `linux-x86_64` (→ AppImage), `linux-x86_64-appimage`,
+`linux-x86_64-deb`, and `linux-x86_64-rpm`. So a `.deb`/`.rpm` installed **from a
+GitHub release** *can* self-update (with a polkit password prompt).
+
+**Implication for the system-repo channels (Phases 2–3):** a package installed
+from AUR / an apt-rpm repo should update through `pacman`/`apt`/`dnf`, not the
+in-app updater — even though the mechanism now exists. Options, cheapest first:
 1. Document "update via your package manager" and accept that the Settings
    update-check may still show a version banner (it only compares version
    strings against `latest.json`).
@@ -91,6 +97,4 @@ in-app update. Options, cheapest first:
    build flag) and hide the update UI / swap it for a "open Releases" link.
 3. (Flatpak/Snap) compile the updater out when `FLATPAK_ID` / `SNAP` is set.
 
-Phases 2–5 each note which they use. Wiring per-format artifacts + `latest.json`
-keys so deb/rpm self-update is possible but deliberately out of scope — the
-package manager is the right updater for those.
+Phases 2–5 each note which they use.
