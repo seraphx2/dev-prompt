@@ -171,9 +171,17 @@ pub fn run() {
     // become a window, tray icon, or a second hotkey registration. The re-launch
     // is deliberately inert — no window pops; the hotkey or tray is how you
     // reach a running instance.
+    //
+    // Skip it under Flatpak: `flatpak run` already reserves the app-id on the
+    // session bus, so the plugin's own RequestName sees the name taken, decides
+    // it's a secondary instance, and exits(0) — the app never starts. Flatpak
+    // enforces single-instance itself.
     #[cfg(desktop)]
-    let builder =
-        builder.plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}));
+    let builder = if launch::in_flatpak() {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
+    };
 
     let mut builder = builder
         .plugin(tauri_plugin_os::init())

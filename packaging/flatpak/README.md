@@ -14,13 +14,24 @@ io.github.seraphx2.devprompt.yaml   the manifest
 - full build is clean — `npm ci`, `svelte-check` (0 errors), `vite build`,
   `cargo build --release`, the `libayatana-appindicator` tray module, and every
   install step.
-- inside the sandbox: `flatpak-spawn --host` runs host commands (the core
-  mechanism), `libayatana-appindicator3.so.1` is bundled, and the exported
-  `.desktop` / metainfo pass `desktop-file-validate` + `appstreamcli validate`.
+- `flatpak run` starts the app and it **stays resident** (needs the
+  single-instance plugin skipped under Flatpak — see `src-tauri/src/lib.rs`;
+  `flatpak run` reserves the app-id on the session bus, so the plugin's own
+  `RequestName` would see it taken and `exit(0)`).
+- the **tray icon registers** — it shows up in
+  `org.kde.StatusNotifierWatcher`'s `RegisteredStatusNotifierItems`.
+- `flatpak-spawn --host` runs host commands (the core launcher mechanism).
+- `libayatana-appindicator3.so.1` is bundled; exported `.desktop` / metainfo
+  pass `desktop-file-validate` + `appstreamcli validate`.
 
-Not yet done: an **interactive** smoke test (tray icon visible, global hotkey via
-the portal, launching a host editor from the overlay), the offline source
-generators, the runtime bump off EOL 48, and the Flathub PR.
+Cosmetic: `flatpak-builder` logs `Ignoring release element without timestamp or
+date` for the `0.0.0` metainfo placeholder — `release.yml` rewrites it with the
+real version + date at tag time, so a real release is clean.
+
+Not yet done: an **interactive** smoke test (overlay window actually shows +
+renders on hotkey/tray-click, global hotkey via the GlobalShortcuts portal,
+launching a host editor from the overlay), the offline source generators, the
+runtime bump off EOL 48, and the Flathub PR.
 
 App-code side (in the main tree, active whether or not it ever runs sandboxed):
 

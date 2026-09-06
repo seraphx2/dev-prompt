@@ -111,15 +111,20 @@ SNI stack). Add `--talk-name=org.kde.StatusNotifierWatcher` and
       `cargo build --release` / the `libayatana-appindicator` tray module
       (flathub/shared-modules submodule at `packaging/flatpak/shared-modules/`) /
       every install step. `finish-args` + app-id-rebased desktop/metainfo/icons.
-- [x] Sandbox checks — `flatpak-spawn --host` executes host commands (the
-      launcher's core mechanism), `libayatana-appindicator3.so.1` is bundled,
-      exported `.desktop` + metainfo pass `desktop-file-validate` /
+- [x] Sandbox checks — `flatpak run` starts and the app **stays resident**
+      (needed skipping `tauri-plugin-single-instance` under Flatpak — it
+      collided with `flatpak run`'s own app-id bus-name reservation and
+      `exit(0)`'d); the **tray icon registers** with
+      `org.kde.StatusNotifierWatcher`; `flatpak-spawn --host` executes host
+      commands (the launcher's core mechanism); `libayatana-appindicator3.so.1`
+      is bundled; exported `.desktop` + metainfo pass `desktop-file-validate` /
       `appstreamcli validate`.
 
 **Pending** (needs an interactive session and/or a Flathub account):
 
-- [ ] Interactive smoke test — tray icon visible, overlay opens, launching a
-      host editor/terminal from the overlay works, on a non-GNOME desktop.
+- [ ] Interactive smoke test — overlay window actually shows and renders on
+      hotkey/tray-click, launching a host editor/terminal from it works, on a
+      non-GNOME desktop.
 - [ ] Global hotkey via the `GlobalShortcuts` portal actually registers (confirm
       `tauri-plugin-global-shortcut` supports it — may need an upstream bump).
       Tray ▸ Show is the documented fallback.
