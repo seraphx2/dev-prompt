@@ -392,6 +392,7 @@ pub fn run() {
             commands::open_releases_page,
             commands::set_dismiss_on_blur,
             commands::updater_mode,
+            commands::is_flatpak,
             commands::set_update_hint,
             commands::get_autostart,
             commands::set_autostart,

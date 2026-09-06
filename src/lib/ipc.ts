@@ -150,6 +150,11 @@ export function updaterMode(): Promise<UpdaterMode> {
   return invoke<UpdaterMode>("updater_mode");
 }
 
+/** True when running inside a Flatpak sandbox — hides controls it can't honour. */
+export function isFlatpak(): Promise<boolean> {
+  return invoke<boolean>("is_flatpak");
+}
+
 /** Native folder picker; returns the chosen directories (empty if cancelled). */
 export async function pickDirectories(): Promise<string[]> {
   const res = await openDialog({

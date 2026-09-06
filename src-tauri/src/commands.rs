@@ -805,6 +805,10 @@ fn clear_startup_approved() {
 #[tauri::command]
 pub fn updater_mode() -> &'static str {
     use tauri::utils::{config::BundleType, platform::bundle_type};
+    // Flatpak updates itself via `flatpak update` / GNOME Software / Discover.
+    if crate::launch::in_flatpak() {
+        return "managed";
+    }
     match bundle_type() {
         Some(
             BundleType::AppImage | BundleType::Nsis | BundleType::Msi | BundleType::App
@@ -814,6 +818,14 @@ pub fn updater_mode() -> &'static str {
         None if cfg!(target_os = "linux") => "managed",
         None => "unmanaged",
     }
+}
+
+/// True when running inside a Flatpak sandbox. The frontend uses this to hide
+/// controls the sandbox can't honour (e.g. the autostart toggle — writing
+/// `~/.config/autostart` from inside the sandbox does nothing).
+#[tauri::command]
+pub fn is_flatpak() -> bool {
+    crate::launch::in_flatpak()
 }
 
 /// Reflect update availability in the tray tooltip. `version` = `None` resets it.

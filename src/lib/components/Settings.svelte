@@ -3,6 +3,7 @@
   import {
     configSummary,
     getAutostart,
+    isFlatpak,
     getConfig,
     listRepos,
     listShells,
@@ -51,6 +52,7 @@
   let appExclude = $state<string[]>([]);
   let appsSnapshot = "";
   let autostart = $state(false);
+  let flatpak = $state(false);
   let loaded = $state(false);
   let busy = $state(false);
   let msg = $state("");
@@ -108,6 +110,7 @@
     applyConfig(await getConfig());
     loaded = true;
     void loadSummary();
+    flatpak = await isFlatpak().catch(() => false);
     try {
       autostart = await getAutostart();
     } catch {
@@ -421,15 +424,22 @@
       </div>
 
       <div class="space-y-5">
-        <label class="flex items-center gap-2">
-          <input
-            type="checkbox"
-            bind:checked={autostart}
-            onchange={toggleAutostart}
-            class="h-3.5 w-3.5 accent-sky-500"
-          />
-          <span class="text-orange-400">Start at login</span>
-        </label>
+        {#if flatpak}
+          <p class="text-[11px] text-white/25">
+            Start-at-login is managed by your desktop for Flatpak apps — enable
+            dev-prompt in your session's autostart settings.
+          </p>
+        {:else}
+          <label class="flex items-center gap-2">
+            <input
+              type="checkbox"
+              bind:checked={autostart}
+              onchange={toggleAutostart}
+              class="h-3.5 w-3.5 accent-sky-500"
+            />
+            <span class="text-orange-400">Start at login</span>
+          </label>
+        {/if}
 
         <div class="space-y-2">
           <span class="text-orange-400">Global hotkeys</span>

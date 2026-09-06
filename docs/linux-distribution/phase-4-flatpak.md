@@ -92,10 +92,34 @@ SNI stack). Add `--talk-name=org.kde.StatusNotifierWatcher` and
 
 ## Definition of done
 
-- [ ] App launches host editors/terminals/CLIs correctly when sandboxed.
-- [ ] Global hotkey works via portal; autostart via Background portal.
-- [ ] Updater UI absent under Flatpak.
-- [ ] `flatpak install flathub io.github.seraphx2.devprompt` works on a
-      non-GNOME distro; tray shows; hotkey works.
-- [ ] Release process documented: how a new version reaches Flathub.
-- [ ] `docs/linux-distribution/README.md` status updated.
+**Done in-tree** (app code + manifest, not yet build-verified):
+
+- [x] Host launches routed through `flatpak-spawn --host` when sandboxed —
+      `src-tauri/src/launch.rs` `in_flatpak()` / `spawn_detached`. Covers the
+      terminal, editor, AI-CLI and `gtk-launch` (app-scope) paths, since they
+      all funnel through `spawn_detached`. Needs `--talk-name=org.freedesktop.Flatpak`.
+- [x] Updater UI absent under Flatpak — `updater_mode` returns `managed` when
+      `/.flatpak-info` is present, which the frontend already treats as
+      "don't poll, don't show".
+- [x] Autostart toggle hidden under Flatpak — `is_flatpak` command; Settings
+      shows a "use your desktop's autostart" note instead. (Background-portal
+      `RequestBackground` is the eventual real fix — deferred; needs `ashpd`
+      or raw zbus and a sandbox to test.)
+- [x] Manifest written — `packaging/flatpak/io.github.seraphx2.devprompt.yaml`
+      with `finish-args`, the app module, desktop/metainfo/icon install rebased
+      to the app-id. Offline source generators + the tray module documented in
+      `packaging/flatpak/README.md`.
+
+**Pending a `flatpak-builder` run** (needs `flatpak-builder` + the multi-GB
+GNOME SDK; not on the dev box):
+
+- [ ] Generate `cargo-sources.json` / `node-sources.json`; pin the
+      `libayatana-appindicator` module.
+- [ ] Build succeeds; `flatpak run` launches; tray shows on a non-GNOME distro.
+- [ ] Global hotkey via the `GlobalShortcuts` portal actually registers
+      (confirm `tauri-plugin-global-shortcut` supports it — may need an upstream
+      bump). Tray ▸ Show is the documented fallback.
+- [ ] Flathub PR: manifest passes `flatpak-builder --lint`, screenshots reachable
+      (merge `dev` → `main` first), permissions justified in the PR body.
+
+- [x] `docs/linux-distribution/README.md` status updated.
