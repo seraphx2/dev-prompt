@@ -141,14 +141,16 @@ own that. Apply option 1 or 2 from the roadmap README's updater section
 - [x] `packaging/repo/` holds the pubkey + `build-repo.sh` + `render-index.sh`;
       `.github/workflows/repo.yml` added. `build-repo.sh` dry-run passes locally
       (pacman path + signing + prune verified; apt/rpm sections need their tools).
-- [ ] maintainer: add secret `REPO_GPG_PRIVATE_KEY`, and enable Pages
-      (Settings → Pages → `gh-pages`, `/`) after the first `repo.yml` run
-      creates the branch.
-- [ ] `repo.yml` publishes `deb/` + `rpm/` + `arch/` with signed metadata on a
-      release (first real run).
-- [ ] Fresh Debian, Fedora, and Arch containers can add the repo, install
-      `dev-prompt`, then `upgrade` to a newer release.
-- [ ] `README.md` (repo root) gains the three copy-paste blocks.
+- [x] secret `REPO_GPG_PRIVATE_KEY` set; Pages enabled (`gh-pages`, `/`).
+- [x] `repo.yml` publishes `deb/` + `rpm/` + `arch/` with signed metadata,
+      auto-dispatched from `release.yml` — validated end-to-end on `v2026.906.2`
+      (all endpoints 200, signatures verify).
+- [x] Arch: installed on the maintainer's CachyOS box from the live repo.
+- [ ] Debian + Fedora containers: `apt`/`dnf install` then `upgrade` between two
+      published versions. One-time sanity check — the metadata is standard
+      `apt-ftparchive` / `createrepo_c` output and the sigs verify, so low risk;
+      not worth a standing CI test.
+- [x] `README.md` (repo root) — "Install" section with the three blocks.
 - [x] `docs/linux-distribution/README.md` status + key table updated.
 
 ## Appendix — OBS as a later add
