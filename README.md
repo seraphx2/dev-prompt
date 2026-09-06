@@ -150,7 +150,7 @@ and a handful of `#[cfg]` blocks. The remaining cross-platform work is tracked i
 
 | Tool                 | Notes                                                                                                                                                                                                                               |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Node.js 18+          | frontend build (`npm`)                                                                                                                                                                                                              |
+| Node.js 22+ (`.nvmrc` pins 24; CI builds on 24) | frontend build (`npm`)                                                                                                                                                                             |
 | Rust (stable, 1.77+) | <https://rustup.rs>                                                                                                                                                                                                                 |
 | Platform toolchain   | **Windows:** MSVC Build Tools ("Desktop development with C++") + WebView2 (preinstalled on Win 11). **Linux:** `webkit2gtk-4.1`, `libayatana-appindicator3`, `librsvg2`, standard build tools. **macOS:** Xcode Command Line Tools. |
 
