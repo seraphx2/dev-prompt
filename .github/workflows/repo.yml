@@ -47,8 +47,11 @@ jobs:
           v="${{ steps.v.outputs.value }}"
           useradd -m builder
           install -d -o builder -g builder /tmp/build
+          # In our own repo the package is just `dev-prompt` (the -bin split and
+          # its provides/conflicts are an AUR convention for coexisting variants).
           cp packaging/arch/PKGBUILD-bin /tmp/build/PKGBUILD
-          sed -i "s/^pkgver=.*/pkgver=$v/" /tmp/build/PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=$v/; s/^pkgname=.*/pkgname=dev-prompt/; /^provides=/d; /^conflicts=/d" \
+            /tmp/build/PKGBUILD
           chown -R builder:builder /tmp/build
           # PKGBUILD-bin keeps sha256sums=('SKIP'); the source is our own release
           # over HTTPS. --nodeps: we're only repackaging the prebuilt .deb.
