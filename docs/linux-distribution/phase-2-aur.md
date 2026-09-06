@@ -1,5 +1,13 @@
 # Phase 2 — AUR (Arch User Repository)
 
+> **PARKED (2026-09-05).** AUR new-account registration is closed (recurring
+> anti-spam / infra-migration measure — it reopens). The `pacman` repo in
+> **Phase 3** covers Arch/CachyOS/Manjaro users in the meantime. Resume this
+> when registration reopens, or hand it to an Arch user with an existing AUR
+> account who can do the initial upload and add the maintainer as co-maintainer.
+> The `packaging/arch/PKGBUILD*` files are done and `makepkg`-tested, so this is
+> just the account + the push automation below.
+
 **Lift:** S (hours once Phase 1 is done). **Reach:** Arch, CachyOS, Manjaro,
 EndeavourOS, Garuda — i.e. the maintainer's own distro.
 **Needs from maintainer:** an AUR account and an SSH key registered on it.

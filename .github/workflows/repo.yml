@@ -1,0 +1,129 @@
+name: Repo
+
+# Publishes the self-hosted apt + rpm + pacman repository to the gh-pages branch
+# (served at https://seraphx2.github.io/dev-prompt/). Runs when a GitHub Release
+# is published — draft releases don't trigger it. workflow_dispatch re-runs it
+# against an existing tag. See docs/linux-distribution/phase-3-apt-rpm-repo.md.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to (re)publish, e.g. v2026.905.1"
+        required: true
+
+# One publish at a time; never cancel a run that may have pushed a partial tree.
+concurrency:
+  group: repo
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  # Repackage the release .deb into a native pacman package. Separate job so it
+  # can run in an Arch container; the result is handed to `publish` as an artifact.
+  pacman-pkg:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Base tools
+        run: pacman -Sy --noconfirm --needed base-devel git pacman-contrib
+
+      - uses: actions/checkout@v5
+
+      - name: Resolve version
+        id: v
+        shell: bash
+        run: |
+          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          echo "value=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: makepkg
+        shell: bash
+        run: |
+          set -eux
+          v="${{ steps.v.outputs.value }}"
+          install -d -o nobody /tmp/build
+          cp packaging/arch/PKGBUILD-bin /tmp/build/PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=$v/" /tmp/build/PKGBUILD
+          chown -R nobody:nobody /tmp/build
+          # nobody can't write $HOME; give makepkg a scratch one
+          su nobody -s /bin/bash -c '
+            export HOME=/tmp/build
+            cd /tmp/build
+            updpkgsums
+            makepkg --noconfirm --nodeps --clean'
+          mkdir -p out && cp /tmp/build/*.pkg.tar.zst out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pacman-pkg
+          path: out/*.pkg.tar.zst
+          if-no-files-found: error
+
+  publish:
+    needs: pacman-pkg
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: v
+        run: |
+          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          echo "tag=$tag"            >> "$GITHUB_OUTPUT"
+          echo "value=${tag#v}"      >> "$GITHUB_OUTPUT"
+
+      - name: Repo tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            apt-utils createrepo-c gnupg
+
+      - name: Fetch release artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p artifacts
+          gh release download "${{ steps.v.outputs.tag }}" \
+            -p '*_amd64.deb' -p '*.x86_64.rpm' -D artifacts
+          ls -l artifacts
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: pacman-pkg
+          path: artifacts
+
+      - name: Import signing key
+        env:
+          REPO_GPG_PRIVATE_KEY: ${{ secrets.REPO_GPG_PRIVATE_KEY }}
+        run: |
+          echo "$REPO_GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --list-secret-keys --keyid-format long
+
+      - name: Check out gh-pages worktree
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            git fetch origin gh-pages
+            git worktree add site origin/gh-pages
+          else
+            git worktree add --detach site
+            git -C site switch --orphan gh-pages
+            git -C site rm -rf --quiet . 2>/dev/null || true
+          fi
+
+      - name: Rebuild repository
+        run: packaging/repo/build-repo.sh artifacts site E3C07CD21A9A9BA5
+
+      - name: Publish gh-pages
+        run: |
+          cd site
+          git add -A
+          git commit -m "repo: ${{ steps.v.outputs.tag }}" || { echo "nothing to publish"; exit 0; }
+          git push --force origin HEAD:gh-pages
