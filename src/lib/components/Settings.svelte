@@ -378,6 +378,24 @@
           {/if}
         </div>
       </div>
+    {:else if upd.mode === "managed"}
+      <p class="text-[11px] text-white/30">
+        Updates come through your package manager (<span class="font-mono"
+          >apt</span
+        >
+        / <span class="font-mono">dnf</span> /
+        <span class="font-mono">pacman -Syu</span>).
+      </p>
+    {:else if upd.mode === "unmanaged"}
+      <p class="text-[11px] text-white/30">
+        This build doesn't auto-update.
+        <button
+          type="button"
+          onclick={() => openReleasesPage()}
+          class="text-sky-300/70 hover:text-sky-300 hover:underline"
+          >Get the latest ↗</button
+        >
+      </p>
     {/if}
 
     <!-- Save floats top-right while the fields it controls are on screen, then

@@ -141,6 +141,13 @@ export function openReleasesPage(): Promise<void> {
   return invoke<void>("open_releases_page");
 }
 
+/** How this build receives updates — see the `updater_mode` command.
+ *  `"self"`: run the in-app updater. `"managed"`/`"unmanaged"`: don't. */
+export type UpdaterMode = "self" | "managed" | "unmanaged";
+export function updaterMode(): Promise<UpdaterMode> {
+  return invoke<UpdaterMode>("updater_mode");
+}
+
 /** Native folder picker; returns the chosen directories (empty if cancelled). */
 export async function pickDirectories(): Promise<string[]> {
   const res = await openDialog({

@@ -8,13 +8,17 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { checkForUpdate, currentVersion, type UpdateInfo } from "./updater";
+import { updaterMode, type UpdaterMode } from "./ipc";
 
 export const upd = $state<{
   info: UpdateInfo | null;
   /** The running version, shown in the footer. Filled on the first poll. */
   current: string;
   checking: boolean;
-}>({ info: null, current: "", checking: false });
+  /** How this build updates. `null` until the first poll resolves it; only
+   *  `"self"` runs the in-app updater. */
+  mode: UpdaterMode | null;
+}>({ info: null, current: "", checking: false, mode: null });
 
 /** Version we've already toasted about this session — don't repeat. */
 let notified: string | null = null;
@@ -30,6 +34,15 @@ export async function pollUpdates(): Promise<void> {
   upd.checking = true;
   try {
     if (!upd.current) upd.current = await currentVersion().catch(() => "");
+    if (upd.mode === null)
+      upd.mode = await updaterMode().catch(() => "self" as const);
+    // Package-manager / portable installs: never run the in-app updater — it
+    // would try to overwrite a root-owned binary and fail. Settings shows a
+    // note instead; the footer just displays the running version.
+    if (upd.mode !== "self") {
+      upd.info = null;
+      return;
+    }
     const info = await checkForUpdate();
     upd.info = info;
 

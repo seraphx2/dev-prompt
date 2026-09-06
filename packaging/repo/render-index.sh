@@ -23,8 +23,10 @@ cat <<HTML
 
 <h1>dev-prompt package repository</h1>
 <p><a href="https://github.com/seraphx2/dev-prompt">github.com/seraphx2/dev-prompt</a>
-  — command-palette overlay for launching dev repositories. Signing key:
-  <a href="dev-prompt.asc">dev-prompt.asc</a> (<code>$KEYID</code>).</p>
+  — command-palette overlay for launching dev repositories.<br>
+  Signing key: <a href="dev-prompt.asc">dev-prompt.asc</a> (<code>$KEYID</code>).</p>
+<p style="color:#888">Updates arrive through your normal
+<code>apt</code> / <code>dnf</code> / <code>pacman -Syu</code>.</p>
 
 <h2>Debian / Ubuntu / Mint</h2>
 <pre>curl -fsSL $BASE/dev-prompt.asc | sudo gpg --dearmor -o /usr/share/keyrings/dev-prompt.gpg
@@ -55,7 +57,4 @@ SigLevel = Required
 Server = $BASE/arch
 EOF
 sudo pacman -Sy dev-prompt</pre>
-
-<p style="margin-top:2.5rem;color:#888">Updates arrive through your normal
-<code>apt</code> / <code>dnf</code> / <code>pacman -Syu</code>.</p>
 HTML

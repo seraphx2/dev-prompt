@@ -31,6 +31,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: write # dispatch repo.yml after publishing
 
 jobs:
   release:
@@ -152,3 +153,14 @@ jobs:
           gh release upload "v${{ steps.version.outputs.value }}" \
             "src-tauri/target/release/dev-prompt_${{ steps.version.outputs.value }}_x64-portable.zip" \
             --clobber
+
+      # A release published by GITHUB_TOKEN doesn't fire `on: release` in other
+      # workflows, so kick the package-repo publish explicitly (once, from the
+      # Linux leg). workflow_dispatch is exempt from that suppression.
+      - name: Publish package repo
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run repo.yml -f tag="v${{ steps.version.outputs.value }}"
