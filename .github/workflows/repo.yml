@@ -31,7 +31,7 @@ jobs:
       - name: Base tools
         run: pacman -Sy --noconfirm --needed base-devel git
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Resolve version
         id: v
@@ -58,7 +58,7 @@ jobs:
           su builder -c 'cd /tmp/build && makepkg --noconfirm --nodeps --clean'
           mkdir -p out && cp /tmp/build/*.pkg.tar.zst out/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pacman-pkg
           path: out/*.pkg.tar.zst
@@ -68,7 +68,7 @@ jobs:
     needs: pacman-pkg
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -94,7 +94,7 @@ jobs:
             -p '*_amd64.deb' -p '*.x86_64.rpm' -D artifacts
           ls -l artifacts
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: pacman-pkg
           path: artifacts
