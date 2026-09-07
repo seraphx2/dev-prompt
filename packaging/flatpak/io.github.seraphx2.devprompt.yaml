@@ -82,6 +82,14 @@ build-options:
   append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node22/bin
   env:
     CARGO_HOME: /run/build/dev-prompt/cargo
+  # Force cmake modules to install into /app/lib, not /app/lib64. The current
+  # freedesktop SDK's CMake picks lib64 on x86_64, but the shared-modules ayatana
+  # chain (and the runtime loader / pkg-config path) expect lib: without this,
+  # libayatana-indicator's cmake can't find the libayatana-ido3 .pc that the
+  # previous module just installed under /app/lib64/pkgconfig. Harmless for the
+  # autotools libdbusmenu module (configure ignores the unknown -D flag).
+  config-opts:
+    - -DCMAKE_INSTALL_LIBDIR=lib
   # The self-hosted repo build (repo.yml) has network; npm/cargo fetch directly.
   # For a Flathub submission this comes out and offline *-sources.json go in.
   build-args:
