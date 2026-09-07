@@ -32,7 +32,7 @@ jobs:
       - name: Base tools
         run: pacman -Sy --noconfirm --needed base-devel git
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Resolve version
         id: v
@@ -59,7 +59,7 @@ jobs:
           su builder -c 'cd /tmp/build && makepkg --noconfirm --nodeps --clean'
           mkdir -p out && cp /tmp/build/*.pkg.tar.zst out/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pacman-pkg
           path: out/*.pkg.tar.zst
@@ -73,7 +73,7 @@ jobs:
   flatpak-repo:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Build the tagged tree (the manifest is `type: dir` on the checkout,
           # not a release artifact). shared-modules is a submodule.
@@ -96,7 +96,7 @@ jobs:
       # The runtime/SDK download (~1.5 GB) dominates a cold run; key the cache on
       # the manifest + lockfiles so it survives until a dependency actually moves.
       - name: Cache Flatpak build state
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             .flatpak-builder
@@ -132,7 +132,7 @@ jobs:
             flatpak-repo
           tar -cf flatpak-repo.tar -C flatpak-repo .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: flatpak-repo
           path: flatpak-repo.tar
@@ -144,7 +144,7 @@ jobs:
     if: always() && needs.pacman-pkg.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -170,14 +170,14 @@ jobs:
             -p '*_amd64.deb' -p '*.x86_64.rpm' -D artifacts
           ls -l artifacts
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: pacman-pkg
           path: artifacts
 
       - name: Fetch Flatpak repo
         if: needs.flatpak-repo.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: flatpak-repo
           path: flatpak-in

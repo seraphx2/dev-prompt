@@ -20,7 +20,7 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/ci-frontend
 
   # Linux for speed. This compiles the cross-platform bulk + all non-cfg tests;
@@ -29,7 +29,7 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/ci-rust
 
   # Lint the Linux packaging metadata (AppStream metainfo + desktop entry) that
@@ -37,7 +37,7 @@ jobs:
   packaging:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/ci-packaging
 
   check:
