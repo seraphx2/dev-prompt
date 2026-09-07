@@ -28,8 +28,8 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@tauri-apps/cli": "^2.1.0",
-    "autoprefixer": "^10.4.20",
-    "postcss": "^8.5.27",
+    "autoprefixer": "^10.5.5",
+    "postcss": "^8.5.28",
     "simple-icons": "^16.29.0",
     "svelte": "^5.16.0",
     "svelte-check": "^4.1.1",
