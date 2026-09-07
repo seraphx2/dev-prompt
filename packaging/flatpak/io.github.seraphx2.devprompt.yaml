@@ -138,6 +138,11 @@ modules:
         paths:
           - shared-modules/libayatana-appindicator/0001-Fix-HAVE_VALGRIND-AM_CONDITIONAL.patch
 
+  # ayatana-ido / -indicator / -appindicator ignore -DCMAKE_INSTALL_LIBDIR=lib
+  # on this SDK (GNUInstallDirs picks lib64), so each relocates /app/lib64 into
+  # /app/lib in post-install: downstream pkg_check_modules then finds the .pc on
+  # the default path, and the runtime loader (which only searches /app/lib) finds
+  # libayatana-appindicator3.so.1.
   - name: ayatana-ido
     buildsystem: cmake-ninja
     cleanup:
@@ -146,6 +151,13 @@ modules:
     config-opts:
       - -DENABLE_INTROSPECTION=OFF
       - -DCMAKE_INSTALL_LIBDIR=lib
+    post-install:
+      - |
+        if [ -d /app/lib64 ]; then
+          cp -a /app/lib64/. /app/lib/ && rm -rf /app/lib64
+          find /app/lib/pkgconfig -name '*.pc' -exec \
+            sed -i 's|/lib64\b|/lib|g' {} + 2>/dev/null || true
+        fi
     sources:
       - type: git
         url: https://github.com/AyatanaIndicators/ayatana-ido.git
@@ -164,6 +176,13 @@ modules:
       - /share
     config-opts:
       - -DCMAKE_INSTALL_LIBDIR=lib
+    post-install:
+      - |
+        if [ -d /app/lib64 ]; then
+          cp -a /app/lib64/. /app/lib/ && rm -rf /app/lib64
+          find /app/lib/pkgconfig -name '*.pc' -exec \
+            sed -i 's|/lib64\b|/lib|g' {} + 2>/dev/null || true
+        fi
     sources:
       - type: git
         url: https://github.com/AyatanaIndicators/libayatana-indicator.git
@@ -180,6 +199,13 @@ modules:
       - -DENABLE_BINDINGS_VALA=NO
       - -DENABLE_GTKDOC=NO
       - -DCMAKE_INSTALL_LIBDIR=lib
+    post-install:
+      - |
+        if [ -d /app/lib64 ]; then
+          cp -a /app/lib64/. /app/lib/ && rm -rf /app/lib64
+          find /app/lib/pkgconfig -name '*.pc' -exec \
+            sed -i 's|/lib64\b|/lib|g' {} + 2>/dev/null || true
+        fi
     sources:
       - type: git
         url: https://github.com/AyatanaIndicators/libayatana-appindicator.git
