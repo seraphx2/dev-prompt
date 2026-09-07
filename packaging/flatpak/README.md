@@ -63,12 +63,13 @@ gpg --dearmor < ../repo/dev-prompt-repo.asc | base64 -w0
 
 `shared-modules/` is the [flathub/shared-modules](https://github.com/flathub/shared-modules)
 submodule — `git submodule update --init` after a fresh clone; CI checks out
-`submodules: recursive`. The manifest inlines its own copy of the ayatana tray
-module chain (adapted from `shared-modules/libayatana-appindicator/`) so it can
-pin `-DCMAKE_INSTALL_LIBDIR=lib` per cmake module — the freedesktop SDK's CMake
-otherwise installs to `/app/lib64` and `libayatana-indicator` can't find the
-`libayatana-ido3` `.pc`. The submodule still supplies the patch files those
-modules apply.
+`submodules: recursive`. The manifest pulls its
+`libayatana-appindicator/libayatana-appindicator-gtk3.json` for the tray stack.
+CI builds inside the `flathub-infra/flatpak-github-actions:gnome-50` container so
+`flatpak-builder` and that module chain behave as they do for Flathub — on a
+bare `ubuntu-latest` the newer freedesktop SDK's CMake installed the ayatana
+libs to `/app/lib64` and `libayatana-indicator` couldn't find the
+`libayatana-ido3` `.pc`.
 
 ## Local build + test
 

@@ -92,9 +92,15 @@ was briefly suspected in an early startup crash.
 `.github/workflows/repo.yml`, on `release: published` (or `workflow_dispatch`
 with a tag):
 
-- **`flatpak-repo` job** — checks out the tagged tree (`submodules: recursive`),
-  installs `flatpak` + `flatpak-builder` on `ubuntu-latest`, imports the signing
-  key (`REPO_GPG_PRIVATE_KEY`), stamps the real version into the metainfo
+- **`flatpak-repo` job** — runs inside the
+  `ghcr.io/flathub-infra/flatpak-github-actions:gnome-50` container
+  (`options: --privileged` for `flatpak-builder`'s bwrap sandbox). A bare
+  `ubuntu-latest` runner's newer freedesktop SDK made CMake install the ayatana
+  tray libs to `/app/lib64`, which the shared-modules chain and the runtime
+  loader don't expect; the container's toolchain matches Flathub's, so the
+  stock module include just works. The job checks out the tagged tree
+  (`submodules: recursive`), adds the flathub remote, imports the signing key
+  (`REPO_GPG_PRIVATE_KEY`), stamps the real version into the metainfo
   `<release>`, then:
   ```sh
   flatpak-builder --user --install-deps-from=flathub \
@@ -104,8 +110,8 @@ with a tag):
   flatpak build-update-repo --gpg-sign=E3C07CD21A9A9BA5 \
     --generate-static-deltas --prune --prune-depth=20 flatpak-repo
   ```
-  The runtime/SDK pull (~1.5 GB) is cached on `~/.local/share/flatpak` +
-  `.flatpak-builder`, keyed on the manifest + `Cargo.lock` + `package-lock.json`.
+  `.flatpak-builder` (the cargo/vite build cache) is cached, keyed on the
+  manifest + `Cargo.lock` + `package-lock.json`; the container carries the SDK.
   The signed OSTree repo is tarred and handed to `publish` as an artifact.
   Best-effort: if this job fails, `publish` still ships the other trees and the
   previous Flatpak repo stays in place.
