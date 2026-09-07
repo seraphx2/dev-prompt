@@ -1,0 +1,20 @@
+# Repo descriptor for the self-hosted dev-prompt Flatpak remote.
+# Published verbatim at https://seraphx2.github.io/dev-prompt/dev-prompt.flatpakrepo
+# (copied there by packaging/repo/build-repo.sh).
+#
+#   flatpak remote-add --if-not-exists --user dev-prompt \
+#     https://seraphx2.github.io/dev-prompt/dev-prompt.flatpakrepo
+#
+# GPGKey is base64 of the *binary* (de-armored) repo signing public key — the
+# same key that signs the apt/rpm/pacman metadata (id E3C07CD21A9A9BA5,
+# packaging/repo/dev-prompt-repo.asc). Regenerate on a key rotation with:
+#   gpg --dearmor < packaging/repo/dev-prompt-repo.asc | base64 -w0
+[Flatpak Repo]
+Title=dev-prompt
+Url=https://seraphx2.github.io/dev-prompt/flatpak
+Homepage=https://github.com/seraphx2/dev-prompt
+Comment=Command-palette overlay for launching dev repositories
+Description=Self-hosted Flatpak repository for dev-prompt.
+Icon=https://raw.githubusercontent.com/seraphx2/dev-prompt/main/src-tauri/icons/128x128.png
+DefaultBranch=stable
+GPGKey=mQINBGqc0CcBEACXLg66TRSe16DGlWK+q74LkWH/DZ2f8O9nCU6xg9GcPSMw1LiKvsmULzxN7ombERGOvJlw1G8cjlXOPtdxmxkJ7mXvLzSop/yijavkvVBQ3PzDhOFJ0LiaH4tbuhDYztDy3zqN+8Piua98cAlhYGlqCi52qHa9MRZIWUIuWkoFi5M8qMhvcxvvw/nd1J7kayOkCeZ0gffWS2UAFbbId4gqzSDN8RvMlgxANdndS8yn7lTgY5AwFBvwt8fEe9edm7XBG0ucQAWpgEGcMzHBE8C50BRBdb0iRd2uKAyOU9yy1Hc+NIJF9qh3Pfe4iARFCiGQcL4UU51/ZqPL29qEAfuKFHaeM/i5O5KYnWtanLMQZ66ozYXi9JoFDicbVUmnnER1pmP3azW2jAtgkZWTjh4okUj/icGhUJjs/IZxO67N8yCVW9M84nNPCu9yMrjyDez/IEcfesNS4Mgu1VHxPqwHg6ElFo1e/JeAxQRpLaJKnQV9sRNAjArIQi4hRM11crHccHQeyQ0XprWvCzmD4Ca/O6+VUKJKPw0qDHH0sqexVRl6NuZmlxXgRS/P77M3lD2eKz95/ZLl8da+7n5ns4/+mGsy250MRUTZmrZcprXWaP6j/i+xzGcFTb/z3pvDl6crWw8qOIMJPWW7jLL0lT+shkrYnQ7tnLUOoCjDlD7TPwARAQABtClkZXYtcHJvbXB0IHJlcG9zaXRvcnkgPHNlcmFwaHgyQGxpdmUuY29tPokCTgQTAQoAOBYhBDBbRmudPZJBdj+WfOPAfNIampulBQJqnNAnAhsDBQsJCAcCBhUKCQgLAgQWAgMBAh4BAheAAAoJEOPAfNIampul0k0P/0MAbxLrDxcq3pfw5qI/ojJYU5T8DKXSDhMQa6xEOaMxkJw5sLfNm2iEU9vVVFR04chQo1HpOiWWjFp4Pj3e/0JQ7yfUY53+brucgAKY6vfSPid+acOja2oDRfLOe4wHncVyipUFtH9lLJIGPeBia6dvYhKIeVe3RgOJyVMUpSTb1s2rcv7MpJaxNmdMMFqlFm86IW0X7WIVZ6CkeJqIF2qNIzMPjLSfkhx8ZJYev+drGKJ0545dGJJgKnlUVO1MTlxNrZSvHewefLGJIVx6QQsLeIfOeP9oA/Ky/RVa20o61fXpsHIveX7IQE3QAf6uFpP44TjX3ZWeEWZX0N6MsArpJClsQPlAOcSUNABKlQJi9WId+BePXUvzFyOykM9fqd20/l4497BUU+FFmm7iIOmW43c/jkQY4ZLsui109PadrgNQh65nAbrc9ZM8YEogsmUtjAgBpZkepcYKvW8syDKvSDOHnkSvDxSXSEXW765sFTLVzhj6OZ3+ajxrHCJzAklgeG0EEyutudSfPUYOsTAwbOicwoivzr6/2sKA/yrkUzHQwZqW4CCWDNyGVGvB86v6J3kwYN7c07GBzwUuRwG93v4gIP8PUfJVXw3MEwcNVCzHTdY+eIuS6liStgpNAb0/9G/YRbvKZ1jKXbpeEWj+6KGAj1o3ROMrjan7pbAq
