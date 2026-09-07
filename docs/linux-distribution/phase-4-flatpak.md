@@ -1,8 +1,22 @@
-# Phase 4 — Flatpak / Flathub
+# Phase 4 — Flatpak (self-hosted repo)
 
 **Lift:** L (weeks; **touches app code**). **Reach:** every distro, one package,
-sandboxed, auto-updating via GNOME Software / KDE Discover / `flatpak update`.
-**Needs from maintainer:** a Flathub submission PR + review.
+sandboxed, auto-updating via `flatpak update` / GNOME Software / KDE Discover.
+**Needs from maintainer:** nothing ongoing — CI builds and signs it.
+
+**Status: live.** `.github/workflows/repo.yml` builds the Flatpak from
+`packaging/flatpak/` and bakes it into a GPG-signed OSTree repo on the `gh-pages`
+branch, served at `https://seraphx2.github.io/dev-prompt/flatpak` next to the
+apt/rpm/pacman trees. Users add it like any third-party remote:
+
+```sh
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak remote-add --if-not-exists --user dev-prompt \
+  https://seraphx2.github.io/dev-prompt/dev-prompt.flatpakrepo
+flatpak install --user dev-prompt io.github.seraphx2.devprompt
+```
+
+Flathub itself is **parked** — see "Flathub, if ever pursued" at the bottom.
 
 ## Why it's the big one
 
@@ -10,122 +24,180 @@ dev-prompt's whole job is to **launch other programs on the host** — editors,
 terminals, AI CLIs. A Flatpak runs in a sandbox where those binaries don't
 exist. Making it work is an architecture task, not just a manifest.
 
-## Blocking app-code changes (do these first, they're useful anyway)
+## App-code changes (done — active whether or not it runs sandboxed)
 
 ### 1. Spawn host processes through `flatpak-spawn --host`
 
-Everywhere the app execs an external program (`src-tauri/src/rules.rs`
-`terminalize()` and the action-launch path — grep for `Command::new`), when
-running under Flatpak it must prefix `flatpak-spawn --host`:
+`src-tauri/src/launch.rs` — `in_flatpak()` (presence of `/.flatpak-info`) and
+`spawn_detached()` prefix `flatpak-spawn --host --directory=<cwd> --` to every
+external exec when sandboxed. The terminal, editor, AI-CLI and app-scope
+`gtk-launch` paths all funnel through it. Needs `--talk-name=org.freedesktop.Flatpak`.
 
-- Detect sandbox: `std::env::var("FLATPAK_ID").is_ok()` (or presence of
-  `/.flatpak-info`).
-- Wrap: `flatpak-spawn --host --env=… -- <argv>`; working directory via
-  `--directory=`.
-- Requires the sandbox hole `--talk-name=org.freedesktop.Flatpak`.
-- Test matrix: terminal launch, editor launch, AI-CLI launch, each with a repo
-  path containing spaces.
+### 2. Host tool detection
 
-### 2. Global hotkey via the XDG GlobalShortcuts portal
+`src-tauri/src/rules.rs` — `host_which()` probes the host via
+`flatpak-spawn --host command -v`, memoised. Without it `requires:` / `needs:`
+gating and the terminal resolver check the *sandbox* PATH, which has none of the
+user's editors/CLIs, so every gated action vanishes.
 
-The sandbox cannot take a raw X11/Wayland global grab.
-`tauri-plugin-global-shortcut` needs to be on a version with
-`org.freedesktop.portal.GlobalShortcuts` support, or the app registers shortcuts
-through the portal directly (user approves them once in a system dialog; they're
-reconfigurable in system settings, not the app). Confirm current plugin
-capability before committing to a timeline — this may need an upstream bump or a
-Linux-specific code path.
+### 3. App-scope discovery reaches the host
 
-### 3. Autostart via the Background portal
+`src-tauri/src/apps.rs` — `app_dirs()` / `icon_roots()` add `/run/host/usr/**`
+so the `>` scope enumerates host system apps and their theme icons (via
+`--filesystem=host-os:ro`). Launching still goes through host `gtk-launch`.
 
-`~/.config/autostart` isn't writable from the sandbox. Use
-`org.freedesktop.portal.Background` `RequestBackground` with `autostart=true`.
-`tauri-plugin-autostart` may already do this when sandboxed — verify; if not,
-add a portal path.
+### 4. Updater + autostart
 
-### 4. Disable the in-app updater under Flatpak
+`updater_mode()` returns `managed` under Flatpak (`flatpak update` owns
+updates); the Settings "Start at login" toggle is hidden (`is_flatpak`
+command) — Flatpak autostart would need `org.freedesktop.portal.Background`
+`RequestBackground` (nice-to-have, not done).
 
-When `FLATPAK_ID` is set: no update polling, no update UI (Flatpak updates
-itself). Gate `pollUpdates()` / the Settings section on a
-`is_flatpak` command, or compile the updater plugin out via a cargo feature for
-the Flatpak build.
+### 5. Single-instance
 
-### 5. Tray
-
-Bundle/rely on `libayatana-appindicator3` (the GNOME/freedesktop runtime has the
-SNI stack). Add `--talk-name=org.kde.StatusNotifierWatcher` and
-`--talk-name=org.freedesktop.Notifications`.
+`tauri-plugin-single-instance` is skipped under Flatpak (`src-tauri/src/lib.rs`)
+— Flatpak enforces single-instance itself, and the session-bus name registration
+was briefly suspected in an early startup crash.
 
 ## The manifest
 
 `packaging/flatpak/io.github.seraphx2.devprompt.yaml`:
 
-- `runtime: org.gnome.Platform` / `sdk: org.gnome.Sdk` (GNOME runtime ships
-  WebKitGTK 4.1 + libsoup3), `sdk-extensions: org.freedesktop.Sdk.Extension.rust-stable`
-  and `.node<NN>`.
-- **Offline build** (Flathub requirement — no network during build):
-  - `flatpak-cargo-generator.py Cargo.lock -o cargo-sources.json`
-  - `flatpak-node-generator npm package-lock.json -o node-sources.json`
-  - regenerate both on every dependency change (CI check).
-- `finish-args` (minimum):
-  ```
-  --socket=wayland --socket=fallback-x11 --share=ipc
-  --device=dri
-  --talk-name=org.freedesktop.Flatpak            # flatpak-spawn --host
-  --talk-name=org.kde.StatusNotifierWatcher      # tray
-  --talk-name=org.freedesktop.Notifications      # notifications
-  --system-talk-name=… only if needed
-  --filesystem=home                              # it scans the user's repos
-  ```
-  Justify every hole in the Flathub PR; `--talk-name=org.freedesktop.Flatpak`
-  plus `--filesystem=home` will draw review scrutiny — explain the launcher
-  use-case.
+- `runtime: org.gnome.Platform` / `sdk: org.gnome.Sdk`, **version `50`**. The
+  EOL GNOME 48 runtime (WebKitGTK 2.48) crashed ~300 ms into startup in a
+  GPU-less Hyper-V guest; 2.50 (runtime 50) is fine. `sdk-extensions:`
+  `rust-stable` + `node22`. `default-branch: stable`.
+- `finish-args` — every hole carries an inline reviewer note in the manifest.
+  The load-bearing ones: `--socket=x11` (the global hotkey is an X11 grab via
+  XWayland — full x11, not `fallback-x11`, which withholds it under Wayland),
+  `--share=network` (WebKitGTK's network process won't start otherwise and then
+  no page — even bundled `tauri://` assets — loads), `--talk-name=org.freedesktop.Flatpak`
+  (host spawn), `--filesystem=host-os:ro` (the `>` scope),
+  `--filesystem=xdg-run/tray-icon:create` (the tray PNG lives in the private
+  runtime dir; without this one subdir shared the host SNI host sees nothing),
+  `--filesystem=home` (repo scan).
+- `build-commands` — `npm ci` then `npm run tauri build -- --no-bundle`
+  (bare `cargo build` leaves the binary in dev mode, reaching for
+  `localhost:1420`); install the binary + desktop/metainfo/icons rebased to the
+  app-id. Tray backend from the `flathub/shared-modules` submodule
+  (`libayatana-appindicator-gtk3` — the GNOME runtime has GTK3 but not the
+  appindicator libs).
+- **Network build.** `build-options.build-args: [--share=network]` and plain
+  `npm ci` / `cargo`. This is fine for the self-hosted repo (our CI has
+  network); Flathub's builders don't, so a submission there would swap this for
+  offline `cargo-sources.json` / `node-sources.json` (below).
 
-## Flathub submission
+## The self-hosted repo pipeline
 
-- Fork `flathub/flathub`, add the manifest on a branch named
-  `io.github.seraphx2.devprompt`, open a PR.
-- Passes: `flatpak-builder --lint`, `appstreamcli validate` on the Phase-1
-  metainfo, screenshot reachable.
-- After merge, Flathub builds and hosts; new releases go out by PRing a manifest
-  version/commit bump (or wiring `flathub/…` to track the git tag).
+`.github/workflows/repo.yml`, on `release: published` (or `workflow_dispatch`
+with a tag):
+
+- **`flatpak-repo` job** — checks out the tagged tree (`submodules: recursive`),
+  installs `flatpak` + `flatpak-builder` on `ubuntu-latest`, imports the signing
+  key (`REPO_GPG_PRIVATE_KEY`), stamps the real version into the metainfo
+  `<release>`, then:
+  ```sh
+  flatpak-builder --user --install-deps-from=flathub \
+    --repo=flatpak-repo --gpg-sign=E3C07CD21A9A9BA5 \
+    --force-clean --disable-rofiles-fuse \
+    build-dir packaging/flatpak/io.github.seraphx2.devprompt.yaml
+  flatpak build-update-repo --gpg-sign=E3C07CD21A9A9BA5 \
+    --generate-static-deltas --prune --prune-depth=20 flatpak-repo
+  ```
+  The runtime/SDK pull (~1.5 GB) is cached on `~/.local/share/flatpak` +
+  `.flatpak-builder`, keyed on the manifest + `Cargo.lock` + `package-lock.json`.
+  The signed OSTree repo is tarred and handed to `publish` as an artifact.
+  Best-effort: if this job fails, `publish` still ships the other trees and the
+  previous Flatpak repo stays in place.
+- **`publish` job** — after placing deb/rpm/pacman, wholesale-replaces
+  `site/flatpak` with the fresh (already signed + summary-updated) OSTree repo,
+  then `build-repo.sh` drops in `dev-prompt.flatpakrepo` +
+  `io.github.seraphx2.devprompt.flatpakref` and the landing page gains a
+  "Flatpak — any distro" section.
+
+No history preservation across releases (each build starts from an empty repo
+dir): `flatpak update` re-pulls the app (~tens of MB — the runtime is shared and
+unaffected), no cross-version static deltas. Fine at this project's release
+cadence; switch to `ostree pull-local` into the existing `site/flatpak` if it
+ever matters.
+
+## Signing / trust
+
+Same GPG key as the apt/rpm/pacman repo (id `E3C07CD21A9A9BA5`,
+`packaging/repo/dev-prompt-repo.asc`, private half = secret
+`REPO_GPG_PRIVATE_KEY`). `GPGKey=` in the two `.flatpakre{po,f}` descriptors is
+base64 of the de-armored public key; regenerate on a rotation with
+`gpg --dearmor < packaging/repo/dev-prompt-repo.asc | base64 -w0`.
+
+This is the same trust posture as the Phase 3 repo: no third-party review, no
+discovery in software centres beyond what the `.flatpakref` gives, but a
+GPG-signed repo over HTTPS from a public, MIT-licensed, CI-built source. The
+audience (developers installing a dev tool) adds third-party remotes routinely.
+
+## Local build + test
+
+```sh
+sudo pacman -S flatpak-builder                     # one-time
+flatpak install flathub org.gnome.Platform//50 org.gnome.Sdk//50 \
+  org.freedesktop.Sdk.Extension.rust-stable//25.08 \
+  org.freedesktop.Sdk.Extension.node22//25.08
+
+flatpak-builder --user --install --force-clean build-dir \
+  packaging/flatpak/io.github.seraphx2.devprompt.yaml
+flatpak run io.github.seraphx2.devprompt
+```
+
+Smoke test: tray icon appears; the hotkey (or tray ▸ Show) opens the overlay;
+"Open in terminal" / "Open in VS Code" on a repo launches the **host** program;
+the `>` scope lists host apps; Settings shows no "Start at login" checkbox.
+
+To exercise the signed-repo path locally, add `--repo=/tmp/dpr
+--gpg-sign=<your key>` to the builder and
+`flatpak build-update-repo --gpg-sign=<your key> /tmp/dpr`.
 
 ## Definition of done
 
-**Done** — built with `flatpak-builder` (GNOME 50) and run on CachyOS (KDE,
-Wayland, Hyper-V guest):
+**Done:**
 
-- [x] App-code, active whether or not it runs sandboxed:
-  - host launches routed through `flatpak-spawn --host` (`src-tauri/src/launch.rs`
-    `in_flatpak()` / `spawn_detached` — the terminal, editor, AI-CLI and
-    app-scope `gtk-launch` paths all funnel through it).
-  - tool detection (`requires:` / `needs:` / terminal resolver) probes the host
-    via `command -v`, memoised — `rules::host_which`. Without this the sandbox
-    PATH has none of the editors/CLIs and every gated action vanishes.
-  - `apps::discover` / icon resolution add `/run/host/usr/**` so the `>` scope
-    sees host system apps.
-  - updater `managed` under Flatpak; autostart toggle hidden (`is_flatpak`).
-  - `tauri-plugin-single-instance` skipped under Flatpak (redundant there).
-- [x] Manifest — `packaging/flatpak/io.github.seraphx2.devprompt.yaml`. Built via
-  `npm run tauri build -- --no-bundle` (bare `cargo build` leaves the binary in
-  dev mode). `finish-args`: `--socket=x11` (the hotkey is an X11 grab),
-  `--share=network` (WebKit's netprocess won't start without it),
-  `--filesystem=xdg-run/tray-icon:create` (tray PNG visibility),
-  `--filesystem=host-os:ro` (+ two `/var` app dirs) for the `>` scope,
-  `--talk-name=org.freedesktop.Flatpak` for host spawn. Tray module from the
-  `flathub/shared-modules` submodule. Desktop/metainfo/icons rebased to the
-  app-id; pass `desktop-file-validate` / `appstreamcli`.
-- [x] Verified on the box: overlay renders, **global hotkey summons it**, tray
-  icon shows, `>` lists host apps with icons, repo actions launch host programs.
+- [x] App-code (§1–5 above), active sandboxed or not.
+- [x] Manifest — `packaging/flatpak/io.github.seraphx2.devprompt.yaml`, network
+  build, `default-branch: stable`, reviewer notes inline.
+- [x] Verified on CachyOS (KDE, Wayland, Hyper-V guest): overlay renders,
+  **global hotkey summons it**, tray icon shows, `>` lists host apps with icons,
+  repo actions launch host programs.
+- [x] `repo.yml` `flatpak-repo` + `publish` jobs build, GPG-sign and publish the
+  OSTree repo to `gh-pages`.
+- [x] `dev-prompt.flatpakrepo` + `io.github.seraphx2.devprompt.flatpakref`
+  descriptors; landing page + README install section.
+- [x] `docs/linux-distribution/README.md` status row updated.
 
-**Pending** (needs a Flathub account):
+**Not done (nice-to-have):**
 
-- [ ] Generate `cargo-sources.json` / `node-sources.json`
-  (`flatpak-cargo-generator` / `flatpak-node-generator`); uncomment them in the
-  manifest and re-comment the local `--share=network` build-arg.
-- [ ] Flathub PR: `flatpak-builder --lint` clean, screenshots reachable (merge
-  `dev` → `main` first), permissions justified from the manifest's reviewer note.
 - [ ] Autostart via `org.freedesktop.portal.Background` `RequestBackground`
-  instead of the hidden toggle (needs `ashpd` / raw zbus) — nice-to-have.
+  instead of the hidden toggle (needs `ashpd` / raw zbus).
+- [ ] Global hotkey via `org.freedesktop.portal.GlobalShortcuts` instead of the
+  X11 grab — needs `tauri-plugin-global-shortcut` support that doesn't exist
+  upstream yet. This is also the main thing between the current manifest and a
+  Flathub submission.
+- [ ] Cross-version static deltas (`ostree pull-local` into the live repo).
 
-- [x] `docs/linux-distribution/README.md` status updated.
+## Flathub, if ever pursued
+
+Parked, not abandoned. The blocker is permission review: `--socket=x11`,
+`--talk-name=org.freedesktop.Flatpak`, `--filesystem=host-os:ro` and
+`--filesystem=home` together are a wide sandbox, and Flathub's "use the portal
+where one exists" rule points straight at the unfinished GlobalShortcuts work
+above. A submission would also need:
+
+- **Offline dependency sources** (Flathub builders have no network):
+  `flatpak-cargo-generator src-tauri/Cargo.lock -o cargo-sources.json` and
+  `flatpak-node-generator npm package-lock.json -o node-sources.json`, wired
+  into the manifest `sources:` with `--share=network` removed. Last attempt the
+  node generator's output was incomplete (missing `zimmerframe`) and the offline
+  `npm ci` failed `ENOTCACHED` — needs debugging.
+- PR against `flathub/flathub` `new-pr` branch (not `master`), the submission
+  template, `flatpak-builder-lint` clean via `org.flatpak.Builder`, screenshot
+  URLs reachable (they point at `main`).
+
+Self-hosting first isn't a detour: the app-code and manifest are the same, and
+the Flatpak gets real-world mileage before any review.

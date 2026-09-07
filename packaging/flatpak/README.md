@@ -1,18 +1,34 @@
 # packaging/flatpak/
 
-Flatpak manifest for dev-prompt (Phase 4). Design and rationale:
-[`docs/linux-distribution/phase-4-flatpak.md`](../../docs/linux-distribution/phase-4-flatpak.md).
+Flatpak manifest + remote descriptors for dev-prompt (Phase 4). Design and
+rationale: [`docs/linux-distribution/phase-4-flatpak.md`](../../docs/linux-distribution/phase-4-flatpak.md).
 
 ```
-io.github.seraphx2.devprompt.yaml   the manifest
+io.github.seraphx2.devprompt.yaml       the manifest
+dev-prompt.flatpakrepo                  remote descriptor  -> published at /dev-prompt.flatpakrepo
+io.github.seraphx2.devprompt.flatpakref one-click install  -> published at /io.github.seraphx2.devprompt.flatpakref
+shared-modules/                         flathub/shared-modules submodule (ayatana tray)
 ```
 
 ## Status
 
-**Working** — built with `flatpak-builder` (GNOME 50) and run on CachyOS (KDE,
-Wayland, in a Hyper-V guest). Overlay renders, **global hotkey summons it**, tray
-icon shows, the `>` scope lists host apps with icons, and repo actions launch
-host editors / terminals.
+**Live, self-hosted.** `.github/workflows/repo.yml` (`flatpak-repo` +
+`publish` jobs) builds this manifest on every release, GPG-signs it with the
+repo key (`E3C07CD21A9A9BA5`), and publishes the OSTree repo to
+`https://seraphx2.github.io/dev-prompt/flatpak` alongside the apt/rpm/pacman
+trees. Install:
+
+```sh
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak remote-add --if-not-exists --user dev-prompt \
+  https://seraphx2.github.io/dev-prompt/dev-prompt.flatpakrepo
+flatpak install --user dev-prompt io.github.seraphx2.devprompt
+```
+
+Built with `flatpak-builder` (GNOME 50) and run on CachyOS (KDE, Wayland, in a
+Hyper-V guest): overlay renders, **global hotkey summons it**, tray icon shows,
+the `>` scope lists host apps with icons, and repo actions launch host editors /
+terminals.
 
 Getting there took seven fixes, each a real Tauri-on-Flatpak gotcha:
 
@@ -30,30 +46,24 @@ Also: `tauri-plugin-single-instance` is skipped under Flatpak (`src-tauri/src/li
 — redundant there and it was briefly suspected in the startup crash.
 
 Cosmetic: `flatpak-builder` logs `Ignoring release element without timestamp or
-date` for the `0.0.0` metainfo placeholder — `release.yml` rewrites it with the
-real version + date at tag time.
+date` for the `0.0.0` metainfo placeholder — the `flatpak-repo` job rewrites it
+with the real version + date at build time (same `sed` as `release.yml`).
 
-Not yet done: the offline source generators and the Flathub PR (below).
+## Descriptors
 
-## Before the first build / Flathub PR
+`dev-prompt.flatpakrepo` (add-remote) and
+`io.github.seraphx2.devprompt.flatpakref` (one-click add-remote + install) are
+committed with the signing key baked in as `GPGKey=` (base64 of the de-armored
+public key). `build-repo.sh` copies both to the site root. On a key rotation,
+regenerate the `GPGKey=` value:
 
-1. **Offline dependency sources** (Flathub disallows network during build):
+```sh
+gpg --dearmor < ../repo/dev-prompt-repo.asc | base64 -w0
+```
 
-   ```sh
-   pip install --user flatpak-cargo-generator flatpak-node-generator   # or pipx
-   flatpak-cargo-generator src-tauri/Cargo.lock -o packaging/flatpak/cargo-sources.json
-   flatpak-node-generator npm package-lock.json  -o packaging/flatpak/node-sources.json
-   ```
-
-   Uncomment the two `- *-sources.json` lines in the manifest. Regenerate both
-   whenever `Cargo.lock` / `package-lock.json` change (worth a CI check).
-
-2. **Tray module** — done: `packaging/flatpak/shared-modules/` is the
-   [flathub/shared-modules](https://github.com/flathub/shared-modules) submodule,
-   and the manifest pulls
-   `shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json`.
-   `git submodule update --init` after a fresh clone.
-
+`shared-modules/` is the [flathub/shared-modules](https://github.com/flathub/shared-modules)
+submodule — `git submodule update --init` after a fresh clone; CI checks out
+`submodules: recursive`.
 
 ## Local build + test
 
@@ -71,15 +81,18 @@ flatpak run io.github.seraphx2.devprompt
 
 Smoke test: tray icon appears; the hotkey (or tray ▸ Show) opens the overlay;
 "Open in terminal" / "Open in VS Code" on a repo launches the **host** program;
-Settings shows no "Start at login" checkbox.
+the `>` scope lists host apps; Settings shows no "Start at login" checkbox.
 
-For a quick loop without the source generators, add `--share=network` under
-`build-options` temporarily — never commit that; Flathub's builders have no net.
+To rehearse the signed-repo path, add `--repo=/tmp/dpr --gpg-sign=<your key>` to
+the builder, then
+`flatpak build-update-repo --gpg-sign=<your key> --prune /tmp/dpr`.
 
-## Flathub submission
+## Flathub
 
-Fork `flathub/flathub`, branch `io.github.seraphx2.devprompt`, add the manifest,
-open the PR. Must pass `flatpak-builder --lint` and `appstreamcli validate` on
-`packaging/linux/io.github.seraphx2.devprompt.metainfo.xml`, with the screenshot
-URLs reachable (they point at `main`, so merge `dev` first). After merge, a new
-release is a manifest commit/version bump PR.
+Parked — the manifest's `--socket=x11` / `--talk-name=org.freedesktop.Flatpak` /
+`--filesystem=host-os:ro` draw review scrutiny against Flathub's "use the portal
+where one exists" rule, and a submission additionally needs offline
+`cargo-sources.json` / `node-sources.json` (the node generator's last output was
+incomplete). Details in
+[`docs/linux-distribution/phase-4-flatpak.md`](../../docs/linux-distribution/phase-4-flatpak.md)
+("Flathub, if ever pursued").

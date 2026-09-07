@@ -57,4 +57,15 @@ SigLevel = Required
 Server = $BASE/arch
 EOF
 sudo pacman -Sy dev-prompt</pre>
+
+<h2>Flatpak — any distro</h2>
+<p>One-click: open
+<a href="io.github.seraphx2.devprompt.flatpakref">io.github.seraphx2.devprompt.flatpakref</a>
+in your software centre. Or from a terminal:</p>
+<pre>flatpak remote-add --if-not-exists --user dev-prompt $BASE/dev-prompt.flatpakrepo
+flatpak install --user dev-prompt io.github.seraphx2.devprompt
+flatpak run io.github.seraphx2.devprompt</pre>
+<p style="color:#888">The GNOME 50 runtime is pulled from Flathub — add it first if you
+haven't: <code>flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo</code>.
+Updates: <code>flatpak update</code>.</p>
 HTML

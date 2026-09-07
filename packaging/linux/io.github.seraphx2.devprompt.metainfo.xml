@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   AppStream metainfo. Consumed by:
-    - Flathub (required)                     -> phase-4-flatpak.md
-    - GNOME Software / KDE Discover           -> shown for apt/rpm/AUR installs
+    - the self-hosted Flatpak (bundled into the app)  -> phase-4-flatpak.md
+    - GNOME Software / KDE Discover                    -> shown for apt/rpm/AUR/Flatpak installs
     - `appstreamcli validate` (CI, phase 1)
+    - a future Flathub submission (required there)
 
-  Before the first Flathub submission the maintainer must:
-    - keep the top <release> in sync with the shipped version (the release
-      workflow should prepend a <release> entry at tag time)
+  The <release> below is a 0.0.0/1970 placeholder; the release.yml and repo.yml
+  "Stamp AppStream release entry" steps sed in the real version/date at build
+  time (not committed back).
   Screenshots live in docs/img/ and are pulled by raw.githubusercontent URL;
   they resolve once dev is merged to main.
 -->

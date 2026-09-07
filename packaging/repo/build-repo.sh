@@ -2,12 +2,15 @@
 #
 # Rebuild the apt + rpm + pacman repository trees under <site> from every package
 # currently in the pools plus any new ones in <artifacts>, then sign all metadata
-# with the repo GPG key.
+# with the repo GPG key. Also drops in the landing page, the signing key, and the
+# Flatpak remote descriptors (the OSTree repo under <site>/flatpak is placed by
+# repo.yml, not here).
 #
 #   build-repo.sh <artifacts-dir> <site-dir> <gpg-key-id>
 #
-# Run from the repo root (needs packaging/repo/dev-prompt-repo.asc).
-# <site-dir> is a checkout / worktree of the gh-pages branch.
+# Run from the repo root (needs packaging/repo/dev-prompt-repo.asc and
+# packaging/flatpak/*.flatpakre{f,po}). <site-dir> is a checkout / worktree of
+# the gh-pages branch.
 #
 # Tools: apt-ftparchive (apt-utils), createrepo_c, gpg, rpm/rpmsign (rpm-sign on
 # Fedora, rpm on Debian/Ubuntu), and repo-add — the last from `pacman`; if it
@@ -115,6 +118,11 @@ createrepo_c "$SITE/rpm"
 
 # --------------------------------------------------------------- key + landing
 cp "$repo_root/packaging/repo/dev-prompt-repo.asc" "$SITE/dev-prompt.asc"
+# Flatpak remote descriptors. The OSTree repo itself under $SITE/flatpak is put
+# there by repo.yml (from the flatpak-repo job's artifact); these just point at it.
+cp "$repo_root/packaging/flatpak/dev-prompt.flatpakrepo" "$SITE/dev-prompt.flatpakrepo"
+cp "$repo_root/packaging/flatpak/io.github.seraphx2.devprompt.flatpakref" \
+   "$SITE/io.github.seraphx2.devprompt.flatpakref"
 KEYID="$KEYID" "$repo_root/packaging/repo/render-index.sh" > "$SITE/index.html"
 # Pages: don't run the output through Jekyll
 : > "$SITE/.nojekyll"

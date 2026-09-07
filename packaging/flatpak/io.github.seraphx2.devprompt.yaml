@@ -15,12 +15,12 @@
 # global hotkey summons it (X11 grab via --socket=x11), tray icon shows, the
 # ">" scope lists host apps, and repo actions launch host editors/terminals.
 #
-# Before the first Flathub submission: generate the offline dependency sources
-# (see packaging/flatpak/README.md) —
-#        cargo-sources.json   <- flatpak-cargo-generator src-tauri/Cargo.lock
-#        node-sources.json    <- flatpak-node-generator npm package-lock.json
-# — uncomment them below, and re-comment the LOCAL BUILD `--share=network`
-# build-arg (Flathub's builders have no network).
+# This manifest is the source for the self-hosted Flatpak repo
+# (https://seraphx2.github.io/dev-prompt/flatpak, built + GPG-signed by
+# .github/workflows/repo.yml). That build has network access, so `npm ci` and
+# `cargo` fetch dependencies directly and the build enables `--share=network`.
+# A future Flathub submission would instead need offline dependency sources
+# (cargo-sources.json / node-sources.json — see docs/linux-distribution/phase-4-flatpak.md).
 #
 # Sandbox rationale for the reviewer (dev-prompt is a launcher):
 #   --talk-name=org.freedesktop.Flatpak  run the user's editor / terminal / AI
@@ -43,6 +43,8 @@ sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
   - org.freedesktop.Sdk.Extension.node22
 command: dev-prompt
+# Users subscribe to a named branch, not "master".
+default-branch: stable
 
 finish-args:
   - --socket=wayland
@@ -80,12 +82,10 @@ build-options:
   append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node22/bin
   env:
     CARGO_HOME: /run/build/dev-prompt/cargo
-    npm_config_offline: 'true'
-  # LOCAL BUILD ONLY — for a build without the offline source generators,
-  # uncomment this and drop the two `--offline` flags below + `npm_config_offline`
-  # above. Flathub's builders have no network — never commit this enabled.
-  # build-args:
-  #   - --share=network
+  # The self-hosted repo build (repo.yml) has network; npm/cargo fetch directly.
+  # For a Flathub submission this comes out and offline *-sources.json go in.
+  build-args:
+    - --share=network
 
 modules:
   # --- tray backend -----------------------------------------------------
@@ -100,11 +100,8 @@ modules:
     sources:
       - type: dir
         path: ../..            # repo root
-      # Generated — see packaging/flatpak/README.md. Not committed until first build.
-      # - cargo-sources.json
-      # - node-sources.json
     build-commands:
-      - npm ci --offline
+      - npm ci
       # `tauri build` (not bare `cargo build`) so the binary serves the bundled
       # tauri:// assets instead of trying to reach the Vite dev server. Runs the
       # beforeBuildCommand (vite -> dist/) itself. --no-bundle: we install the

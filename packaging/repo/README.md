@@ -1,18 +1,23 @@
 # packaging/repo/
 
-The self-hosted apt + rpm + pacman repository (Phase 3). Full design:
-[`docs/linux-distribution/phase-3-apt-rpm-repo.md`](../../docs/linux-distribution/phase-3-apt-rpm-repo.md).
+The self-hosted apt + rpm + pacman repository (Phase 3). The Flatpak OSTree repo
+(Phase 4) is published to the same `gh-pages` tree by the same workflow. Full
+design: [`phase-3-apt-rpm-repo.md`](../../docs/linux-distribution/phase-3-apt-rpm-repo.md),
+[`phase-4-flatpak.md`](../../docs/linux-distribution/phase-4-flatpak.md).
 
 ```
 dev-prompt-repo.asc   repo signing public key (committed; published as /dev-prompt.asc)
-build-repo.sh         rebuild + sign the three repo trees under a gh-pages checkout
+build-repo.sh         rebuild + sign the deb/rpm/pacman trees under a gh-pages checkout;
+                      also drops in the landing page + the ../flatpak/*.flatpakre{f,po} descriptors
 render-index.sh       emit the landing page (index.html)
 ```
 
 `.github/workflows/repo.yml` runs on `release: published`: builds a pacman
-package from `../arch/PKGBUILD-bin` in an Arch container, then on a second job
+package from `../arch/PKGBUILD-bin` in an Arch container and (in parallel) the
+GPG-signed Flatpak OSTree repo from `../flatpak/`, then on the `publish` job
 downloads the release `.deb`/`.rpm`, imports the signing key, checks out
-`gh-pages`, runs `build-repo.sh`, and force-pushes the result.
+`gh-pages`, drops the Flatpak repo into `site/flatpak`, runs `build-repo.sh`, and
+force-pushes the result.
 
 ## Signing key
 
