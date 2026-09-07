@@ -751,8 +751,33 @@ pub fn set_dismiss_on_blur(state: State<'_, AppState>, enabled: bool) {
 /// [`set_autostart`] so a read never races ahead of a pending write.
 #[tauri::command]
 pub fn get_autostart(app: AppHandle) -> bool {
+    // Under Flatpak the autostart entry is owned by the XDG Background portal,
+    // not tauri-plugin-autostart — read the file it writes instead.
+    #[cfg(target_os = "linux")]
+    if crate::launch::in_flatpak() {
+        return crate::autostart::is_enabled();
+    }
     use tauri_plugin_autostart::ManagerExt;
     app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+/// Flatpak-only: register/unregister login autostart through the XDG Background
+/// portal (the sandbox can't write `~/.config/autostart` itself). Returns the
+/// state the portal granted; a first enable shows a system consent dialog.
+/// Async because it's a D-Bus round-trip that waits on the user.
+#[tauri::command]
+pub async fn set_autostart_portal(enabled: bool) -> AppResult<bool> {
+    #[cfg(target_os = "linux")]
+    {
+        crate::autostart::portal_set(enabled)
+            .await
+            .map_err(|e| AppError::msg(format!("autostart portal: {e}")))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = enabled;
+        Err(AppError::msg("portal autostart is Linux-only"))
+    }
 }
 
 /// Sync on purpose: it must stay sync so rapid checkbox toggles apply in click

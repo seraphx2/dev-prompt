@@ -49,9 +49,11 @@ so the `>` scope enumerates host system apps and their theme icons (via
 ### 4. Updater + autostart
 
 `updater_mode()` returns `managed` under Flatpak (`flatpak update` owns
-updates); the Settings "Start at login" toggle is hidden (`is_flatpak`
-command) — Flatpak autostart would need `org.freedesktop.portal.Background`
-`RequestBackground` (nice-to-have, not done).
+updates). "Start at login" still works: under Flatpak the toggle routes through
+the `org.freedesktop.portal.Background` `RequestBackground` portal
+(`src-tauri/src/autostart.rs`, `ashpd`) instead of `tauri-plugin-autostart` —
+the portal writes the host `~/.config/autostart` entry after a one-time consent
+dialog. `get_autostart` reads that file back (visible via `--filesystem=home`).
 
 ### 5. Single-instance
 
@@ -155,7 +157,7 @@ flatpak run io.github.seraphx2.devprompt
 
 Smoke test: tray icon appears; the hotkey (or tray ▸ Show) opens the overlay;
 "Open in terminal" / "Open in VS Code" on a repo launches the **host** program;
-the `>` scope lists host apps; Settings shows no "Start at login" checkbox.
+the `>` scope lists host apps; "Start at login" prompts for consent then persists.
 
 To exercise the signed-repo path locally, add `--repo=/tmp/dpr
 --gpg-sign=<your key>` to the builder and
@@ -175,17 +177,19 @@ To exercise the signed-repo path locally, add `--repo=/tmp/dpr
   OSTree repo to `gh-pages`.
 - [x] `dev-prompt.flatpakrepo` + `io.github.seraphx2.devprompt.flatpakref`
   descriptors; landing page + README install section.
+- [x] Autostart via `org.freedesktop.portal.Background` `RequestBackground`
+  (`src-tauri/src/autostart.rs`, `ashpd`) — the "Start at login" toggle works
+  in the Flatpak like it does natively, minus a one-time consent dialog.
 - [x] `docs/linux-distribution/README.md` status row updated.
 
-**Not done (nice-to-have):**
+**Not done:**
 
-- [ ] Autostart via `org.freedesktop.portal.Background` `RequestBackground`
-  instead of the hidden toggle (needs `ashpd` / raw zbus).
 - [ ] Global hotkey via `org.freedesktop.portal.GlobalShortcuts` instead of the
-  X11 grab — needs `tauri-plugin-global-shortcut` support that doesn't exist
-  upstream yet. This is also the main thing between the current manifest and a
-  Flathub submission.
-- [ ] Cross-version static deltas (`ostree pull-local` into the live repo).
+  X11 grab — blocked on `tauri-plugin-global-shortcut`, which has no portal
+  support upstream. The X11 grab (via XWayland) works today; this is the main
+  thing between the current manifest and a Flathub submission.
+- [ ] Cross-version static deltas (`ostree pull-local` into the live repo) —
+  optional; `flatpak update` just re-pulls the (small) app without them.
 
 ## Flathub, if ever pursued
 

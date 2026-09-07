@@ -8,6 +8,8 @@
 #![cfg_attr(not(windows), allow(dead_code, unused_imports, unused_mut))]
 
 mod apps;
+#[cfg(target_os = "linux")]
+mod autostart;
 mod cache;
 mod commands;
 mod config;
@@ -404,6 +406,7 @@ pub fn run() {
             commands::set_update_hint,
             commands::get_autostart,
             commands::set_autostart,
+            commands::set_autostart_portal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running dev-prompt");

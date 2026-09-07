@@ -10,14 +10,21 @@ reuse groundwork from earlier ones.
 
 | Phase | Channel | Reach | Lift | Needs from maintainer | Status |
 |---|---|---|---|---|---|
-| [1](phase-1-groundwork.md) | In-repo packaging groundwork | all channels | S | nothing | **done** bar a screenshot (`docs/img/overlay.png`, needed for Phase 4) |
+| [1](phase-1-groundwork.md) | In-repo packaging groundwork | all channels | S | nothing | **done** |
 | [2](phase-2-aur.md) | AUR | Arch / CachyOS / Manjaro / EndeavourOS | S | AUR account + SSH key | **parked** — AUR registration closed; Phase 3 covers `pacman` meanwhile |
 | [3](phase-3-apt-rpm-repo.md) | Self-hosted apt + rpm + **pacman** repo (GitHub Pages) | Debian/Ubuntu, Fedora/RHEL, Arch/CachyOS | M | a GPG key (generated in-phase) + enable Pages | **live** — apt/dnf/pacman all container-verified (install+upgrade); rpm package-signing bug found and fixed |
 | [4](phase-4-flatpak.md) | Flatpak (self-hosted repo; Flathub parked) | every distro (sandboxed) | L | nothing (Flathub PR only if pursued) | **live** — `repo.yml` builds + GPG-signs the Flatpak into the gh-pages OSTree repo alongside deb/rpm/pacman; verified on CachyOS (hotkey, tray, `>` scope, host launches). Flathub parked on permission-review risk |
-| [5](phase-5-snap.md) | Snap Store | Ubuntu-centric (sandboxed) | M (after 4) | Snapcraft account | not started |
+| [5](phase-5-snap.md) | Snap Store | Ubuntu-centric (sandboxed) | M (after 4) | Snapcraft account | **skipped indefinitely** — can't be self-hosted (store-only, manual review); audience already covered by Phase 3 + 4 |
 | [6](phase-6-distro-repos.md) | Official distro repos | max trust | — | a distro maintainer adopting it | passive |
 
 Lift: S = hours, M = a day or two, L = weeks and touches app code.
+
+**Roadmap status (2026-09): effectively complete.** Phases 1, 3 and 4 are live —
+a Linux user on any mainstream distro can install with `apt` / `dnf` / `pacman`
+or Flatpak and get updates through their normal flow, or take the AppImage.
+Phase 2 (AUR) is parked on external registration; Phase 5 (Snap) is skipped by
+choice; Phase 6 (official distro repos) is a passive long-term goal, not a task.
+No further work is planned.
 
 ## What already exists (this is the baseline all phases build on)
 
@@ -59,9 +66,11 @@ Lift: S = hours, M = a day or two, L = weeks and touches app code.
   `ubuntu-22.04` where `libayatana-appindicator3-dev` is installed.
 - **Autostart:** `tauri-plugin-autostart` writes
   `~/.config/autostart/dev-prompt.desktop` with
-  `Exec=<binary> --autostart` (starts silent in the tray). Inside a sandbox
-  this path is unavailable — use the `org.freedesktop.portal.Background`
-  portal instead (Phase 4).
+  `Exec=<binary> --autostart` (starts silent in the tray). Inside the Flatpak
+  sandbox that path isn't writable, so the toggle routes through the
+  `org.freedesktop.portal.Background` `RequestBackground` portal instead
+  (`src-tauri/src/autostart.rs`, `ashpd`) — one consent dialog, then the portal
+  maintains the same host autostart entry.
 - **Signing keys — keep them straight:**
   | Key | Purpose | Where |
   |---|---|---|

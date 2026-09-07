@@ -4,6 +4,26 @@
 **Reach:** Ubuntu and derivatives primarily; any distro with `snapd`.
 **Needs from maintainer:** a Snapcraft (Ubuntu One) account.
 
+## Status: skipped indefinitely (2026-09)
+
+Not planned. The reasoning:
+
+- **Snap can't be self-hosted.** `snapd` only auto-refreshes snaps tracked from
+  the Snap Store (`api.snapcraft.io`); a sideloaded `snap install --dangerous`
+  never updates. There's no decentralised remote like Flatpak's OSTree repos, so
+  an auto-updating snap *must* go through Canonical's store — account, upload,
+  and a manual `classic`-confinement review.
+- **The audience is already covered.** Snap's reach is Ubuntu-centric, and those
+  users have the apt repo (Phase 3) plus the self-hosted Flatpak (Phase 4). The
+  only thing the store adds is `snap find` discoverability — which requires the
+  store.
+- **Not doing Flatpak obliges doing Snap.** Flatpak-only is a coherent stance
+  (decentralised, FOSS, self-hosted); Snap is the Canonical-ecosystem play and
+  skipping it doesn't leave a gap the other channels don't already fill.
+
+Revisit only if there's concrete demand from Snap users that the apt repo and
+Flatpak somehow don't satisfy. The design notes below are kept for that case.
+
 ## Why after Flatpak
 
 Snap's confinement raises the same wall as Flatpak: a strictly-confined snap

@@ -87,7 +87,7 @@ flatpak run io.github.seraphx2.devprompt
 
 Smoke test: tray icon appears; the hotkey (or tray ▸ Show) opens the overlay;
 "Open in terminal" / "Open in VS Code" on a repo launches the **host** program;
-the `>` scope lists host apps; Settings shows no "Start at login" checkbox.
+the `>` scope lists host apps; "Start at login" prompts for consent then persists.
 
 To rehearse the signed-repo path, add `--repo=/tmp/dpr --gpg-sign=<your key>` to
 the builder, then
