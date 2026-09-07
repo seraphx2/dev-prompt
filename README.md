@@ -194,6 +194,12 @@ recipe for smoke-testing a Linux bundle locally.
 
 ## Usage
 
+dev-prompt is meant to sit in the background and be summoned by its hotkey, so
+turn on **Settings ▸ Start at login** — then the hotkey is live from every boot
+and the app is never a window you have to find. (On Flatpak your desktop asks
+permission the first time; on the AppImage there's no autostart hook, so add one
+via your desktop's session settings.)
+
 **Repo list**
 
 | Key                  | Action                                                |

@@ -91,7 +91,9 @@ modules:
   # --- tray backend -----------------------------------------------------
   # libayatana-appindicator (+ libdbusmenu) — the SNI stack Tauri's tray uses.
   # From the flathub/shared-modules submodule; the GNOME runtime has GTK3 but
-  # not the appindicator libraries.
+  # not the appindicator libraries. Built inside the flathub-infra
+  # flatpak-github-actions container (gnome-50), whose toolchain matches what
+  # this module chain expects (CMake installs to /app/lib, not lib64).
   - shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json
 
   # --- the app ----------------------------------------------------------

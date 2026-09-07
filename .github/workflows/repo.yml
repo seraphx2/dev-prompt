@@ -66,12 +66,18 @@ jobs:
           if-no-files-found: error
 
   # Build the Flatpak from packaging/flatpak/ and bake it into a GPG-signed
-  # OSTree repo, handed to `publish` as a tarball. Heavy (~30 min: pulls the
-  # GNOME 50 SDK, full cargo + vite build), so it's its own job and best-effort
-  # — if it fails, `publish` still ships the apt/rpm/pacman trees and leaves the
-  # last Flatpak repo in place.
+  # OSTree repo, handed to `publish` as a tarball. Runs inside the flathub-infra
+  # flatpak-github-actions container (matched to runtime-version '50') so
+  # flatpak-builder + the shared-modules ayatana chain behave exactly as they do
+  # for Flathub — the bare ubuntu runner's newer SDK installed cmake modules to
+  # /app/lib64 and broke the tray chain. Heavy (~30 min: SDK + full cargo/vite
+  # build) and best-effort — if it fails, `publish` still ships the apt/rpm/
+  # pacman trees and leaves the last Flatpak repo in place.
   flatpak-repo:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged # flatpak-builder's bwrap sandbox needs it
     steps:
       - uses: actions/checkout@v7
         with:
@@ -86,23 +92,19 @@ jobs:
           tag="${{ github.event.release.tag_name || inputs.tag }}"
           echo "value=${tag#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Flatpak tooling
+      - name: Flathub remote
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
           flatpak remote-add --user --if-not-exists \
             flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
-      # The runtime/SDK download (~1.5 GB) dominates a cold run; key the cache on
-      # the manifest + lockfiles so it survives until a dependency actually moves.
-      - name: Cache Flatpak build state
+      # The build module cache (cargo compile + fetched sources) is the real time
+      # sink; the container already carries the GNOME 50 SDK.
+      - name: Cache flatpak-builder state
         uses: actions/cache@v6
         with:
-          path: |
-            .flatpak-builder
-            ~/.local/share/flatpak
-          key: flatpak-gnome50-${{ hashFiles('packaging/flatpak/io.github.seraphx2.devprompt.yaml', 'src-tauri/Cargo.lock', 'package-lock.json') }}
-          restore-keys: flatpak-gnome50-
+          path: .flatpak-builder
+          key: flatpak-builder-gnome50-${{ hashFiles('packaging/flatpak/io.github.seraphx2.devprompt.yaml', 'src-tauri/Cargo.lock', 'package-lock.json') }}
+          restore-keys: flatpak-builder-gnome50-
 
       - name: Import signing key
         env:

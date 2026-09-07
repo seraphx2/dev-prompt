@@ -63,7 +63,13 @@ gpg --dearmor < ../repo/dev-prompt-repo.asc | base64 -w0
 
 `shared-modules/` is the [flathub/shared-modules](https://github.com/flathub/shared-modules)
 submodule — `git submodule update --init` after a fresh clone; CI checks out
-`submodules: recursive`.
+`submodules: recursive`. The manifest pulls its
+`libayatana-appindicator/libayatana-appindicator-gtk3.json` for the tray stack.
+CI builds inside the `flathub-infra/flatpak-github-actions:gnome-50` container so
+`flatpak-builder` and that module chain behave as they do for Flathub — on a
+bare `ubuntu-latest` the newer freedesktop SDK's CMake installed the ayatana
+libs to `/app/lib64` and `libayatana-indicator` couldn't find the
+`libayatana-ido3` `.pc`.
 
 ## Local build + test
 
@@ -81,7 +87,7 @@ flatpak run io.github.seraphx2.devprompt
 
 Smoke test: tray icon appears; the hotkey (or tray ▸ Show) opens the overlay;
 "Open in terminal" / "Open in VS Code" on a repo launches the **host** program;
-the `>` scope lists host apps; Settings shows no "Start at login" checkbox.
+the `>` scope lists host apps; "Start at login" prompts for consent then persists.
 
 To rehearse the signed-repo path, add `--repo=/tmp/dpr --gpg-sign=<your key>` to
 the builder, then

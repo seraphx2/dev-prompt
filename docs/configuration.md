@@ -51,6 +51,24 @@ stays active.
 
 ---
 
+## Start at login
+
+**Settings ▸ Start at login** registers dev-prompt to launch (silently, into the
+tray) when you log in — recommended, since the app is only useful when it's
+already running to catch the hotkey. It applies immediately, not on Save, and
+the OS is the source of truth: the checkbox reflects the actual autostart entry.
+
+- **Windows / native Linux / macOS** — writes the platform autostart entry
+  directly (`~/.config/autostart/dev-prompt.desktop`, a `Run` key, or a
+  LaunchAgent).
+- **Flatpak** — the sandbox can't write that file, so the toggle asks
+  `xdg-desktop-portal` to do it. The **first** enable shows a system consent
+  dialog ("Allow dev-prompt to start automatically?"); after that it's silent.
+- **AppImage** — no autostart hook. Add one yourself via your desktop's session
+  / autostart settings, pointing at the AppImage with `--autostart`.
+
+---
+
 ## Terminal
 
 Which terminal emulator "Open in terminal" and every `terminal: true` action

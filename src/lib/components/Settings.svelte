@@ -16,6 +16,7 @@
     rescanApps,
     saveConfig,
     setAutostart,
+    setAutostartPortal,
   } from "../ipc";
   import type { ConfigSummary, RepoTrace, TerminalOption } from "../types";
   import HotkeyRecorder from "./HotkeyRecorder.svelte";
@@ -138,9 +139,15 @@
   });
 
   // Autostart applies immediately (the OS is the source of truth), not via Save.
+  // Under Flatpak it goes through the Background portal, which pops a consent
+  // dialog the first time and returns the state it actually granted.
   async function toggleAutostart() {
     try {
-      await setAutostart(autostart);
+      if (flatpak) {
+        autostart = await setAutostartPortal(autostart);
+      } else {
+        await setAutostart(autostart);
+      }
     } catch (e) {
       autostart = !autostart; // revert on failure
       note(`${e}`, true);
@@ -424,12 +431,7 @@
       </div>
 
       <div class="space-y-5">
-        {#if flatpak}
-          <p class="text-[11px] text-white/25">
-            Start-at-login is managed by your desktop for Flatpak apps — enable
-            dev-prompt in your session's autostart settings.
-          </p>
-        {:else}
+        <div class="space-y-1">
           <label class="flex items-center gap-2">
             <input
               type="checkbox"
@@ -439,7 +441,12 @@
             />
             <span class="text-orange-400">Start at login</span>
           </label>
-        {/if}
+          {#if flatpak}
+            <p class="pl-6 text-[11px] text-white/25">
+              Your desktop will ask permission the first time.
+            </p>
+          {/if}
+        </div>
 
         <div class="space-y-2">
           <span class="text-orange-400">Global hotkeys</span>

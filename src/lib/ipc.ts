@@ -175,6 +175,15 @@ export function setAutostart(enabled: boolean): Promise<void> {
   return invoke<void>("set_autostart", { enabled });
 }
 
+/**
+ * Flatpak-only autostart via the XDG Background portal (the sandbox can't write
+ * ~/.config/autostart). Shows a system consent dialog the first time; resolves
+ * to the state the portal actually granted.
+ */
+export function setAutostartPortal(enabled: boolean): Promise<boolean> {
+  return invoke<boolean>("set_autostart_portal", { enabled });
+}
+
 /** Toggle whether clicking away dismisses the overlay (off for the settings screen). */
 export function setDismissOnBlur(enabled: boolean): Promise<void> {
   return invoke<void>("set_dismiss_on_blur", { enabled });
