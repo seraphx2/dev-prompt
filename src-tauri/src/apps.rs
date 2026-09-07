@@ -426,16 +426,30 @@ mod linux {
     /// activation and startup notification are all the platform's problem, not
     /// ours. Falls back to `gio launch`, then to spawning the parsed `Exec`.
     pub fn launch(entry: &AppEntry) -> AppResult<()> {
-        let id = Path::new(&entry.exec)
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        // The gtk-launch / gio id is the freedesktop desktop-file ID:
+        // the path under `applications/`, `.desktop` stripped, `/` -> `-`
+        // (so `kde/systemsettings.desktop` -> `kde-systemsettings`). A plain
+        // file_stem drops the subdir and gtk-launch then can't resolve it.
+        let id = entry
+            .exec
+            .rsplit_once("/applications/")
+            .map(|(_, rel)| rel.trim_end_matches(".desktop").replace('/', "-"))
+            .unwrap_or_else(|| {
+                Path::new(&entry.exec)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            });
 
         if !id.is_empty() && which("gtk-launch").is_some() {
             return crate::launch::spawn("gtk-launch", &[id], "");
         }
         if which("gio").is_some() {
-            return crate::launch::spawn("gio", &["launch".into(), entry.exec.clone()], "");
+            // Under Flatpak entry.exec is a /run/host/... path that host `gio`
+            // (via flatpak-spawn --host) can't see — strip the prefix to the
+            // real host path. Non-host paths (~/.local/share/...) are unchanged.
+            let path = entry.exec.strip_prefix("/run/host").unwrap_or(&entry.exec);
+            return crate::launch::spawn("gio", &["launch".into(), path.to_string()], "");
         }
 
         // Last resort: run the parsed Exec ourselves.
@@ -486,10 +500,19 @@ mod linux {
         }
 
         let home = dirs::home_dir();
-        let data_home = std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .filter(|p| p.is_absolute())
-            .or_else(|| home.as_ref().map(|h| h.join(".local/share")));
+        // Under Flatpak, $XDG_DATA_HOME is redirected into
+        // ~/.var/app/<id>/data (empty), so honouring it would hide every
+        // user-level entry — including `flatpak install --user` apps, the common
+        // case. The real ~/.local/share is reachable via --filesystem=home;
+        // reach it through $HOME, exactly as autostart.rs does.
+        let data_home = if crate::launch::in_flatpak() {
+            home.as_ref().map(|h| h.join(".local/share"))
+        } else {
+            std::env::var_os("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute())
+                .or_else(|| home.as_ref().map(|h| h.join(".local/share")))
+        };
         if let Some(dh) = &data_home {
             push_dir(&mut dirs, dh.join("applications"));
             push_dir(&mut dirs, dh.join("flatpak/exports/share/applications"));
@@ -759,40 +782,50 @@ mod linux {
         None
     }
 
-    fn icon_roots() -> Vec<PathBuf> {
-        let mut roots = Vec::new();
-        if let Some(h) = dirs::home_dir() {
-            roots.push(h.join(".local/share/icons"));
-            roots.push(h.join(".icons"));
-        }
-        let data_dirs = std::env::var("XDG_DATA_DIRS")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
-        for base in data_dirs.split(':').filter(|s| !s.is_empty()) {
-            roots.push(Path::new(base).join("icons"));
-        }
-        roots.push(PathBuf::from("/usr/share/pixmaps"));
-        // Host icon themes for the /run/host apps (see app_dirs).
-        if crate::launch::in_flatpak() {
-            roots.push(PathBuf::from("/run/host/usr/share/icons"));
-            roots.push(PathBuf::from("/run/host/usr/local/share/icons"));
-            roots.push(PathBuf::from("/run/host/usr/share/pixmaps"));
-        }
-        roots
+    // Both are invariant for the process and were being rebuilt once per app
+    // icon — `icon_themes()` in particular forks `gsettings` on any non-GNOME
+    // desktop. Memoised; a GTK theme change mid-session needs a restart to
+    // re-resolve icons (a rescan alone reuses the cached themes).
+    fn icon_roots() -> &'static [PathBuf] {
+        static ROOTS: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+        ROOTS.get_or_init(|| {
+            let mut roots = Vec::new();
+            if let Some(h) = dirs::home_dir() {
+                roots.push(h.join(".local/share/icons"));
+                roots.push(h.join(".icons"));
+            }
+            let data_dirs = std::env::var("XDG_DATA_DIRS")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+            for base in data_dirs.split(':').filter(|s| !s.is_empty()) {
+                roots.push(Path::new(base).join("icons"));
+            }
+            roots.push(PathBuf::from("/usr/share/pixmaps"));
+            // Host icon themes for the /run/host apps (see app_dirs).
+            if crate::launch::in_flatpak() {
+                roots.push(PathBuf::from("/run/host/usr/share/icons"));
+                roots.push(PathBuf::from("/run/host/usr/local/share/icons"));
+                roots.push(PathBuf::from("/run/host/usr/share/pixmaps"));
+            }
+            roots
+        })
     }
 
-    fn icon_themes() -> Vec<String> {
-        let mut themes: Vec<String> = Vec::new();
-        if let Some(t) = configured_icon_theme() {
-            themes.push(t);
-        }
-        for d in ["Adwaita", "breeze", "Papirus", "hicolor", "gnome"] {
-            if !themes.iter().any(|t| t == d) {
-                themes.push(d.to_string());
+    fn icon_themes() -> &'static [String] {
+        static THEMES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+        THEMES.get_or_init(|| {
+            let mut themes: Vec<String> = Vec::new();
+            if let Some(t) = configured_icon_theme() {
+                themes.push(t);
             }
-        }
-        themes
+            for d in ["Adwaita", "breeze", "Papirus", "hicolor", "gnome"] {
+                if !themes.iter().any(|t| t == d) {
+                    themes.push(d.to_string());
+                }
+            }
+            themes
+        })
     }
 
     /// The GTK icon theme from `settings.ini`, else `gsettings`, else `None`.
@@ -832,7 +865,7 @@ mod linux {
         let roots = icon_roots();
         let themes = icon_themes();
 
-        for root in &roots {
+        for root in roots {
             let is_pixmaps = root.ends_with("pixmaps");
             if is_pixmaps {
                 for ext in EXTS.iter().chain(std::iter::once(&"xpm")) {
@@ -840,7 +873,7 @@ mod linux {
                 }
                 continue;
             }
-            for theme in &themes {
+            for theme in themes {
                 for size in SIZES {
                     for ext in EXTS {
                         // freedesktop / hicolor layout

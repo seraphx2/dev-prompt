@@ -86,6 +86,7 @@ true
 # and loopback/batch flags so it never tries to prompt on a passphrase-less key.
 rpm_sign_cmd="$(command -v gpg) --no-verbose --no-armor --batch --pinentry-mode loopback -u \"%{_gpg_name}\" -sbo %{__signature_filename} --digest-algo sha256 %{__plaintext_filename}"
 for f in "$SITE"/rpm/*.rpm; do
+  [ -e "$f" ] || continue   # nullglob is off here; skip the literal glob on an empty pool
   rpm --define "_gpg_name $KEYID" \
       --define "__gpg_sign_cmd $rpm_sign_cmd" \
       --addsign "$f"
@@ -97,13 +98,19 @@ createrepo_c "$SITE/rpm"
 # ----------------------------------------------------------------------- pacman
 (
   cd "$SITE/arch"
+  shopt -s nullglob   # subshell-local; an empty pool must not become a literal glob
+  pkgs=(./*.pkg.tar.zst)
+  if (( ${#pkgs[@]} == 0 )); then
+    echo "pacman: no packages in the pool yet — skipping"
+    exit 0
+  fi
   rm -f dev-prompt.db* dev-prompt.files*
   if command -v repo-add >/dev/null; then
-    repo-add dev-prompt.db.tar.gz ./*.pkg.tar.zst
+    repo-add dev-prompt.db.tar.gz "${pkgs[@]}"
   else
     # `repo-add` ships in the `pacman` package, already present in the image.
     docker run --rm -v "$PWD:/a" -w /a archlinux:latest \
-      repo-add dev-prompt.db.tar.gz ./*.pkg.tar.zst
+      repo-add dev-prompt.db.tar.gz "${pkgs[@]}"
   fi
   # GitHub Pages doesn't serve symlinks — materialise the names pacman fetches
   # ("$repo.db", "$repo.files") as real files.
@@ -111,7 +118,7 @@ createrepo_c "$SITE/rpm"
     cp --remove-destination "dev-prompt.$n.tar.gz" "dev-prompt.$n"
   done
   # detached sigs under the fetched names: the db + every package
-  for f in dev-prompt.db ./*.pkg.tar.zst; do
+  for f in dev-prompt.db "${pkgs[@]}"; do
     "${gpg_bin[@]}" --detach-sign --no-armor -o "$f.sig" "$f"
   done
 )
