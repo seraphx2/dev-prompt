@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   AppStream metainfo. Consumed by:
-    - Flathub (required)                     -> phase-4-flatpak.md
-    - GNOME Software / KDE Discover           -> shown for apt/rpm/AUR installs
+    - the self-hosted Flatpak (bundled into the app)  -> phase-4-flatpak.md
+    - GNOME Software / KDE Discover                    -> shown for apt/rpm/AUR/Flatpak installs
     - `appstreamcli validate` (CI, phase 1)
+    - a future Flathub submission (required there)
 
-  Before the first Flathub submission the maintainer must:
-    - commit a real screenshot at docs/img/overlay.png (see <screenshots> below)
-    - keep the top <release> in sync with the shipped version (the release
-      workflow should prepend a <release> entry at tag time)
+  The <release> below is a 0.0.0/1970 placeholder; the release.yml and repo.yml
+  "Stamp AppStream release entry" steps sed in the real version/date at build
+  time (not committed back).
+  Screenshots live in docs/img/ and are pulled by raw.githubusercontent URL;
+  they resolve once dev is merged to main.
 -->
 <component type="desktop-application">
   <id>io.github.seraphx2.devprompt</id>
@@ -57,11 +59,17 @@
   </keywords>
 
   <screenshots>
-    <!-- TODO(phase 1): commit docs/img/overlay.png before Phase 4.
-         Flathub requires >=1 screenshot; PNG/JPEG, <=2000px wide. -->
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/seraphx2/dev-prompt/main/docs/img/overlay.png</image>
-      <caption>The overlay searching repositories</caption>
+      <image>https://raw.githubusercontent.com/seraphx2/dev-prompt/main/docs/img/1_dev-prompt_repos.png</image>
+      <caption>Fuzzy-search every repository under your code folders</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/seraphx2/dev-prompt/main/docs/img/2_dev-prompt_actions.png</image>
+      <caption>Each repo's action menu, built from the scripts and tools the project actually uses</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/seraphx2/dev-prompt/main/docs/img/3_dev-prompt_apps.png</image>
+      <caption>Type &gt; to switch to an installed-application launcher</caption>
     </screenshot>
   </screenshots>
 

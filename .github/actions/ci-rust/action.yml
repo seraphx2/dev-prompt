@@ -20,9 +20,9 @@ runs:
           librsvg2-dev libayatana-appindicator3-dev
 
     - name: Setup Node
-      uses: actions/setup-node@v5
+      uses: actions/setup-node@v7
       with:
-        node-version: 22
+        node-version-file: .nvmrc
         cache: npm
 
     - name: Setup Rust

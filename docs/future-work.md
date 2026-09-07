@@ -55,10 +55,9 @@ icons, frecency, `apps.{enabled,extra_dirs,exclude}`, Settings controls. Left:
   action menu, app → launch).
 - **App action menu** — Tab on an app row → Open / Open file location / Run as
   administrator / Copy path. Currently Tab is a no-op in the `>` scope.
-- **Non-Windows discovery** — `apps::discover` returns `[]` off Windows. Linux:
-  parse `$XDG_DATA_DIRS/applications/*.desktop` (`Name`, `Exec`, `Icon`, skip
-  `NoDisplay=true`). macOS: enumerate `/Applications` + `~/Applications`
-  `.app` bundles, launch via `open -a`.
+- **macOS discovery** — `apps::discover` returns `[]` on macOS (Windows and
+  Linux are implemented). Enumerate `/Applications` + `~/Applications` `.app`
+  bundles, launch via `open -a`.
 - **Native enumeration** — replace the embedded PowerShell script with direct
   registry reads + `IShellLink` if the ~4 s cold rescan ever matters.
 

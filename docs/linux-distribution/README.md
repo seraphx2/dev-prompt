@@ -12,8 +12,8 @@ reuse groundwork from earlier ones.
 |---|---|---|---|---|---|
 | [1](phase-1-groundwork.md) | In-repo packaging groundwork | all channels | S | nothing | **done** bar a screenshot (`docs/img/overlay.png`, needed for Phase 4) |
 | [2](phase-2-aur.md) | AUR | Arch / CachyOS / Manjaro / EndeavourOS | S | AUR account + SSH key | **parked** — AUR registration closed; Phase 3 covers `pacman` meanwhile |
-| [3](phase-3-apt-rpm-repo.md) | Self-hosted apt + rpm + **pacman** repo (GitHub Pages) | Debian/Ubuntu, Fedora/RHEL, Arch/CachyOS | M | a GPG key (generated in-phase) + enable Pages | **next** |
-| [4](phase-4-flatpak.md) | Flatpak / Flathub | every distro (sandboxed) | L | Flathub PR review | not started |
+| [3](phase-3-apt-rpm-repo.md) | Self-hosted apt + rpm + **pacman** repo (GitHub Pages) | Debian/Ubuntu, Fedora/RHEL, Arch/CachyOS | M | a GPG key (generated in-phase) + enable Pages | **live** — apt/dnf/pacman all container-verified (install+upgrade); rpm package-signing bug found and fixed |
+| [4](phase-4-flatpak.md) | Flatpak (self-hosted repo; Flathub parked) | every distro (sandboxed) | L | nothing (Flathub PR only if pursued) | **live** — `repo.yml` builds + GPG-signs the Flatpak into the gh-pages OSTree repo alongside deb/rpm/pacman; verified on CachyOS (hotkey, tray, `>` scope, host launches). Flathub parked on permission-review risk |
 | [5](phase-5-snap.md) | Snap Store | Ubuntu-centric (sandboxed) | M (after 4) | Snapcraft account | not started |
 | [6](phase-6-distro-repos.md) | Official distro repos | max trust | — | a distro maintainer adopting it | passive |
 
@@ -66,9 +66,9 @@ Lift: S = hours, M = a day or two, L = weeks and touches app code.
   | Key | Purpose | Where |
   |---|---|---|
   | minisign keypair | in-app updater artifact signatures | pubkey in `tauri.conf.json`; private key = repo secrets `TAURI_SIGNING_PRIVATE_KEY` (+ empty `_PASSWORD`) |
-  | GPG key | signs the apt + rpm + pacman repo metadata (one key, all three) | Phase 3 — generated in-phase; pubkey at `packaging/repo/dev-prompt-repo.asc` (id `E3C07CD21A9A9BA5`, hardcoded in the workflow — not secret); private key = secret `REPO_GPG_PRIVATE_KEY` |
+  | GPG key | signs the apt + rpm + pacman repo metadata **and the self-hosted Flatpak OSTree repo** (one key, all four) | Phase 3 — generated in-phase; pubkey at `packaging/repo/dev-prompt-repo.asc` (id `E3C07CD21A9A9BA5`, hardcoded in the workflow — not secret); private key = secret `REPO_GPG_PRIVATE_KEY` |
   | SSH key | pushes to `aur.archlinux.org` | Phase 2 — parked |
-  | (Flathub signs its own builds; nothing to manage) | | |
+  | (a Flathub submission, if ever pursued, would have Flathub sign its own builds) | | |
 
 ## How the in-app updater interacts with system packages
 

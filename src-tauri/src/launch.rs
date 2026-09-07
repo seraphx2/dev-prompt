@@ -4,6 +4,12 @@ use crate::rules::Action;
 use crate::error::{AppError, AppResult};
 use crate::scan::Repo;
 
+/// True when running inside a Flatpak sandbox. `/.flatpak-info` is always
+/// present there (unlike `$FLATPAK_ID`, which `flatpak run` doesn't always set).
+pub fn in_flatpak() -> bool {
+    std::path::Path::new("/.flatpak-info").exists()
+}
+
 fn substitute(template: &str, repo: &Repo) -> String {
     template
         .replace("{{path}}", &repo.path)
@@ -78,11 +84,28 @@ fn spawn_detached(program: &str, args: &[String], cwd: &str, via_cmd: bool) -> A
 
 #[cfg(not(windows))]
 fn spawn_detached(program: &str, args: &[String], cwd: &str, _via_cmd: bool) -> AppResult<()> {
-    let mut cmd = Command::new(program);
-    cmd.args(args);
-    if !cwd.is_empty() {
-        cmd.current_dir(cwd);
-    }
+    let mut cmd = if in_flatpak() {
+        // Inside the sandbox the editors / terminals / CLIs we launch live on
+        // the host, not in the runtime. `flatpak-spawn --host` runs them there;
+        // `--directory=` sets the host-side cwd (the sandbox's own cwd is
+        // meaningless to the target). Needs the `--talk-name=org.freedesktop.Flatpak`
+        // hole — see packaging/flatpak/. No `--watch-bus`: the launched process
+        // should outlive the overlay.
+        let mut c = Command::new("flatpak-spawn");
+        c.arg("--host");
+        if !cwd.is_empty() {
+            c.arg(format!("--directory={cwd}"));
+        }
+        c.arg("--").arg(program).args(args);
+        c
+    } else {
+        let mut c = Command::new(program);
+        c.args(args);
+        if !cwd.is_empty() {
+            c.current_dir(cwd);
+        }
+        c
+    };
 
     #[cfg(unix)]
     {

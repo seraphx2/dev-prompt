@@ -1,9 +1,10 @@
 name: Repo
 
-# Publishes the self-hosted apt + rpm + pacman repository to the gh-pages branch
-# (served at https://seraphx2.github.io/dev-prompt/). Runs when a GitHub Release
-# is published — draft releases don't trigger it. workflow_dispatch re-runs it
-# against an existing tag. See docs/linux-distribution/phase-3-apt-rpm-repo.md.
+# Publishes the self-hosted apt + rpm + pacman + Flatpak repository to the
+# gh-pages branch (served at https://seraphx2.github.io/dev-prompt/). Runs when a
+# GitHub Release is published — draft releases don't trigger it.
+# workflow_dispatch re-runs it against an existing tag. See
+# docs/linux-distribution/phase-3-apt-rpm-repo.md and phase-4-flatpak.md.
 on:
   release:
     types: [published]
@@ -31,7 +32,7 @@ jobs:
       - name: Base tools
         run: pacman -Sy --noconfirm --needed base-devel git
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Resolve version
         id: v
@@ -58,17 +59,92 @@ jobs:
           su builder -c 'cd /tmp/build && makepkg --noconfirm --nodeps --clean'
           mkdir -p out && cp /tmp/build/*.pkg.tar.zst out/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pacman-pkg
           path: out/*.pkg.tar.zst
           if-no-files-found: error
 
-  publish:
-    needs: pacman-pkg
+  # Build the Flatpak from packaging/flatpak/ and bake it into a GPG-signed
+  # OSTree repo, handed to `publish` as a tarball. Heavy (~30 min: pulls the
+  # GNOME 50 SDK, full cargo + vite build), so it's its own job and best-effort
+  # — if it fails, `publish` still ships the apt/rpm/pacman trees and leaves the
+  # last Flatpak repo in place.
+  flatpak-repo:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
+        with:
+          # Build the tagged tree (the manifest is `type: dir` on the checkout,
+          # not a release artifact). shared-modules is a submodule.
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          submodules: recursive
+
+      - name: Resolve version
+        id: v
+        run: |
+          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          echo "value=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Flatpak tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists \
+            flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      # The runtime/SDK download (~1.5 GB) dominates a cold run; key the cache on
+      # the manifest + lockfiles so it survives until a dependency actually moves.
+      - name: Cache Flatpak build state
+        uses: actions/cache@v6
+        with:
+          path: |
+            .flatpak-builder
+            ~/.local/share/flatpak
+          key: flatpak-gnome50-${{ hashFiles('packaging/flatpak/io.github.seraphx2.devprompt.yaml', 'src-tauri/Cargo.lock', 'package-lock.json') }}
+          restore-keys: flatpak-gnome50-
+
+      - name: Import signing key
+        env:
+          REPO_GPG_PRIVATE_KEY: ${{ secrets.REPO_GPG_PRIVATE_KEY }}
+        run: |
+          echo "$REPO_GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --list-secret-keys --keyid-format long
+
+      # Same swap release.yml does: the checked-in metainfo carries a 0.0.0
+      # placeholder <release>; give the bundled AppStream data the real one.
+      - name: Stamp AppStream release entry
+        run: |
+          f=packaging/linux/io.github.seraphx2.devprompt.metainfo.xml
+          sed -i \
+            "s|<release version=\"0.0.0\" date=\"1970-01-01\"/>|<release version=\"${{ steps.v.outputs.value }}\" date=\"$(date -u +%Y-%m-%d)\"/>|" \
+            "$f"
+          grep -A2 '<releases>' "$f"
+
+      - name: Build + sign the Flatpak repo
+        run: |
+          flatpak-builder --user --install-deps-from=flathub \
+            --repo=flatpak-repo --gpg-sign=E3C07CD21A9A9BA5 \
+            --force-clean --disable-rofiles-fuse \
+            build-dir packaging/flatpak/io.github.seraphx2.devprompt.yaml
+          flatpak build-update-repo --gpg-sign=E3C07CD21A9A9BA5 \
+            --generate-static-deltas --prune --prune-depth=20 \
+            flatpak-repo
+          tar -cf flatpak-repo.tar -C flatpak-repo .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: flatpak-repo
+          path: flatpak-repo.tar
+          if-no-files-found: error
+
+  publish:
+    needs: [pacman-pkg, flatpak-repo]
+    # flatpak-repo is best-effort; pacman-pkg is not.
+    if: always() && needs.pacman-pkg.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -83,7 +159,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            apt-utils createrepo-c gnupg
+            apt-utils createrepo-c gnupg rpm
 
       - name: Fetch release artifacts
         env:
@@ -94,10 +170,17 @@ jobs:
             -p '*_amd64.deb' -p '*.x86_64.rpm' -D artifacts
           ls -l artifacts
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: pacman-pkg
           path: artifacts
+
+      - name: Fetch Flatpak repo
+        if: needs.flatpak-repo.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: flatpak-repo
+          path: flatpak-in
 
       - name: Import signing key
         env:
@@ -118,6 +201,16 @@ jobs:
             git -C site switch --orphan gh-pages
             git -C site rm -rf --quiet . 2>/dev/null || true
           fi
+
+      # Wholesale-replace site/flatpak with the freshly built OSTree repo (it is
+      # already signed + summary-updated). Only when flatpak-repo succeeded —
+      # otherwise the previous Flatpak repo in the gh-pages checkout stands.
+      - name: Place Flatpak repo
+        if: needs.flatpak-repo.result == 'success'
+        run: |
+          rm -rf site/flatpak
+          mkdir -p site/flatpak
+          tar -xf flatpak-in/flatpak-repo.tar -C site/flatpak
 
       - name: Rebuild repository
         run: packaging/repo/build-repo.sh artifacts site E3C07CD21A9A9BA5

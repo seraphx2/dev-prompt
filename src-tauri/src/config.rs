@@ -37,6 +37,8 @@ pub struct Config {
     pub scan: ScanConfig,
     /// How long a cached repo list stays fresh.
     pub cache_ttl_secs: u64,
+    /// When the overlay dismisses itself — see [`DismissMode`].
+    pub dismiss: DismissMode,
     /// Terminal emulator to open (`programs.terminal` key, a bare name, or an
     /// absolute path). `None` = first `programs.terminal` candidate that resolves.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,6 +78,7 @@ impl Default for Config {
             roots: Vec::new(),
             scan: ScanConfig::default(),
             cache_ttl_secs: 900,
+            dismiss: DismissMode::default(),
             terminal: None,
             terminal_template: None,
             shell: None,
@@ -175,6 +178,22 @@ impl<'de> Deserialize<'de> for CollapseNested {
             ))),
         }
     }
+}
+
+/// `dismiss` in `config.yaml` — when the overlay closes itself.
+///
+/// * `Always` (default): hide on focus loss and after launching an action —
+///   the classic disappear-the-moment-you're-done overlay.
+/// * `KeepOnBlur`: ignore focus loss; still hide after an action or on Escape.
+/// * `Manual`: only Escape, the hotkey, or the tray close it — for working
+///   through several actions in one repo without re-summoning.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DismissMode {
+    #[default]
+    Always,
+    KeepOnBlur,
+    Manual,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -367,6 +386,8 @@ pub struct UserConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_ttl_secs: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub dismiss: Option<DismissMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal_template: Option<String>,
@@ -430,6 +451,9 @@ fn merge_settings(cfg: &mut Config, u: UserConfig) {
     }
     if let Some(t) = u.cache_ttl_secs {
         cfg.cache_ttl_secs = t;
+    }
+    if let Some(d) = u.dismiss {
+        cfg.dismiss = d;
     }
     if let Some(t) = u.terminal {
         cfg.terminal = Some(t);
@@ -562,6 +586,9 @@ fn first_run_user() -> UserConfig {
         roots: Vec::new(),
         scan: Some(ScanConfig::default()),
         cache_ttl_secs: Some(900),
+        // Bundled default (`always`) lives in default_config.yaml; only written
+        // here if the user changes it.
+        dismiss: None,
         terminal: None,
         terminal_template: None,
         shell: None,
@@ -754,6 +781,32 @@ mod tests {
         merge_settings(&mut cfg, user);
         assert_eq!(cfg.hotkey, "Alt+Space");
         assert_eq!(cfg.scan.max_depth, 7);
+    }
+
+    #[test]
+    fn dismiss_mode_parses_and_defaults_to_always() {
+        assert_eq!(bundled_defaults().dismiss, DismissMode::Always);
+
+        let mut cfg = bundled_defaults();
+        merge_settings(
+            &mut cfg,
+            serde_yaml_ng::from_str("dismiss: manual\n").unwrap(),
+        );
+        assert_eq!(cfg.dismiss, DismissMode::Manual);
+
+        let mut cfg = bundled_defaults();
+        merge_settings(
+            &mut cfg,
+            serde_yaml_ng::from_str("dismiss: keep_on_blur\n").unwrap(),
+        );
+        assert_eq!(cfg.dismiss, DismissMode::KeepOnBlur);
+
+        // A config that predates the key keeps the default.
+        let mut cfg = bundled_defaults();
+        merge_settings(&mut cfg, serde_yaml_ng::from_str("hotkey: Alt+Space\n").unwrap());
+        assert_eq!(cfg.dismiss, DismissMode::Always);
+
+        assert!(serde_yaml_ng::from_str::<UserConfig>("dismiss: sometimes\n").is_err());
     }
 
     #[test]

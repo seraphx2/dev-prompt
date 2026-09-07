@@ -92,9 +92,10 @@ always the default when the overlay opens the normal way. Enter launches the
 selected app; `Ctrl+R` re-enumerates. Frecency: apps you launch from dev-prompt
 float to the top of the empty-query list.
 
-**Windows only.** On other platforms the `>` scope shows an empty list.
+Supported on **Windows** and **Linux**; on macOS the `>` scope shows an empty
+list.
 
-Discovery unions four sources and de-duplicates by executable path:
+**Windows** discovery unions four sources and de-duplicates by executable path:
 
 - **Start Menu** shortcuts (both the machine and per-user `Programs` trees)
 - **Store apps** (`Get-StartApps` AppUserModelIDs)
@@ -103,6 +104,16 @@ Discovery unions four sources and de-duplicates by executable path:
 
 Icons are extracted from the executables and cached under
 `%LOCALAPPDATA%\dev-prompt\cache\app-icons\`.
+
+**Linux** parses freedesktop `.desktop` entries from `$XDG_DATA_HOME/applications`,
+every `$XDG_DATA_DIRS/*/applications`, the Flatpak and Snap export directories,
+and any `extra_dirs`. Entries with `NoDisplay=true`, `Hidden=true`, a missing
+`TryExec`, or a non-`Application` type are skipped; a user override in
+`~/.local/share` shadows the system copy of the same id. Icons are resolved
+against the current icon theme (then Adwaita / breeze / Papirus / hicolor, then
+`pixmaps`) and embedded in `apps.json`. Launch goes through `gtk-launch`, so
+`Exec` field codes, `Terminal=true` and D-Bus activation are handled by the
+platform.
 
 ```yaml
 # config.yaml — managed from Settings ▸ "Index installed apps"
@@ -133,9 +144,24 @@ scan:
                               #   ancestor's .gitmodules, not under vendor/ …)
 cache_ttl_secs: 900           # how long the discovered repo list stays fresh
                               #   before the next open triggers a background rescan
+dismiss: always               # when the overlay closes itself — Settings ▸
+                              #   Overlay dismissal:
+                              #   always       = on focus loss, and after an action
+                              #   keep_on_blur = ignore focus loss; still close
+                              #                  after an action or on Esc
+                              #   manual       = only Esc / the hotkey / the tray
 ```
 
 The discovered list is cached at `<OS cache dir>/dev-prompt/repos.json`.
+
+With `dismiss: manual`, launching an action from the menu leaves the overlay open
+on that repo (filter cleared) so you can fire several in a row; `Esc` steps back
+out as usual.
+
+`keep_on_blur` and `manual` also give the overlay a **taskbar button** (so you
+can click back to it after it loses focus); `always` keeps it out of the
+taskbar. On Wayland this is a no-op — the overlay is always in the taskbar there
+regardless.
 
 ---
 

@@ -1,22 +1,29 @@
 # packaging/repo/
 
-The self-hosted apt + rpm + pacman repository (Phase 3). Full design:
-[`docs/linux-distribution/phase-3-apt-rpm-repo.md`](../../docs/linux-distribution/phase-3-apt-rpm-repo.md).
+The self-hosted apt + rpm + pacman repository (Phase 3). The Flatpak OSTree repo
+(Phase 4) is published to the same `gh-pages` tree by the same workflow. Full
+design: [`phase-3-apt-rpm-repo.md`](../../docs/linux-distribution/phase-3-apt-rpm-repo.md),
+[`phase-4-flatpak.md`](../../docs/linux-distribution/phase-4-flatpak.md).
 
 ```
 dev-prompt-repo.asc   repo signing public key (committed; published as /dev-prompt.asc)
-build-repo.sh         rebuild + sign the three repo trees under a gh-pages checkout
+build-repo.sh         rebuild + sign the deb/rpm/pacman trees under a gh-pages checkout;
+                      also drops in the landing page + the ../flatpak/*.flatpakre{f,po} descriptors
 render-index.sh       emit the landing page (index.html)
 ```
 
 `.github/workflows/repo.yml` runs on `release: published`: builds a pacman
-package from `../arch/PKGBUILD-bin` in an Arch container, then on a second job
+package from `../arch/PKGBUILD-bin` in an Arch container and (in parallel) the
+GPG-signed Flatpak OSTree repo from `../flatpak/`, then on the `publish` job
 downloads the release `.deb`/`.rpm`, imports the signing key, checks out
-`gh-pages`, runs `build-repo.sh`, and force-pushes the result.
+`gh-pages`, drops the Flatpak repo into `site/flatpak`, runs `build-repo.sh`, and
+force-pushes the result.
 
 ## Signing key
 
-One GPG keypair, **repo metadata only** — separate from the minisign updater key.
+One GPG keypair — signs the apt `Release`, the rpm `repomd.xml`, the pacman
+`.db`, **and each individual `.rpm`** (`rpm --addsign`, required for dnf's
+`gpgcheck=1`). Separate from the minisign updater key.
 
 - Public: `dev-prompt-repo.asc` here, key id `E3C07CD21A9A9BA5` (hardcoded in
   `repo.yml` and `build-repo.sh` — a key id isn't secret).
@@ -37,5 +44,6 @@ cd /path/to/repo
 GNUPGHOME=... packaging/repo/build-repo.sh /tmp/art /tmp/site E3C07CD21A9A9BA5
 ```
 
-Needs `apt-ftparchive` (apt-utils), `createrepo_c`, `gpg`; `repo-add` if present,
-else `docker`.
+Needs `apt-ftparchive` (apt-utils), `createrepo_c`, `gpg`, `rpm`/`rpmsign`
+(`rpm-sign` on Fedora, `rpm` on Debian/Ubuntu); `repo-add` if present, else
+`docker`.

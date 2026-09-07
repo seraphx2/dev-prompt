@@ -36,6 +36,11 @@ scan:
   #                     ancestor's .gitmodules, not under vendor/ third_party/ …
   collapse_nested: true
 cache_ttl_secs: 900
+# When the overlay closes itself:
+#   always       (default) — on focus loss, and after launching an action
+#   keep_on_blur           — ignore focus loss; still close after an action / on Esc
+#   manual                 — only Esc, the hotkey, or the tray close it
+dismiss: always
 
 # --- installed-app launcher (the ">" scope in the search bar) ---------------
 # Type ">" in the overlay to search installed apps instead of repos. Windows

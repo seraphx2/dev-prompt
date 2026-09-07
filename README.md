@@ -51,6 +51,74 @@ WebView.
 - **In-app auto-update** — checks GitHub Releases, downloads and installs signed
   updates, relaunches. See [`docs/releasing.md`](docs/releasing.md).
 
+## Install
+
+**Windows** — grab `dev-prompt_<version>_x64-setup.exe` (or the portable zip)
+from the [latest release](https://github.com/seraphx2/dev-prompt/releases/latest).
+
+**Linux** — a signed package repo covers apt / dnf / pacman / Flatpak
+([`docs/linux-distribution/`](docs/linux-distribution/README.md)); updates then
+ride your normal `apt` / `dnf` / `pacman -Syu` / `flatpak update`. Or take the
+`.AppImage` from the release and run it directly.
+
+<details><summary>Debian / Ubuntu / Mint</summary>
+
+```sh
+curl -fsSL https://seraphx2.github.io/dev-prompt/dev-prompt.asc \
+  | sudo gpg --dearmor -o /usr/share/keyrings/dev-prompt.gpg
+echo "deb [signed-by=/usr/share/keyrings/dev-prompt.gpg] https://seraphx2.github.io/dev-prompt/deb stable main" \
+  | sudo tee /etc/apt/sources.list.d/dev-prompt.list
+sudo apt update && sudo apt install dev-prompt
+```
+</details>
+
+<details><summary>Fedora / RHEL</summary>
+
+```sh
+sudo tee /etc/yum.repos.d/dev-prompt.repo <<'EOF'
+[dev-prompt]
+name=dev-prompt
+baseurl=https://seraphx2.github.io/dev-prompt/rpm
+enabled=1
+gpgcheck=1
+gpgkey=https://seraphx2.github.io/dev-prompt/dev-prompt.asc
+EOF
+sudo dnf install dev-prompt
+```
+</details>
+
+<details><summary>Arch / CachyOS / Manjaro</summary>
+
+```sh
+curl -fsSL https://seraphx2.github.io/dev-prompt/dev-prompt.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key E3C07CD21A9A9BA5
+sudo tee -a /etc/pacman.conf <<'EOF'
+
+[dev-prompt]
+SigLevel = Required
+Server = https://seraphx2.github.io/dev-prompt/arch
+EOF
+sudo pacman -Sy dev-prompt
+```
+</details>
+
+<details><summary>Flatpak (any distro)</summary>
+
+```sh
+# one-time: the GNOME runtime comes from Flathub
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+flatpak remote-add --if-not-exists --user dev-prompt \
+  https://seraphx2.github.io/dev-prompt/dev-prompt.flatpakrepo
+flatpak install --user dev-prompt io.github.seraphx2.devprompt
+```
+
+Or open
+[`io.github.seraphx2.devprompt.flatpakref`](https://seraphx2.github.io/dev-prompt/io.github.seraphx2.devprompt.flatpakref)
+in your software centre for a one-click install. This is a self-hosted remote,
+not Flathub — see [`docs/linux-distribution/phase-4-flatpak.md`](docs/linux-distribution/phase-4-flatpak.md).
+</details>
+
 ## Configuration
 
 First run creates two files in your OS config directory (`%APPDATA%\dev-prompt\`,
@@ -87,7 +155,7 @@ The discovered repo list is cached at `<OS cache dir>/dev-prompt/repos.json`.
 |                   | Status                                                                                                                                                                                                                                                                                                                     |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Windows 10/11** | Built, packaged (NSIS installer + portable zip), and tested. Acrylic blur + rounded corners, Windows Terminal integration, Visual Studio / Rider detection.                                                                                                                                                                |
-| **Linux**         | Same codebase, compiles. Built and packaged (`deb` / `rpm` / `AppImage`) by the release workflow; AppImage installs auto-update, deb/rpm update via the package. Hotkey works on X11; Wayland needs the XDG global-shortcuts portal (tray-click fallback otherwise). Terminal-command actions need per-emulator working-dir flags (in progress) — plain "open a terminal" works. Panel is translucent but unblurred (no compositor backing yet), so it paints a little more solid than on Windows. |
+| **Linux**         | Same codebase, compiles. Built and packaged (`deb` / `rpm` / `AppImage` + a signed apt/dnf/pacman repo and a self-hosted Flatpak) by the release workflow; AppImage installs auto-update, everything else updates through its package manager. Hotkey works on X11; Wayland needs the XDG global-shortcuts portal (tray-click fallback otherwise). The `>` app launcher reads freedesktop `.desktop` entries (theme icons, `gtk-launch`). Terminal-command actions need per-emulator working-dir flags (in progress) — plain "open a terminal" works. Panel is translucent but unblurred (no compositor backing yet), so it paints a little more solid than on Windows. |
 | **macOS**         | Same codebase, compiles; not yet run on a Mac. Global hotkey and process launching are supported by the underlying plugins; vibrancy and `.dmg` packaging are unimplemented.                                                                                                                                               |
 
 The architecture is platform-neutral — program paths and OS quirks are isolated
@@ -99,7 +167,7 @@ and a handful of `#[cfg]` blocks. The remaining cross-platform work is tracked i
 
 | Tool                 | Notes                                                                                                                                                                                                                               |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Node.js 18+          | frontend build (`npm`)                                                                                                                                                                                                              |
+| Node.js 22+ (`.nvmrc` pins 24; CI builds on 24) | frontend build (`npm`)                                                                                                                                                                             |
 | Rust (stable, 1.77+) | <https://rustup.rs>                                                                                                                                                                                                                 |
 | Platform toolchain   | **Windows:** MSVC Build Tools ("Desktop development with C++") + WebView2 (preinstalled on Win 11). **Linux:** `webkit2gtk-4.1`, `libayatana-appindicator3`, `librsvg2`, standard build tools. **macOS:** Xcode Command Line Tools. |
 

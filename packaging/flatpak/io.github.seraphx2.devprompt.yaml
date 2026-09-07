@@ -1,0 +1,129 @@
+# Flatpak manifest for dev-prompt.
+#
+# Built + installed locally with flatpak-builder against GNOME 50 (npm ci,
+# svelte-check, vite build, cargo release compile, the ayatana tray module, all
+# the install steps — clean). The app launches and stays resident; inside the
+# sandbox `flatpak-spawn --host` runs host commands, libayatana-appindicator3 is
+# bundled, and the exported .desktop / metainfo pass desktop-file-validate +
+# appstreamcli.
+#
+# Runtime 50 is load-bearing, not just hygiene: on the EOL GNOME 48 runtime the
+# app crashed ~300 ms into startup (WebKitGTK 2.48, race-sensitive, only in a
+# Hyper-V guest without a GPU). WebKitGTK 2.50 (runtime 50) is fine.
+#
+# Verified working on CachyOS (KDE, Wayland, Hyper-V guest): overlay renders,
+# global hotkey summons it (X11 grab via --socket=x11), tray icon shows, the
+# ">" scope lists host apps, and repo actions launch host editors/terminals.
+#
+# This manifest is the source for the self-hosted Flatpak repo
+# (https://seraphx2.github.io/dev-prompt/flatpak, built + GPG-signed by
+# .github/workflows/repo.yml). That build has network access, so `npm ci` and
+# `cargo` fetch dependencies directly and the build enables `--share=network`.
+# A future Flathub submission would instead need offline dependency sources
+# (cargo-sources.json / node-sources.json — see docs/linux-distribution/phase-4-flatpak.md).
+#
+# Sandbox rationale for the reviewer (dev-prompt is a launcher):
+#   --talk-name=org.freedesktop.Flatpak  run the user's editor / terminal / AI
+#     CLI on the host via `flatpak-spawn --host` — the app's whole job.
+#   --filesystem=home                    scan the user's code folders for repos.
+#   --filesystem=host-os:ro              enumerate installed apps for the ">"
+#     scope (read-only /usr; launch still goes through host `gtk-launch`).
+#   --socket=x11                         the global hotkey is an X11 grab (as in
+#     the non-Flatpak build); Wayland gives no equivalent and the shortcut is
+#     the primary way to summon the overlay.
+#   --share=network                      WebKitGTK's network process won't start
+#     without it and then no page loads — not used for actual networking (the
+#     in-app updater is disabled under Flatpak; updates come from `flatpak update`).
+#   It never writes outside its own data dir.
+app-id: io.github.seraphx2.devprompt
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.node22
+command: dev-prompt
+# Users subscribe to a named branch, not "master".
+default-branch: stable
+
+finish-args:
+  - --socket=wayland
+  # Full X11 (not fallback): the global hotkey is an X11 grab via XWayland,
+  # exactly as in the native build. Wayland offers no client-side global grab.
+  - --socket=x11
+  - --share=ipc
+  - --device=dri
+  # WebKitGTK's network process fails to initialise without this and then every
+  # page load — including the bundled tauri:// assets — errors out. Standard for
+  # WebKit Flatpaks even when the app itself does no networking (dev-prompt's
+  # updater is disabled under Flatpak, so nothing here reaches the internet).
+  - --share=network
+  # Launch host programs (editors, terminals, AI CLIs) via `flatpak-spawn --host`.
+  - --talk-name=org.freedesktop.Flatpak
+  # System-tray icon (SNI) and desktop notifications.
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --talk-name=org.freedesktop.Notifications
+  # Tauri writes the tray PNG to $XDG_RUNTIME_DIR/tray-icon/ and hands the SNI
+  # host that path; without sharing this one subdir the host sees an empty dir
+  # and the tray icon never renders.
+  - --filesystem=xdg-run/tray-icon:create
+  # Discover the user's repositories (and, for the ">" app scope, the .desktop
+  # files under ~/.local/share).
+  - --filesystem=home
+  # The ">" app scope enumerates installed applications. Host system apps and
+  # their icon themes are read-only at /run/host/usr via host-os; the two /var
+  # paths cover system Flatpaks and Snaps (harmless where absent). Launching goes
+  # through `gtk-launch` on the host regardless.
+  - --filesystem=host-os:ro
+  - --filesystem=/var/lib/flatpak/exports/share/applications:ro
+  - --filesystem=/var/lib/snapd/desktop/applications:ro
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node22/bin
+  env:
+    CARGO_HOME: /run/build/dev-prompt/cargo
+  # The self-hosted repo build (repo.yml) has network; npm/cargo fetch directly.
+  # For a Flathub submission this comes out and offline *-sources.json go in.
+  build-args:
+    - --share=network
+
+modules:
+  # --- tray backend -----------------------------------------------------
+  # libayatana-appindicator (+ libdbusmenu) — the SNI stack Tauri's tray uses.
+  # From the flathub/shared-modules submodule; the GNOME runtime has GTK3 but
+  # not the appindicator libraries.
+  - shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json
+
+  # --- the app ----------------------------------------------------------
+  - name: dev-prompt
+    buildsystem: simple
+    sources:
+      - type: dir
+        path: ../..            # repo root
+    build-commands:
+      - npm ci
+      # `tauri build` (not bare `cargo build`) so the binary serves the bundled
+      # tauri:// assets instead of trying to reach the Vite dev server. Runs the
+      # beforeBuildCommand (vite -> dist/) itself. --no-bundle: we install the
+      # binary below, no deb/rpm/AppImage. No signing key -> no updater artifacts.
+      - >-
+        npm run tauri build -- --no-bundle
+        -c '{"bundle":{"createUpdaterArtifacts":false}}'
+      - install -Dm755 src-tauri/target/release/dev-prompt -t /app/bin
+      # Desktop entry + metainfo, rebased to the Flatpak app-id.
+      - |
+        install -Dm644 packaging/linux/dev-prompt.desktop \
+          /app/share/applications/io.github.seraphx2.devprompt.desktop
+        sed -i 's/^Icon=dev-prompt$/Icon=io.github.seraphx2.devprompt/' \
+          /app/share/applications/io.github.seraphx2.devprompt.desktop
+      - |
+        install -Dm644 packaging/linux/io.github.seraphx2.devprompt.metainfo.xml \
+          /app/share/metainfo/io.github.seraphx2.devprompt.metainfo.xml
+        sed -i 's|>dev-prompt.desktop<|>io.github.seraphx2.devprompt.desktop<|' \
+          /app/share/metainfo/io.github.seraphx2.devprompt.metainfo.xml
+      # Icons — Tauri's PNG set lives in src-tauri/icons/ (32, 128, 128@2x, and
+      # icon.png at 512).
+      - install -Dm644 src-tauri/icons/32x32.png     /app/share/icons/hicolor/32x32/apps/io.github.seraphx2.devprompt.png
+      - install -Dm644 src-tauri/icons/128x128.png   /app/share/icons/hicolor/128x128/apps/io.github.seraphx2.devprompt.png
+      - install -Dm644 src-tauri/icons/128x128@2x.png /app/share/icons/hicolor/256x256/apps/io.github.seraphx2.devprompt.png
+      - install -Dm644 src-tauri/icons/icon.png       /app/share/icons/hicolor/512x512/apps/io.github.seraphx2.devprompt.png

@@ -184,6 +184,7 @@ mod tests {
             kind: crate::apps::AppKind::Exe,
             args: vec![],
             icon: Some("data:image/png;base64,AAAA".into()),
+            terminal: false,
             source: "start-menu".into(),
         };
         let file = AppsCacheFile {

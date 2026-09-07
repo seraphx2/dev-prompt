@@ -55,6 +55,8 @@ export interface AppConfig {
   /** `collapse_nested`: `true` collapse, `false` list all, `"auto"` keep independent. */
   scan: { max_depth: number; collapse_nested: boolean | "auto" };
   cache_ttl_secs: number;
+  /** When the overlay closes itself. */
+  dismiss?: "always" | "keep_on_blur" | "manual";
   /** Pinned terminal emulator (name / path); absent = auto-probe. */
   terminal?: string | null;
   /** Raw `{{dir}}` / `{{cmd}}` invocation for an unknown terminal. */
@@ -129,13 +131,18 @@ export interface RepoListPayload {
 /** An installed application for the `>` launcher scope. */
 export interface AppEntry {
   name: string;
-  /** Executable path (`exe`) or AppUserModelID (`aumid`). */
+  /**
+   * Executable path (`exe`), AppUserModelID (`aumid`), or absolute `.desktop`
+   * file path (`desktop`, Linux).
+   */
   exec: string;
-  kind: "exe" | "aumid";
+  kind: "exe" | "aumid" | "desktop";
   args?: string[];
-  /** `data:image/png;base64,…` when an icon was extracted. */
+  /** `desktop` only: the entry declared `Terminal=true`. */
+  terminal?: boolean;
+  /** `data:image/png;base64,…` / `data:image/svg+xml;base64,…` icon. */
   icon?: string | null;
-  /** "start-menu" | "store" | "uninstall" | "scan". */
+  /** "start-menu" | "store" | "uninstall" | "scan" | "desktop". */
   source: string;
   /** Times launched from dev-prompt (frecency). */
   uses: number;

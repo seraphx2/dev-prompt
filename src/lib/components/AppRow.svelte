@@ -19,9 +19,15 @@
     onhover: () => void;
   } = $props();
 
-  const fallback = icons.app;
+  // Iconless terminal apps (htop, btop…) get the terminal glyph; everything
+  // else falls back to the generic app square.
+  const fallback = $derived(app.terminal ? icons.terminal : icons.app);
   const sub = $derived(
-    app.kind === "aumid" ? "Store app" : middleTruncate(app.exec, 72),
+    app.kind === "aumid"
+      ? "Store app"
+      : app.kind === "desktop"
+        ? middleTruncate((app.args ?? []).join(" ") || app.exec, 72)
+        : middleTruncate(app.exec, 72),
   );
 </script>
 
@@ -36,7 +42,7 @@
     <img src={app.icon} alt="" class="h-5 w-5 shrink-0 rounded-[3px]" />
   {:else}
     <svg
-      class="h-5 w-5 shrink-0 text-white/30"
+      class="h-5 w-5 shrink-0 text-white/45"
       viewBox={fallback.vb ?? "0 0 24 24"}
       fill="currentColor"
     >

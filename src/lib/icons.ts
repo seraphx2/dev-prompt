@@ -16,7 +16,7 @@ export interface Glyph {
 
 export const icons: Record<string, Glyph> = {
   "app": {
-    "d": "M7 3h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4z"
+    "raw": "<rect x=\"3\" y=\"3\" width=\"8\" height=\"8\" rx=\"1\"/><rect x=\"3\" y=\"13\" width=\"8\" height=\"8\" rx=\"1\"/><rect x=\"13\" y=\"13\" width=\"8\" height=\"8\" rx=\"1\"/><path fill=\"#7dd3fc\" d=\"M14.43 1.96 22.04 4.43 19.57 12.04 11.96 9.57Z\"/>"
   },
   "run": {
     "d": "M8 5v14l11-7z"

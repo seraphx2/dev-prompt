@@ -77,6 +77,7 @@ export function saveConfig(patch: {
   apps_hotkey?: string;
   roots?: string[];
   cache_ttl_secs?: number;
+  dismiss?: "always" | "keep_on_blur" | "manual";
   scan_max_depth?: number;
   collapse_nested?: boolean | "auto";
   /** "" clears the pin / template / shell back to auto. */
@@ -123,6 +124,7 @@ export function runApp(e: AppEntry): Promise<void> {
     exec: e.exec,
     kind: e.kind,
     args: e.args ?? null,
+    terminal: e.terminal ?? null,
   });
 }
 
@@ -146,6 +148,11 @@ export function openReleasesPage(): Promise<void> {
 export type UpdaterMode = "self" | "managed" | "unmanaged";
 export function updaterMode(): Promise<UpdaterMode> {
   return invoke<UpdaterMode>("updater_mode");
+}
+
+/** True when running inside a Flatpak sandbox — hides controls it can't honour. */
+export function isFlatpak(): Promise<boolean> {
+  return invoke<boolean>("is_flatpak");
 }
 
 /** Native folder picker; returns the chosen directories (empty if cancelled). */

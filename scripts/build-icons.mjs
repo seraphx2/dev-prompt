@@ -103,7 +103,15 @@ const MANUAL = {
 
 // Neutral filled glyphs (24x24) for things without — or not allowed — a logo.
 const GENERIC = {
-  app: { d: "M7 3h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4z" },
+  // Three muted squares + one tilted, sky-tinted square (the app's "selected"
+  // accent) so the fallback reads as "an app" and catches the eye.
+  app: {
+    raw:
+      '<rect x="3" y="3" width="8" height="8" rx="1"/>' +
+      '<rect x="3" y="13" width="8" height="8" rx="1"/>' +
+      '<rect x="13" y="13" width="8" height="8" rx="1"/>' +
+      '<path fill="#7dd3fc" d="M14.43 1.96 22.04 4.43 19.57 12.04 11.96 9.57Z"/>',
+  },
   run: { d: "M8 5v14l11-7z" },
   terminal: {
     d: "M3 4h18a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm3.7 4.3L10 11.6l-3.3 3.3 1.4 1.4L12.8 12 8.1 7.3 6.7 8.3zM13 15h5v2h-5z",

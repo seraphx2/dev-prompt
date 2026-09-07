@@ -63,14 +63,15 @@ jobs:
           fi
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0 # need all tags so the CalVer build segment is correct
 
       - name: Setup Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .nvmrc
+          cache: npm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -123,7 +124,7 @@ jobs:
 
       - name: Build and publish release
         id: tauri
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -133,7 +134,7 @@ jobs:
           releaseName: dev-prompt v${{ steps.version.outputs.value }}
           releaseDraft: ${{ inputs.draft || false }}
           prerelease: ${{ inputs.prerelease || false }}
-          includeUpdaterJson: true
+          uploadUpdaterJson: true # renamed from includeUpdaterJson in tauri-action v1
 
       # Windows only: ship the bare .exe as a no-install option. The Linux
       # AppImage already is that, so there's no equivalent step for it.
