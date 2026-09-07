@@ -89,7 +89,11 @@ jobs:
       - name: Flatpak tooling
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
+          # elfutils: flatpak-builder shells out to `eu-strip` / `eu-elfcompress`
+          # to strip module debuginfo; neither ships with flatpak-builder on the
+          # bare runner and a build module fails without them.
+          sudo apt-get install -y --no-install-recommends \
+            flatpak flatpak-builder elfutils
           flatpak remote-add --user --if-not-exists \
             flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
