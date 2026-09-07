@@ -9,36 +9,31 @@ io.github.seraphx2.devprompt.yaml   the manifest
 
 ## Status
 
-**Builds and installs locally** (`flatpak-builder`, GNOME 48). Verified:
+**Working** — built with `flatpak-builder` (GNOME 50) and run on CachyOS (KDE,
+Wayland, in a Hyper-V guest). Overlay renders, **global hotkey summons it**, tray
+icon shows, the `>` scope lists host apps with icons, and repo actions launch
+host editors / terminals.
 
-- full build is clean — `npm ci`, `svelte-check` (0 errors), `vite build`,
-  `cargo build --release`, the `libayatana-appindicator` tray module, and every
-  install step.
-- `flatpak run` starts the app and it **stays resident** (needs the
-  single-instance plugin skipped under Flatpak — see `src-tauri/src/lib.rs`;
-  `flatpak run` reserves the app-id on the session bus, so the plugin's own
-  `RequestName` would see it taken and `exit(0)`).
-- the **tray icon registers** — it shows up in
-  `org.kde.StatusNotifierWatcher`'s `RegisteredStatusNotifierItems`.
-- `flatpak-spawn --host` runs host commands (the core launcher mechanism).
-- `libayatana-appindicator3.so.1` is bundled; exported `.desktop` / metainfo
-  pass `desktop-file-validate` + `appstreamcli validate`.
+Getting there took seven fixes, each a real Tauri-on-Flatpak gotcha:
+
+| Fix | Symptom it cured |
+| --- | --- |
+| `runtime-version: '50'` (was 48, EOL) | crash ~300 ms into startup (WebKitGTK 2.48) |
+| `--share=network` | WebKit's network process won't init → every page load (incl. bundled `tauri://`) errors |
+| `--filesystem=xdg-run/tray-icon:create` | tray SNI registers but the icon PNG (in the private runtime dir) is invisible to the host |
+| `tauri build --no-bundle` (was bare `cargo build`) | binary ran in dev mode → tried to reach `localhost:1420` |
+| `rules::host_which` (`src-tauri/src/rules.rs`) | `requires:`/`needs:` and the terminal resolver checked the *sandbox* PATH → editors/CLIs invisible |
+| `--filesystem=host-os:ro` + `/run/host/usr` dirs in `apps.rs` | `>` scope only saw `~/.local/share` apps |
+| `--socket=x11` (was `fallback-x11`) | global hotkey (an X11 grab via XWayland) had no X11 socket |
+
+Also: `tauri-plugin-single-instance` is skipped under Flatpak (`src-tauri/src/lib.rs`)
+— redundant there and it was briefly suspected in the startup crash.
 
 Cosmetic: `flatpak-builder` logs `Ignoring release element without timestamp or
 date` for the `0.0.0` metainfo placeholder — `release.yml` rewrites it with the
-real version + date at tag time, so a real release is clean.
+real version + date at tag time.
 
-Not yet done: an **interactive** smoke test (overlay window actually shows +
-renders on hotkey/tray-click, global hotkey via the GlobalShortcuts portal,
-launching a host editor from the overlay), the offline source generators, the
-runtime bump off EOL 48, and the Flathub PR.
-
-App-code side (in the main tree, active whether or not it ever runs sandboxed):
-
-- `flatpak-spawn --host` wrapping — `src-tauri/src/launch.rs` (`in_flatpak()`).
-- updater disabled under Flatpak — `updater_mode` returns `managed`.
-- autostart toggle hidden under Flatpak — `is_flatpak` command + Settings.
-- global hotkey: relies on the `GlobalShortcuts` portal; tray is the fallback.
+Not yet done: the offline source generators and the Flathub PR (below).
 
 ## Before the first build / Flathub PR
 
@@ -59,16 +54,14 @@ App-code side (in the main tree, active whether or not it ever runs sandboxed):
    `shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json`.
    `git submodule update --init` after a fresh clone.
 
-3. **Runtime** — `runtime-version: '48'` is EOL; bump to `49` / `50` (the
-   `rust-stable` / `node22` extension versions follow the SDK automatically).
 
 ## Local build + test
 
 ```sh
 sudo pacman -S flatpak-builder                     # one-time
-flatpak install flathub org.gnome.Platform//48 org.gnome.Sdk//48 \
-  org.freedesktop.Sdk.Extension.rust-stable//24.08 \
-  org.freedesktop.Sdk.Extension.node22//24.08
+flatpak install flathub org.gnome.Platform//50 org.gnome.Sdk//50 \
+  org.freedesktop.Sdk.Extension.rust-stable//25.08 \
+  org.freedesktop.Sdk.Extension.node22//25.08
 
 flatpak-builder --user --install --force-clean build-dir \
   packaging/flatpak/io.github.seraphx2.devprompt.yaml

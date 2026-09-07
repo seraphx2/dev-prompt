@@ -503,6 +503,17 @@ mod linux {
             push_dir(&mut dirs, Path::new(base).join("applications"));
         }
 
+        // Under Flatpak $XDG_DATA_DIRS points at the runtime's /usr, which has
+        // almost nothing. The host's system apps are exposed at /run/host/usr
+        // (--filesystem=host-os:ro).
+        if crate::launch::in_flatpak() {
+            push_dir(&mut dirs, PathBuf::from("/run/host/usr/share/applications"));
+            push_dir(
+                &mut dirs,
+                PathBuf::from("/run/host/usr/local/share/applications"),
+            );
+        }
+
         push_dir(
             &mut dirs,
             PathBuf::from("/var/lib/flatpak/exports/share/applications"),
@@ -762,6 +773,12 @@ mod linux {
             roots.push(Path::new(base).join("icons"));
         }
         roots.push(PathBuf::from("/usr/share/pixmaps"));
+        // Host icon themes for the /run/host apps (see app_dirs).
+        if crate::launch::in_flatpak() {
+            roots.push(PathBuf::from("/run/host/usr/share/icons"));
+            roots.push(PathBuf::from("/run/host/usr/local/share/icons"));
+            roots.push(PathBuf::from("/run/host/usr/share/pixmaps"));
+        }
         roots
     }
 

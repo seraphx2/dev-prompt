@@ -59,6 +59,8 @@ fn program_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
 /// is installed while the app runs).
 pub fn clear_program_cache() {
     program_cache().lock().unwrap().clear();
+    #[cfg(target_os = "linux")]
+    host_which_cache().lock().unwrap().clear();
 }
 
 pub struct Resolver<'a> {
@@ -130,6 +132,12 @@ fn resolve_path_candidate(raw: &str) -> Option<String> {
     if !pat.contains('/') {
         return which(&pat);
     }
+    // Under Flatpak an absolute candidate is a host path; `command -v` accepts
+    // one and only prints it back if it's an executable file there.
+    #[cfg(target_os = "linux")]
+    if crate::launch::in_flatpak() {
+        return host_which(&pat);
+    }
     Path::new(&pat).is_file().then(|| pat.clone())
 }
 
@@ -160,7 +168,15 @@ fn resolve_vswhere(_args: &str) -> Option<String> {
 }
 
 /// `which`-style PATH lookup that returns the resolved path.
+///
+/// Under Flatpak the tools we're probing for (editors, terminals, CLIs) live on
+/// the host, not in the runtime — resolve there via `flatpak-spawn --host`,
+/// memoised (this is hot: every `requires:` / `needs:` check calls it).
 pub fn which(program: &str) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    if crate::launch::in_flatpak() {
+        return host_which(program);
+    }
     let path = std::env::var_os("PATH")?;
     let exts: Vec<String> = if cfg!(windows) {
         std::env::var("PATHEXT")
@@ -184,6 +200,41 @@ pub fn which(program: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(target_os = "linux")]
+fn host_which_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// `command -v <program>` on the host, memoised. Cleared by
+/// [`clear_program_cache`] alongside the resolver cache.
+#[cfg(target_os = "linux")]
+fn host_which(program: &str) -> Option<String> {
+    if let Some(hit) = host_which_cache().lock().unwrap().get(program) {
+        return hit.clone();
+    }
+    // `program` goes in as a positional arg, never interpolated into the script.
+    let resolved = std::process::Command::new("flatpak-spawn")
+        .args([
+            "--host",
+            "sh",
+            "-c",
+            r#"command -v -- "$1" || true"#,
+            "sh",
+            program,
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+    host_which_cache()
+        .lock()
+        .unwrap()
+        .insert(program.to_string(), resolved.clone());
+    resolved
 }
 
 // --- template expansion --------------------------------------------------

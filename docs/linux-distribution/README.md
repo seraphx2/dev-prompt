@@ -13,7 +13,7 @@ reuse groundwork from earlier ones.
 | [1](phase-1-groundwork.md) | In-repo packaging groundwork | all channels | S | nothing | **done** bar a screenshot (`docs/img/overlay.png`, needed for Phase 4) |
 | [2](phase-2-aur.md) | AUR | Arch / CachyOS / Manjaro / EndeavourOS | S | AUR account + SSH key | **parked** — AUR registration closed; Phase 3 covers `pacman` meanwhile |
 | [3](phase-3-apt-rpm-repo.md) | Self-hosted apt + rpm + **pacman** repo (GitHub Pages) | Debian/Ubuntu, Fedora/RHEL, Arch/CachyOS | M | a GPG key (generated in-phase) + enable Pages | **live** — apt/dnf/pacman all container-verified (install+upgrade); rpm package-signing bug found and fixed |
-| [4](phase-4-flatpak.md) | Flatpak / Flathub | every distro (sandboxed) | L | Flathub PR review | **in progress** — sandbox app-code + manifest done in-tree; needs a `flatpak-builder` run + the Flathub PR |
+| [4](phase-4-flatpak.md) | Flatpak / Flathub | every distro (sandboxed) | L | Flathub PR review | **built & verified** on CachyOS (hotkey, tray, `>` scope, host launches all work); only the offline source generators + the Flathub PR remain |
 | [5](phase-5-snap.md) | Snap Store | Ubuntu-centric (sandboxed) | M (after 4) | Snapcraft account | not started |
 | [6](phase-6-distro-repos.md) | Official distro repos | max trust | — | a distro maintainer adopting it | passive |
 

@@ -1,33 +1,43 @@
 # Flatpak manifest for dev-prompt.
 #
-# Built + installed locally with flatpak-builder against GNOME 48 (npm ci,
+# Built + installed locally with flatpak-builder against GNOME 50 (npm ci,
 # svelte-check, vite build, cargo release compile, the ayatana tray module, all
-# the install steps — clean). Verified inside the sandbox: `flatpak-spawn --host`
-# runs host commands, libayatana-appindicator3 is bundled, the exported
-# .desktop / metainfo pass desktop-file-validate + appstreamcli.
+# the install steps — clean). The app launches and stays resident; inside the
+# sandbox `flatpak-spawn --host` runs host commands, libayatana-appindicator3 is
+# bundled, and the exported .desktop / metainfo pass desktop-file-validate +
+# appstreamcli.
 #
-# Before the first Flathub submission:
-#   1. Bump runtime-version to a supported GNOME (49/50 — 48 is EOL). The SDK
-#      extensions follow the SDK version automatically.
-#   2. Generate the offline dependency sources (see packaging/flatpak/README.md):
+# Runtime 50 is load-bearing, not just hygiene: on the EOL GNOME 48 runtime the
+# app crashed ~300 ms into startup (WebKitGTK 2.48, race-sensitive, only in a
+# Hyper-V guest without a GPU). WebKitGTK 2.50 (runtime 50) is fine.
+#
+# Verified working on CachyOS (KDE, Wayland, Hyper-V guest): overlay renders,
+# global hotkey summons it (X11 grab via --socket=x11), tray icon shows, the
+# ">" scope lists host apps, and repo actions launch host editors/terminals.
+#
+# Before the first Flathub submission: generate the offline dependency sources
+# (see packaging/flatpak/README.md) —
 #        cargo-sources.json   <- flatpak-cargo-generator src-tauri/Cargo.lock
 #        node-sources.json    <- flatpak-node-generator npm package-lock.json
-#      and uncomment them + the `--offline` flags below; drop the local
-#      `--share=network` build-arg.
-#   3. flatpak-builder --user --install --force-clean build-dir <this file>;
-#      interactive smoke-test: tray icon, global hotkey (GlobalShortcuts portal),
-#      launching a host editor/terminal from the overlay.
+# — uncomment them below, and re-comment the LOCAL BUILD `--share=network`
+# build-arg (Flathub's builders have no network).
 #
-# Sandbox rationale for the reviewer:
-#   dev-prompt is a launcher. It reads the git repos under the user's code
-#   folders (--filesystem=home) and opens them in the user's editor / terminal /
-#   CLI on the host (--talk-name=org.freedesktop.Flatpak for `flatpak-spawn
-#   --host`). It never writes outside its own data dir. No --share=network: the
-#   in-app updater is compiled-in but disabled under Flatpak (updates come from
-#   `flatpak update`).
+# Sandbox rationale for the reviewer (dev-prompt is a launcher):
+#   --talk-name=org.freedesktop.Flatpak  run the user's editor / terminal / AI
+#     CLI on the host via `flatpak-spawn --host` — the app's whole job.
+#   --filesystem=home                    scan the user's code folders for repos.
+#   --filesystem=host-os:ro              enumerate installed apps for the ">"
+#     scope (read-only /usr; launch still goes through host `gtk-launch`).
+#   --socket=x11                         the global hotkey is an X11 grab (as in
+#     the non-Flatpak build); Wayland gives no equivalent and the shortcut is
+#     the primary way to summon the overlay.
+#   --share=network                      WebKitGTK's network process won't start
+#     without it and then no page loads — not used for actual networking (the
+#     in-app updater is disabled under Flatpak; updates come from `flatpak update`).
+#   It never writes outside its own data dir.
 app-id: io.github.seraphx2.devprompt
 runtime: org.gnome.Platform
-runtime-version: '48'
+runtime-version: '50'
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
@@ -36,30 +46,44 @@ command: dev-prompt
 
 finish-args:
   - --socket=wayland
-  - --socket=fallback-x11
+  # Full X11 (not fallback): the global hotkey is an X11 grab via XWayland,
+  # exactly as in the native build. Wayland offers no client-side global grab.
+  - --socket=x11
   - --share=ipc
   - --device=dri
+  # WebKitGTK's network process fails to initialise without this and then every
+  # page load — including the bundled tauri:// assets — errors out. Standard for
+  # WebKit Flatpaks even when the app itself does no networking (dev-prompt's
+  # updater is disabled under Flatpak, so nothing here reaches the internet).
+  - --share=network
   # Launch host programs (editors, terminals, AI CLIs) via `flatpak-spawn --host`.
   - --talk-name=org.freedesktop.Flatpak
   # System-tray icon (SNI) and desktop notifications.
   - --talk-name=org.kde.StatusNotifierWatcher
   - --talk-name=org.freedesktop.Notifications
-  # Discover the user's repositories. Also gives the ">" app scope the user's
-  # ~/.local/share[/flatpak/exports]/applications entries; system apps under
-  # /usr/share would need --filesystem=host:ro and aren't worth that here.
+  # Tauri writes the tray PNG to $XDG_RUNTIME_DIR/tray-icon/ and hands the SNI
+  # host that path; without sharing this one subdir the host sees an empty dir
+  # and the tray icon never renders.
+  - --filesystem=xdg-run/tray-icon:create
+  # Discover the user's repositories (and, for the ">" app scope, the .desktop
+  # files under ~/.local/share).
   - --filesystem=home
-  # Global hotkey goes through org.freedesktop.portal.GlobalShortcuts (part of
-  # the always-available Desktop portal). Falls back to the tray if the portal
-  # or the plugin can't register it.
+  # The ">" app scope enumerates installed applications. Host system apps and
+  # their icon themes are read-only at /run/host/usr via host-os; the two /var
+  # paths cover system Flatpaks and Snaps (harmless where absent). Launching goes
+  # through `gtk-launch` on the host regardless.
+  - --filesystem=host-os:ro
+  - --filesystem=/var/lib/flatpak/exports/share/applications:ro
+  - --filesystem=/var/lib/snapd/desktop/applications:ro
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node22/bin
   env:
     CARGO_HOME: /run/build/dev-prompt/cargo
     npm_config_offline: 'true'
-  # LOCAL BUILD ONLY — uncomment for a build without the offline source
-  # generators (also drop the two `--offline` flags below and `npm_config_offline`
-  # above). Flathub's builders have no network — never commit this enabled.
+  # LOCAL BUILD ONLY — for a build without the offline source generators,
+  # uncomment this and drop the two `--offline` flags below + `npm_config_offline`
+  # above. Flathub's builders have no network — never commit this enabled.
   # build-args:
   #   - --share=network
 
@@ -81,8 +105,13 @@ modules:
       # - node-sources.json
     build-commands:
       - npm ci --offline
-      - npm run build                       # vite -> dist/ (embedded by tauri-build)
-      - cargo build --release --offline --manifest-path src-tauri/Cargo.toml
+      # `tauri build` (not bare `cargo build`) so the binary serves the bundled
+      # tauri:// assets instead of trying to reach the Vite dev server. Runs the
+      # beforeBuildCommand (vite -> dist/) itself. --no-bundle: we install the
+      # binary below, no deb/rpm/AppImage. No signing key -> no updater artifacts.
+      - >-
+        npm run tauri build -- --no-bundle
+        -c '{"bundle":{"createUpdaterArtifacts":false}}'
       - install -Dm755 src-tauri/target/release/dev-prompt -t /app/bin
       # Desktop entry + metainfo, rebased to the Flatpak app-id.
       - |

@@ -92,47 +92,40 @@ SNI stack). Add `--talk-name=org.kde.StatusNotifierWatcher` and
 
 ## Definition of done
 
-**Done in-tree** (app code + manifest, not yet build-verified):
+**Done** — built with `flatpak-builder` (GNOME 50) and run on CachyOS (KDE,
+Wayland, Hyper-V guest):
 
-- [x] Host launches routed through `flatpak-spawn --host` when sandboxed —
-      `src-tauri/src/launch.rs` `in_flatpak()` / `spawn_detached`. Covers the
-      terminal, editor, AI-CLI and `gtk-launch` (app-scope) paths, since they
-      all funnel through `spawn_detached`. Needs `--talk-name=org.freedesktop.Flatpak`.
-- [x] Updater UI absent under Flatpak — `updater_mode` returns `managed` when
-      `/.flatpak-info` is present, which the frontend already treats as
-      "don't poll, don't show".
-- [x] Autostart toggle hidden under Flatpak — `is_flatpak` command; Settings
-      shows a "use your desktop's autostart" note instead. (Background-portal
-      `RequestBackground` is the eventual real fix — deferred; needs `ashpd`
-      or raw zbus and a sandbox to test.)
-- [x] Manifest written **and built** —
-      `packaging/flatpak/io.github.seraphx2.devprompt.yaml`, `flatpak-builder`
-      against GNOME 48. Clean through `npm ci` / `svelte-check` / `vite build` /
-      `cargo build --release` / the `libayatana-appindicator` tray module
-      (flathub/shared-modules submodule at `packaging/flatpak/shared-modules/`) /
-      every install step. `finish-args` + app-id-rebased desktop/metainfo/icons.
-- [x] Sandbox checks — `flatpak run` starts and the app **stays resident**
-      (needed skipping `tauri-plugin-single-instance` under Flatpak — it
-      collided with `flatpak run`'s own app-id bus-name reservation and
-      `exit(0)`'d); the **tray icon registers** with
-      `org.kde.StatusNotifierWatcher`; `flatpak-spawn --host` executes host
-      commands (the launcher's core mechanism); `libayatana-appindicator3.so.1`
-      is bundled; exported `.desktop` + metainfo pass `desktop-file-validate` /
-      `appstreamcli validate`.
+- [x] App-code, active whether or not it runs sandboxed:
+  - host launches routed through `flatpak-spawn --host` (`src-tauri/src/launch.rs`
+    `in_flatpak()` / `spawn_detached` — the terminal, editor, AI-CLI and
+    app-scope `gtk-launch` paths all funnel through it).
+  - tool detection (`requires:` / `needs:` / terminal resolver) probes the host
+    via `command -v`, memoised — `rules::host_which`. Without this the sandbox
+    PATH has none of the editors/CLIs and every gated action vanishes.
+  - `apps::discover` / icon resolution add `/run/host/usr/**` so the `>` scope
+    sees host system apps.
+  - updater `managed` under Flatpak; autostart toggle hidden (`is_flatpak`).
+  - `tauri-plugin-single-instance` skipped under Flatpak (redundant there).
+- [x] Manifest — `packaging/flatpak/io.github.seraphx2.devprompt.yaml`. Built via
+  `npm run tauri build -- --no-bundle` (bare `cargo build` leaves the binary in
+  dev mode). `finish-args`: `--socket=x11` (the hotkey is an X11 grab),
+  `--share=network` (WebKit's netprocess won't start without it),
+  `--filesystem=xdg-run/tray-icon:create` (tray PNG visibility),
+  `--filesystem=host-os:ro` (+ two `/var` app dirs) for the `>` scope,
+  `--talk-name=org.freedesktop.Flatpak` for host spawn. Tray module from the
+  `flathub/shared-modules` submodule. Desktop/metainfo/icons rebased to the
+  app-id; pass `desktop-file-validate` / `appstreamcli`.
+- [x] Verified on the box: overlay renders, **global hotkey summons it**, tray
+  icon shows, `>` lists host apps with icons, repo actions launch host programs.
 
-**Pending** (needs an interactive session and/or a Flathub account):
+**Pending** (needs a Flathub account):
 
-- [ ] Interactive smoke test — overlay window actually shows and renders on
-      hotkey/tray-click, launching a host editor/terminal from it works, on a
-      non-GNOME desktop.
-- [ ] Global hotkey via the `GlobalShortcuts` portal actually registers (confirm
-      `tauri-plugin-global-shortcut` supports it — may need an upstream bump).
-      Tray ▸ Show is the documented fallback.
-- [ ] Bump `runtime-version` off EOL 48 → 49/50.
-- [ ] Generate `cargo-sources.json` / `node-sources.json` (needs
-      `flatpak-cargo-generator` / `flatpak-node-generator`); flip the manifest
-      back to `--offline` (it already is — just uncomment the source lines).
+- [ ] Generate `cargo-sources.json` / `node-sources.json`
+  (`flatpak-cargo-generator` / `flatpak-node-generator`); uncomment them in the
+  manifest and re-comment the local `--share=network` build-arg.
 - [ ] Flathub PR: `flatpak-builder --lint` clean, screenshots reachable (merge
-      `dev` → `main` first), permissions justified in the PR body.
+  `dev` → `main` first), permissions justified from the manifest's reviewer note.
+- [ ] Autostart via `org.freedesktop.portal.Background` `RequestBackground`
+  instead of the hidden toggle (needs `ashpd` / raw zbus) — nice-to-have.
 
 - [x] `docs/linux-distribution/README.md` status updated.
