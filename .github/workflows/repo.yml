@@ -105,8 +105,8 @@ jobs:
           path: |
             .flatpak-builder
             ~/.local/share/flatpak
-          key: flatpak-gnome50-${{ hashFiles('packaging/flatpak/io.github.seraphx2.devprompt.yaml', 'src-tauri/Cargo.lock', 'package-lock.json') }}
-          restore-keys: flatpak-gnome50-
+          key: flatpak-gnome50-v2-${{ hashFiles('packaging/flatpak/io.github.seraphx2.devprompt.yaml', 'src-tauri/Cargo.lock', 'package-lock.json') }}
+          restore-keys: flatpak-gnome50-v2-
 
       - name: Import signing key
         env:
