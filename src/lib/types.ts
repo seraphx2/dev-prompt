@@ -45,6 +45,12 @@ export type MenuItem =
       target: string;
       label: string;
       count: number;
+    }
+  | {
+      /** Placeholder shown while `buildDetectedActions` is still walking PATH. */
+      kind: "loading";
+      group: string;
+      label: string;
     };
 
 export interface AppConfig {

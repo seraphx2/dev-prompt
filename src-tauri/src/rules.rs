@@ -55,10 +55,20 @@ fn program_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Memoizes [`which`] itself (bare-name PATH lookups made directly by
+/// `rule_gate`'s `requires:` check, outside the `Resolver`). Without this, every
+/// `requires:` binary is re-walked across all of PATH — PATHEXT-aware, so up to
+/// 4x the directory count — on every action-menu open and every launch.
+fn which_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Forget every memoized program lookup (call after the config changes or a tool
 /// is installed while the app runs).
 pub fn clear_program_cache() {
     program_cache().lock().unwrap().clear();
+    which_cache().lock().unwrap().clear();
     #[cfg(target_os = "linux")]
     host_which_cache().lock().unwrap().clear();
 }
@@ -172,11 +182,28 @@ fn resolve_vswhere(_args: &str) -> Option<String> {
 /// Under Flatpak the tools we're probing for (editors, terminals, CLIs) live on
 /// the host, not in the runtime — resolve there via `flatpak-spawn --host`,
 /// memoised (this is hot: every `requires:` / `needs:` check calls it).
+///
+/// Memoized process-wide for the non-Flatpak path too — a `requires:` check
+/// hits this directly (not through `Resolver`), so without a cache here every
+/// action-menu open and every launch re-walks all of PATH, PATHEXT-aware, for
+/// each `requires:` binary. Cleared by [`clear_program_cache`].
 pub fn which(program: &str) -> Option<String> {
     #[cfg(target_os = "linux")]
     if crate::launch::in_flatpak() {
         return host_which(program);
     }
+    if let Some(hit) = which_cache().lock().unwrap().get(program) {
+        return hit.clone();
+    }
+    let resolved = which_uncached(program);
+    which_cache()
+        .lock()
+        .unwrap()
+        .insert(program.to_string(), resolved.clone());
+    resolved
+}
+
+fn which_uncached(program: &str) -> Option<String> {
     let path = std::env::var_os("PATH")?;
     let exts: Vec<String> = if cfg!(windows) {
         std::env::var("PATHEXT")
@@ -1222,15 +1249,27 @@ fn universal_actions(config: &Config, repo: &Repo, resolver: &Resolver) -> Vec<A
         .collect()
 }
 
-pub fn evaluate(config: &Config, ctx: &RepoContext, repo: &Repo) -> Vec<Action> {
-    let resolver = Resolver::new(&config.programs)
+fn resolver_for(config: &Config) -> Resolver<'_> {
+    Resolver::new(&config.programs)
         .with_terminal(config.terminal.as_deref(), config.terminal_template.as_deref())
-        .with_shell(config.shell.as_deref());
+        .with_shell(config.shell.as_deref())
+}
 
-    // Universal actions first — "open in terminal / editor / file manager" is the
-    // common case; the detected per-ecosystem stuff sits below it.
-    let mut out = universal_actions(config, repo, &resolver);
+/// "Open in terminal / editor / file manager" and friends — no filesystem walk
+/// beyond what `Resolver` already memoizes, so this is cheap even cold. Safe to
+/// await on the UI thread's critical path (the menu renders from this alone).
+pub fn evaluate_universal(config: &Config, repo: &Repo) -> Vec<Action> {
+    universal_actions(config, repo, &resolver_for(config))
+}
 
+/// Per-ecosystem detected actions (`rules:`), gated by `requires:` / `needs:`.
+/// The `requires:` PATH walk is only memoized *after* the first call this
+/// process makes — cheap on a warm cache, but the first call of a session pays
+/// for it. Run this off the menu's initial render (see `build_detected_actions`
+/// in commands.rs) rather than blocking on it.
+pub fn evaluate_detected(config: &Config, ctx: &RepoContext, repo: &Repo) -> Vec<Action> {
+    let resolver = resolver_for(config);
+    let mut out = Vec::new();
     for proj in &ctx.projects {
         for rule in &config.rules {
             if rule_gate(rule, &resolver).is_some() {
@@ -1239,7 +1278,15 @@ pub fn evaluate(config: &Config, ctx: &RepoContext, repo: &Repo) -> Vec<Action> 
             out.extend(rule_project_actions(rule, proj, repo, &resolver));
         }
     }
+    out
+}
 
+/// Full action set (universal + detected) — used where a single one-shot
+/// answer is needed (`find_action`, the settings trace view) rather than the
+/// menu's two-phase render.
+pub fn evaluate(config: &Config, ctx: &RepoContext, repo: &Repo) -> Vec<Action> {
+    let mut out = evaluate_universal(config, repo);
+    out.extend(evaluate_detected(config, ctx, repo));
     out
 }
 

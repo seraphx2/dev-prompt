@@ -13,7 +13,8 @@ use crate::index::{self, ScoredRepo};
 use crate::inspect::{self, RepoContext};
 use crate::launch;
 use crate::rules::{
-    build_actions as build_actions_impl, find_action, terminal_command, Action, Resolver,
+    build_actions as build_actions_impl, evaluate_detected, evaluate_universal, find_action,
+    terminal_command, Action, Resolver,
 };
 use crate::scan::{self, Repo};
 
@@ -201,6 +202,52 @@ pub async fn build_actions(
         // in `inspect`). An empty menu is a softer landing than failing the IPC,
         // but the panic shouldn't vanish silently.
         eprintln!("build_actions task failed: {e}");
+        Vec::new()
+    }))
+}
+
+/// The fast half of the action menu: universal actions only ("open in
+/// terminal / editor / file manager", the AI-CLI launchers, …), all gated by
+/// `needs:` which `Resolver` memoizes — no `requires:` PATH walk here, so this
+/// is cheap even on a cold cache. The menu renders from this alone, instantly;
+/// `build_detected_actions` fills in the rest afterward.
+#[tauri::command]
+pub async fn build_universal_actions(
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<Vec<Action>> {
+    let repo = repo_for_path(&state, &path);
+    let cfg = state.config.lock().unwrap().clone();
+    Ok(
+        tauri::async_runtime::spawn_blocking(move || evaluate_universal(&cfg, &repo))
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("build_universal_actions task failed: {e}");
+                Vec::new()
+            }),
+    )
+}
+
+/// The slow half: per-ecosystem detected actions (`rules:`), gated by
+/// `requires:` (an uncached PATH walk the first time this process checks each
+/// binary, memoized after) / `needs:`. Called after the menu is already
+/// showing the universal actions, so this never blocks the initial render —
+/// the frontend merges the result in once it lands.
+#[tauri::command]
+pub async fn build_detected_actions(
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<Vec<Action>> {
+    let repo = repo_for_path(&state, &path);
+    let cached = state.contexts.lock().unwrap().get(&repo.path).cloned();
+    let cfg = state.config.lock().unwrap().clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        let ctx = cached.unwrap_or_else(|| inspect_cold(&repo.path, &cfg));
+        evaluate_detected(&cfg, &ctx, &repo)
+    })
+    .await
+    .unwrap_or_else(|e| {
+        eprintln!("build_detected_actions task failed: {e}");
         Vec::new()
     }))
 }
