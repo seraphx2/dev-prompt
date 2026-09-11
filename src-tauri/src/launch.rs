@@ -77,9 +77,21 @@ fn spawn_detached(program: &str, args: &[String], cwd: &str, via_cmd: bool) -> A
         cmd.current_dir(cwd);
     }
     cmd.creation_flags(FLAGS);
-    cmd.spawn()
-        .map(|_| ())
-        .map_err(|e| AppError::msg(format!("failed to launch {program}: {e}")))
+    let child = cmd
+        .spawn()
+        .map_err(|e| AppError::msg(format!("failed to launch {program}: {e}")))?;
+
+    // Windows blocks background processes from stealing focus (the foreground
+    // lock timeout), so a detached child's first window can open behind
+    // whatever's already active. Grant it a one-shot exemption so its own
+    // SetForegroundWindow call (made implicitly when its main window is
+    // created) succeeds. Best-effort: locked-down machines (GPO, endpoint
+    // security) may still ignore it, so a failure here isn't fatal.
+    unsafe {
+        let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(child.id());
+    }
+
+    Ok(())
 }
 
 #[cfg(not(windows))]
