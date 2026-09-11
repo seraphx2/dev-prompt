@@ -39,7 +39,7 @@
   });
 
   const key = (it: MenuItem) =>
-    it.kind === "submenu" ? `sub:${it.target}` : it.action.id;
+    it.kind === "submenu" ? `sub:${it.target}` : it.kind === "loading" ? "loading" : it.action.id;
 
   // Auto-scroll follows keyboard navigation only — see the note in ResultList:
   // scrolling a hovered row shifts the list under the mouse and loops.
@@ -96,29 +96,38 @@
     </div>
   {:else}
     {#each items as item, i (key(item))}
-      {#if i === 0 || items[i - 1].group !== item.group}
-        {#if item.group}
-          <div
-            class="truncate px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-orange-400"
-          >
-            {item.group}
-          </div>
-        {:else}
-          <div class="my-1 border-t border-hair"></div>
-        {/if}
-      {/if}
+      {@const newGroup = i > 0 && items[i - 1].group !== item.group}
       <button
         type="button"
         data-idx={i}
+        disabled={item.kind === "loading"}
         class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors
-               {i === selected ? 'bg-white/10' : 'hover:bg-white/[0.04]'}"
+               {newGroup ? 'mt-3' : ''}
+               {item.kind === 'loading'
+          ? 'cursor-default'
+          : i === selected
+            ? 'bg-white/10'
+            : 'hover:bg-white/[0.04]'}"
         onclick={() => onrun(i)}
         onpointerenter={() => {
+          if (item.kind === "loading") return;
           if (i !== selected) skipScroll = true;
           onselect(i);
         }}
       >
-        {#if item.kind === "submenu"}
+        {#if item.kind === "loading"}
+          <svg
+            class="h-4 w-4 shrink-0 animate-spin text-white/40"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+          >
+            <path d="M12 3a9 9 0 1 0 9 9" />
+          </svg>
+          <span class="flex-1 truncate text-[13px] text-white/40">{item.label}</span>
+        {:else if item.kind === "submenu"}
           <svg
             class="h-4 w-4 shrink-0 text-orange-300"
             viewBox="0 0 24 24"

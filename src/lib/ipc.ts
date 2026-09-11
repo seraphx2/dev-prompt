@@ -35,6 +35,25 @@ export function buildActions(path: string): Promise<Action[]> {
 }
 
 /**
+ * Universal actions only (terminal / editor / file manager / AI-CLI
+ * launchers) — no `requires:` PATH walk, so this resolves instantly even on a
+ * cold cache. Use this to render the action menu immediately, then merge in
+ * `buildDetectedActions` once it lands.
+ */
+export function buildUniversalActions(path: string): Promise<Action[]> {
+  return invoke<Action[]>("build_universal_actions", { path });
+}
+
+/**
+ * Per-ecosystem detected actions (npm/cargo/mvn/docker/…). Slower — walks
+ * PATH for each `requires:` binary the first time this session checks it
+ * (memoized after). Call after the menu is already showing universal actions.
+ */
+export function buildDetectedActions(path: string): Promise<Action[]> {
+  return invoke<Action[]>("build_detected_actions", { path });
+}
+
+/**
  * Re-inspect one repo in the background. Fire-and-forget after `buildActions`:
  * if the repo changed since the last scan the backend emits `repo:context-updated`.
  */

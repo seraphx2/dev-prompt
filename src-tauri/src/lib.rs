@@ -384,6 +384,8 @@ pub fn run() {
             commands::rescan_repos,
             commands::search_repos,
             commands::build_actions,
+            commands::build_universal_actions,
+            commands::build_detected_actions,
             commands::repo_rule_trace,
             commands::refresh_repo_context,
             commands::run_action,

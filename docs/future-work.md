@@ -20,12 +20,13 @@ Files: `rules.rs` (or a `providers/` split if it grows), `default_config.yaml`.
 
 ---
 
-## 10. Terminal abstraction — non-Windows · _hard, mostly untestable here_
+## 10. Terminal abstraction — non-Windows · _hard; now testable on Linux_
 
 The Windows half shipped (see Done): `TermKind` table (`wt` / `alacritty` /
 `wezterm`), a `terminal:` pin and `terminal_template:` override, the `shell:`
 knob + per-shell `shell_wrap`, `list_terminals` / `list_shells`, and the
-Settings dropdowns. Left:
+Settings dropdowns. The Linux distribution work (see shipped-alongside) means
+there's a real CachyOS/KDE box to validate against now. Left:
 
 - **Linux emulator table** — `terminalize()`'s `#[cfg(not(windows))]` branch
   still spawns the bare command with no window. Add the same table shape:
@@ -81,18 +82,23 @@ Files: new `watch.rs`, `scan.rs` (`scan_root`), `lib.rs`, `commands.rs`, `Cargo.
 
 ---
 
-## 12. Linux X11/Wayland hotkey hardening · _hardest — partly out of our hands_
+## 12. Linux X11/Wayland hotkey hardening · _partly out of our hands; lower urgency now_
 
 `tauri-plugin-global-shortcut` → `global-hotkey` is X11-only on Linux. Wayland
 has no global-grab; it needs the `GlobalShortcuts` XDG portal (compositor
-support varies).
+support varies), and the plugin has no portal support upstream yet.
+
+Status: the X11 grab via XWayland is confirmed working on KDE Wayland (native
+and inside the Flatpak with `--socket=x11`), and the limitation is now
+documented in `docs/linux-distribution/phase-4-flatpak.md`. So this is no longer
+"the hotkey is broken on Wayland" — it's the portal path as a nice-to-have.
 
 - Detect session type via `tauri-plugin-os`.
-- On Wayland: attempt the portal; if unavailable, surface a clear message and
-  fall back (tray-only activation).
-- Document the limitation prominently.
+- On Wayland without XWayland: attempt the portal; if unavailable, surface a
+  clear message and fall back (tray-only activation).
 
-Files: `lib.rs`, docs. Needs real X11 + Wayland sessions to validate.
+Files: `lib.rs`, docs. Blocked on upstream `tauri-plugin-global-shortcut`
+portal support.
 
 ---
 
@@ -193,7 +199,9 @@ Files: `rules.rs` (`expand` + `build_action`), `config.rs` (schema),
 - **#1** Fatten `default_config.yaml` — 2026-08-31
 - **#2** VCS row badge — 2026-08-31 (PR #1)
 - **#3** Folder picker for roots — 2026-08-31 (PR #1)
-- **#4** Start at login — 2026-08-31 (PR #1)
+- **#4** Start at login — 2026-08-31 (PR #1); extended 2026-09-07 to work inside
+  the Flatpak sandbox via the `org.freedesktop.portal.Background` portal
+  (`src-tauri/src/autostart.rs`, `ashpd`)
 - **#5** `collapse_nested` toggle (`true` / `false` / `auto`) — 2026-09-01
 - **#8** per-repo rule trace in Settings ("Trace a repo") — 2026-09-01
 - **#7** `dotnet` provider — `.sln` / `.slnx` / lone `.??proj` → build/run/test — 2026-09-01
@@ -250,3 +258,14 @@ Release pipeline (CalVer + GitHub Actions + signed auto-update), `config.yaml` /
 notifications (launch + daily check, footer chip, tray tooltip, system
 notification), CI workflow + `main` branch protection, empty-state guidance,
 mouse back/forward navigation, hover/scroll fix.
+
+**Linux distribution** (its own roadmap: `docs/linux-distribution/`) — Aug–Sep
+2026. Phase 1 packaging metadata (`.desktop` + AppStream, CI validation); Phase 3
+self-hosted signed apt + rpm + pacman repo on GitHub Pages (`repo.yml`,
+`build-repo.sh`); Phase 4 self-hosted GPG-signed Flatpak (sandbox-aware
+`flatpak-spawn --host` launch, host tool detection, `/run/host` app discovery,
+Background-portal autostart, built in the flathub-infra container); the `>` app
+scope on Linux (freedesktop `.desktop` discovery, theme icons, `gtk-launch`);
+Dependabot (grouped weekly). Phase 2 (AUR) parked on registration, Phase 5 (Snap)
+skipped (can't self-host), Phase 6 (official repos) passive. Reviewed + hardened
+2026-09-07 (`docs/review/20260907/`).

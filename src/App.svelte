@@ -8,6 +8,8 @@
   import Settings from "./lib/components/Settings.svelte";
   import {
     buildActions,
+    buildDetectedActions,
+    buildUniversalActions,
     copyPath,
     getConfig,
     hideOverlay,
@@ -92,6 +94,8 @@
   let actionQuery = $state("");
   let actionSel = $state(0);
   let activeRepo = $state<ScoredRepo | null>(null);
+  /** True while `buildDetectedActions` is still walking PATH for `activeRepo`. */
+  let detectedLoading = $state(false);
   /** When set, the action menu is drilled into this `Detected · <x>` group. */
   let subGroup = $state<string | null>(null);
   /** `run:` template of the prompt action that opened the "Run command…" mode. */
@@ -156,6 +160,11 @@
       }
       items.push({ kind: "action", group: a.group, action: a, positions: [] });
     }
+    // Detected actions haven't landed yet — show a placeholder in their spot
+    // rather than leaving the menu looking like this repo has nothing.
+    if (detectedLoading && !seen.size) {
+      items.push({ kind: "loading", group: "Detected", label: "Checking…" });
+    }
     return items;
   });
 
@@ -168,7 +177,7 @@
 
   function activateMenuItem(i: number) {
     const it = menuItems[i];
-    if (!it) return;
+    if (!it || it.kind === "loading") return;
     if (it.kind === "submenu") {
       subGroup = it.target;
       actionQuery = "";
@@ -347,11 +356,21 @@
 
   async function openActions(entry: ScoredRepo) {
     activeRepo = entry;
-    actions = await buildActions(entry.repo.path);
+    // Universal actions only — no `requires:` PATH walk, so this is fast even
+    // on a cold cache. The menu opens on this alone; detected actions (npm /
+    // cargo / docker / …) stream in afterward instead of blocking the open.
+    actions = await buildUniversalActions(entry.repo.path);
     actionQuery = "";
     actionSel = 0;
     subGroup = null;
     mode = "action-menu";
+    detectedLoading = true;
+    void buildDetectedActions(entry.repo.path).then((detected) => {
+      // The user may have backed out and opened a different repo already.
+      if (activeRepo?.repo.path !== entry.repo.path) return;
+      actions = [...actions, ...detected];
+      detectedLoading = false;
+    });
     // Menu is up from the scan-time cache; re-check this one repo off-thread in
     // case it changed since the last scan. `onRepoContextUpdated` rebuilds it.
     void refreshRepoContext(entry.repo.path);
@@ -433,9 +452,19 @@
   async function activateRepo(i: number) {
     const entry = results[i];
     if (!entry) return;
-    const acts = await buildActions(entry.repo.path);
-    const def = acts.find((a) => a.default) ?? acts[0];
+    // The default action is "terminal" (universal) unless a rule's own action
+    // was configured as the default — so try the fast, `requires:`-free path
+    // first and only fall back to the full (slower) evaluation on a miss.
+    const uni = await buildUniversalActions(entry.repo.path);
+    const def = uni.find((a) => a.default) ?? (await fullDefaultAction(entry.repo.path));
     if (def) await execute(def, entry.repo.path);
+  }
+
+  /** Fallback for `activateRepo` when no universal action is the default —
+   *  a user-configured rule action must be. Pays the full `requires:` walk. */
+  async function fullDefaultAction(path: string): Promise<Action | undefined> {
+    const acts = await buildActions(path);
+    return acts.find((a) => a.default) ?? acts[0];
   }
 
   function onListKeydown(e: KeyboardEvent) {
@@ -584,6 +613,7 @@
         ) {
           void buildActions(path).then((a) => {
             actions = a;
+            detectedLoading = false;
           });
         }
       }),
