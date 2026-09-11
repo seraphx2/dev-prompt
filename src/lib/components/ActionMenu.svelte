@@ -96,22 +96,13 @@
     </div>
   {:else}
     {#each items as item, i (key(item))}
-      {#if i === 0 || items[i - 1].group !== item.group}
-        {#if item.group}
-          <div
-            class="truncate px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-orange-400"
-          >
-            {item.group}
-          </div>
-        {:else}
-          <div class="my-1 border-t border-hair"></div>
-        {/if}
-      {/if}
+      {@const newGroup = i > 0 && items[i - 1].group !== item.group}
       <button
         type="button"
         data-idx={i}
         disabled={item.kind === "loading"}
         class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors
+               {newGroup ? 'mt-3' : ''}
                {item.kind === 'loading'
           ? 'cursor-default'
           : i === selected
