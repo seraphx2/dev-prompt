@@ -312,7 +312,7 @@
     const payload = await listRepos();
     status = payload.ageSecs < 0
       ? "No cache — press Ctrl+R to scan"
-      : `${payload.repos.length} repos · cache ${fmtAge(payload.ageSecs)} old`;
+      : `${payload.repos.length} repos`;
     await refresh();
     if (payload.stale || payload.ageSecs < 0) void rescan();
   }
@@ -323,19 +323,13 @@
     status = "Scanning…";
     try {
       const payload = await rescanRepos();
-      status = `${payload.repos.length} repos · just scanned`;
+      status = `${payload.repos.length} repos`;
       await refresh();
     } catch (e) {
       status = `Scan failed: ${e}`;
     } finally {
       scanning = false;
     }
-  }
-
-  function fmtAge(secs: number): string {
-    if (secs < 90) return `${secs}s`;
-    if (secs < 5400) return `${Math.round(secs / 60)}m`;
-    return `${Math.round(secs / 3600)}h`;
   }
 
   async function loadApps() {
@@ -356,7 +350,7 @@
     try {
       const p = await rescanApps();
       apps = p.apps;
-      appStatus = `${p.apps.length} apps · just scanned`;
+      appStatus = `${p.apps.length} apps`;
     } catch (e) {
       appStatus = `App scan failed: ${e}`;
     } finally {
@@ -746,6 +740,9 @@
           </svg>
         </button>
       {/if}
+      {#if mode === "settings" && upd.current}
+        <span class="shrink-0 tabular-nums text-sky-400">v{upd.current}</span>
+      {/if}
       <span class="truncate">{footerStatus}</span>
       {#if mode === "repo-list"}
         <span class="inline-flex shrink-0 items-center gap-1"
@@ -768,8 +765,6 @@
         >
           ↑ {upd.info.version}
         </button>
-      {:else if upd.current}
-        <span class="shrink-0 tabular-nums text-white/25">v{upd.current}</span>
       {/if}
     </span>
   </footer>

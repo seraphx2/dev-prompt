@@ -554,7 +554,7 @@
 
       <div class="space-y-5">
         <div class="space-y-1">
-          <label class="flex cursor-pointer items-center gap-2">
+          <label class="flex w-fit cursor-pointer items-center gap-2">
             <input
               type="checkbox"
               bind:checked={autostart}
@@ -593,7 +593,7 @@
       </p>
     </div>
 
-    <label class="block space-y-1.5">
+    <label class="block w-fit space-y-1.5">
       <span class="text-orange-400">Overlay dismissal</span>
       <select
         bind:value={dismiss}
@@ -697,7 +697,7 @@
       </label>
     </div>
 
-    <label class="block space-y-1.5">
+    <label class="block w-fit space-y-1.5">
       <span class="text-orange-400">Repo inside another repo</span>
       <select
         bind:value={collapseNested}
@@ -791,15 +791,17 @@
     </div>
 
     <div class="space-y-2">
-      <label class="flex cursor-pointer items-center gap-2">
-        <input
-          type="checkbox"
-          bind:checked={appsEnabled}
-          class="h-3.5 w-3.5 cursor-pointer accent-sky-500"
-        />
-        <span class="text-orange-400">Index installed apps</span>
+      <div class="flex items-center gap-2">
+        <label class="flex w-fit cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            bind:checked={appsEnabled}
+            class="h-3.5 w-3.5 cursor-pointer accent-sky-500"
+          />
+          <span class="text-orange-400">Index installed apps</span>
+        </label>
         <span class="text-white/25">— type <span class="font-mono">›</span> in the search bar</span>
-      </label>
+      </div>
       <p class="pl-5 text-[11px] text-white/25">
         Unchecking this turns the <span class="font-mono">›</span> scope off entirely
         — typing it does nothing and the app-launcher hotkey won't open it either.
