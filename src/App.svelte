@@ -269,9 +269,7 @@
     mode === "repo-list" && appScope
       ? appStatus
       : mode === "settings"
-        ? [status, apps.length ? `${apps.length} apps` : ""]
-            .filter(Boolean)
-            .join(" · ")
+        ? [status, appStatus].filter(Boolean).join(" · ")
         : status,
   );
 
@@ -320,7 +318,7 @@
   async function rescan() {
     if (scanning) return;
     scanning = true;
-    status = "Scanning…";
+    status = "Scanning repos…";
     try {
       const payload = await rescanRepos();
       status = `${payload.repos.length} repos`;
@@ -346,7 +344,7 @@
   async function rescanAppsNow() {
     if (appsScanning) return;
     appsScanning = true;
-    appStatus = "Scanning for apps…";
+    appStatus = "Scanning apps…";
     try {
       const p = await rescanApps();
       apps = p.apps;
@@ -698,12 +696,13 @@
       onback={backToList}
       ondirtychange={(d) => (settingsDirty = d)}
       onsaved={() => {
-        rescan();
         void getConfig().then((c) => {
           dismissMode = c.dismiss ?? "always";
           appsEnabled = c.apps?.enabled ?? true;
         });
       }}
+      onrescanrepos={rescan}
+      onrescanapps={rescanAppsNow}
     />
   {/if}
 

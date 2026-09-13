@@ -16,7 +16,6 @@
     pickDirectories,
     reloadConfig,
     repoRuleTrace,
-    rescanApps,
     saveConfig,
     setAutostart,
     setAutostartPortal,
@@ -42,10 +41,18 @@
   let {
     onback,
     onsaved,
+    onrescanrepos,
+    onrescanapps,
     ondirtychange,
   }: {
     onback: () => void;
+    /** Fires after every successful save — App.svelte re-syncs the config
+     *  fields it caches (dismiss mode, apps enabled). Never rescans on its
+     *  own; that's `onrescanrepos` / `onrescanapps`, so a save that only
+     *  touches unrelated settings doesn't kick off a scan of either kind. */
     onsaved: () => void;
+    onrescanrepos: () => void;
+    onrescanapps: () => void;
     /** Fires whenever `dirty` changes, so the parent can gate other ways to
      *  leave (Esc, the mouse back-button) that don't go through `onback`. */
     ondirtychange?: (dirty: boolean) => void;
@@ -393,8 +400,9 @@
     const { ok, appsChanged } = await persist();
     if (!ok) return;
     note("Saved.");
-    onsaved(); // App.svelte re-scans repos
-    if (appsChanged) void rescanApps();
+    onsaved();
+    onrescanrepos();
+    if (appsChanged) onrescanapps();
   }
 
   // The contextual "Rescan" buttons save first, so they act on what's on screen
@@ -402,16 +410,17 @@
   async function saveAndRescanRepos() {
     const { ok } = await persist();
     if (!ok) return;
-    note("Saved — rescanning repositories…");
+    note("Saved — Scanning repos…");
     onsaved();
+    onrescanrepos();
   }
 
   async function saveAndRescanApps() {
     const { ok } = await persist();
     if (!ok) return;
-    note("Saved — rescanning apps…");
+    note("Saved — Scanning apps…");
     onsaved(); // App.svelte refreshes its cached apps.enabled, among other things
-    await rescanApps();
+    onrescanapps();
   }
 
   /** Discard edits back to the last-saved values. Stays on this screen. */
