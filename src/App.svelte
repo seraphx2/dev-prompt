@@ -231,8 +231,7 @@
       : mode === "repo-list"
       ? [
           ["Up/Down", "move"],
-          ["Enter", "launch"],
-          ["Tab", "actions"],
+          ["Enter", "actions"],
           ["Esc", "close"],
         ]
       : mode === "settings"
@@ -448,25 +447,6 @@
     }
   }
 
-  /** Enter on a repo runs its default action (the terminal), else the first. */
-  async function activateRepo(i: number) {
-    const entry = results[i];
-    if (!entry) return;
-    // The default action is "terminal" (universal) unless a rule's own action
-    // was configured as the default — so try the fast, `requires:`-free path
-    // first and only fall back to the full (slower) evaluation on a miss.
-    const uni = await buildUniversalActions(entry.repo.path);
-    const def = uni.find((a) => a.default) ?? (await fullDefaultAction(entry.repo.path));
-    if (def) await execute(def, entry.repo.path);
-  }
-
-  /** Fallback for `activateRepo` when no universal action is the default —
-   *  a user-configured rule action must be. Pays the full `requires:` walk. */
-  async function fullDefaultAction(path: string): Promise<Action | undefined> {
-    const acts = await buildActions(path);
-    return acts.find((a) => a.default) ?? acts[0];
-  }
-
   function onListKeydown(e: KeyboardEvent) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -479,15 +459,9 @@
       if (appScope) {
         const hit = filteredApps[selected];
         if (hit) runAppAndHide(hit.app);
-      } else if (e.shiftKey || e.ctrlKey) {
-        if (results[selected]) openActions(results[selected]);
-      } else {
-        activateRepo(selected);
+      } else if (results[selected]) {
+        openActions(results[selected]);
       }
-    } else if (e.key === "Tab") {
-      // Tab goes "forward" — into the selected repo's actions (repo scope only).
-      e.preventDefault();
-      if (!appScope && results[selected]) openActions(results[selected]);
     } else if (e.key === "Delete") {
       e.preventDefault();
       query = "";

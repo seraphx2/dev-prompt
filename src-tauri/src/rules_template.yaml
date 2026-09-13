@@ -35,6 +35,5 @@
 
 # Actions offered for every repo.
 # universal:
-#   default: vscode                # which action Enter runs on a repo in the list
 #   add:
 #     - { id: helix, name: "Edit in Helix", run: "hx {{path}}", terminal: true, needs: [helix] }

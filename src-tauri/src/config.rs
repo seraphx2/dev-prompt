@@ -354,8 +354,6 @@ pub struct RuleAction {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     pub needs: Vec<String>,
-    /// The action `Enter` runs on a repo (universal actions only).
-    pub default: bool,
 }
 
 impl RuleAction {
@@ -368,8 +366,6 @@ impl RuleAction {
 #[serde(default, rename_all = "snake_case")]
 pub struct UniversalConfig {
     pub actions: Vec<RuleAction>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default: Option<String>,
     /// Built-ins the user turned off — kept for the settings viewer.
     #[serde(skip)]
     pub disabled: Vec<RuleAction>,
@@ -435,8 +431,6 @@ pub struct UniversalPatch {
     pub disable: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub add: Vec<RuleAction>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default: Option<String>,
 }
 
 // --- loading / merging ----------------------------------------------------
@@ -539,9 +533,6 @@ fn merge_overrides(cfg: &mut Config, u: RuleOverrides) {
             cfg.universal.actions = kept;
         }
         cfg.universal.actions.extend(p.add);
-        if p.default.is_some() {
-            cfg.universal.default = p.default;
-        }
     }
 }
 

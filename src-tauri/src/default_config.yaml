@@ -6,7 +6,7 @@
 #   rules.yaml  (hand-authored)    — markers  : appended (markers_replace: true to reset)
 #                                    programs : merged by key
 #                                    rules    : prepended; rules_disable: [id] drops built-ins
-#                                    universal: universal.disable / .add / .default
+#                                    universal: universal.disable / .add
 #                                    docs/rules-engine.md
 #
 # Every rules[].match also acts as a discovery marker, so adding a rule for an
@@ -433,7 +433,6 @@ rules:
 # may not be installed (and is hidden via `needs:` when it isn't). Grouped:
 # AI CLIs, then AI editors, then editors/IDEs, then git tools.
 universal:
-  default: terminal
   actions:
     - { id: terminal, name: "Open in terminal", terminal: true, icon: terminal }
     - { id: filemanager, name: "Reveal in file manager", program: "{{filemanager}}", args: ["{{path}}"], icon: folder }

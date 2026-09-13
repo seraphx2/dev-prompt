@@ -109,8 +109,8 @@ surrounding style rather than running `cargo fmt`.
   `programs` merge **by key** (a key you set fully replaces the built-in
   candidate list for that key, it isn't merged item-by-item —
   `cfg.programs.insert(k, v)` in `config.rs`), `rules` prepend, `universal`
-  supports `.add` / `.disable` / `.default`. The Settings screen never
-  rewrites this file, so hand-written comments survive.
+  supports `.add` / `.disable`. The Settings screen never rewrites this file,
+  so hand-written comments survive.
 - `merge_settings()` applies `config.yaml`; `merge_overrides()` applies
   `rules.yaml` — both in `config.rs`, both scalar-present-wins / list-append
   semantics as appropriate per field. See `docs/rules-engine.md` for the

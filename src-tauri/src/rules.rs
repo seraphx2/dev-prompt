@@ -29,8 +29,6 @@ pub struct Action {
     pub hint: String,
     /// Section header; "" is just a divider.
     pub group: String,
-    /// The action `Enter` runs on a repo.
-    pub default: bool,
     /// Icon key resolved against `src/lib/icons.ts` in the frontend.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
@@ -836,7 +834,6 @@ fn build_action(
             label: expand(&ra.name, t),
             hint: String::new(),
             group: group.to_string(),
-            default: ra.default,
             icon: ra.icon.clone(),
             program: String::new(),
             args: Vec::new(),
@@ -858,7 +855,6 @@ fn build_action(
             label: expand(&ra.name, t),
             hint: ra.run.as_deref().map(|r| expand(r, t)).unwrap_or_default(),
             group: group.to_string(),
-            default: ra.default,
             icon: ra.icon.clone(),
             program: String::new(),
             args: Vec::new(),
@@ -907,7 +903,6 @@ fn build_action(
         label: expand(&ra.name, t),
         hint,
         group: group.to_string(),
-        default: ra.default,
         icon: ra.icon.clone(),
         program: final_prog,
         args: final_args,
@@ -943,7 +938,6 @@ fn provider_actions(
             label,
             hint,
             group: group.to_string(),
-            default: false,
             icon: None,
             program: p,
             args: a,
@@ -1386,7 +1380,6 @@ fn universal_actions(config: &Config, repo: &Repo, resolver: &Resolver) -> Vec<A
         .filter_map(|ra| {
             let id = ra.action_id();
             let mut ra = ra.clone();
-            ra.default = ra.default || config.universal.default.as_deref() == Some(&id);
             // A file manager that needs more than a bare path (Directory Opus,
             // say) replaces the built-in `program`/`args` with a `run:` line —
             // same `expand` + `shell_split` pipeline any other `run:` action uses.
@@ -1608,7 +1601,6 @@ pub struct UniversalStatus {
     pub label: String,
     /// `icon:` key from the action def, for the settings preview.
     pub icon: Option<String>,
-    pub default: bool,
     pub available: bool,
     /// The user turned this built-in off (`universal.disable`).
     pub disabled: bool,
@@ -1665,7 +1657,6 @@ pub fn summarize(config: &Config, rules_path: String) -> ConfigSummary {
     let universal_status = |a: &RuleAction, disabled: bool| {
         let id = a.action_id();
         UniversalStatus {
-            default: a.default || config.universal.default.as_deref() == Some(&id),
             available: !disabled
                 && (a.client || a.needs.iter().all(|k| resolver.resolve(k).is_some())),
             label: a.name.clone(),
@@ -1911,12 +1902,10 @@ mod tests {
     }
 
     #[test]
-    fn defaults_produce_universal_actions_with_one_default() {
+    fn defaults_produce_a_client_side_copy_path_action() {
         let cfg = bundled_defaults();
         let acts = build_actions(&repo(), &ctx_one(Project::default()), &cfg);
         assert!(acts.iter().any(|a| a.id == "copy-path" && a.client_side));
-        assert_eq!(acts.iter().filter(|a| a.default).count(), 1);
-        assert_eq!(acts.iter().find(|a| a.default).unwrap().id, "terminal");
     }
 
     #[test]

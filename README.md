@@ -207,8 +207,7 @@ via your desktop's session settings.)
 | -------------------- | ----------------------------------------------------- |
 | type                 | fuzzy-filter repos                                    |
 | `Up` / `Down`        | move selection                                        |
-| `Enter`              | run the repo's default action (open a terminal there) |
-| `Tab` / `Ctrl+Enter` | open the full action menu for the selected repo       |
+| `Enter`              | open the action menu for the selected repo            |
 | `Ctrl+R`             | force a rescan                                        |
 | `Delete`             | clear the query                                       |
 | `Ctrl+,`             | open Settings                                         |
@@ -224,7 +223,8 @@ via your desktop's session settings.)
 | `Esc`   | step back one level (sub-project → menu → repo list) |
 
 The mouse **back / forward** buttons work throughout: back == `Esc` for the
-current screen, forward == `Tab` (open actions / drill into a sub-project).
+current screen, forward == open the action menu on the repo list, or drill
+into a sub-project from within it.
 
 ## Releasing
 

@@ -867,7 +867,6 @@
                       {#if g.raw}{@html g.raw}{:else}<path d={g.d} />{/if}
                     </svg>
                     <span>{u.label}</span>
-                    {#if u.default}<span class="text-sky-300/70">default</span>{/if}
                     {#if u.disabled}
                       <span class="text-red-300/70">disabled</span>
                     {:else if !u.available}

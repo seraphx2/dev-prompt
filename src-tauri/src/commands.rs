@@ -704,7 +704,6 @@ pub async fn run_command(
             label: command.to_string(),
             hint: command.to_string(),
             group: String::new(),
-            default: false,
             icon: None,
             program,
             args,
