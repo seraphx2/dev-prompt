@@ -12,7 +12,6 @@ Both user files live in your OS config directory, created on first run:
 
 - Windows — `%APPDATA%\dev-prompt\`
 - Linux — `~/.config/dev-prompt/`
-- macOS — `~/Library/Application Support/dev-prompt/`
 
 **This document covers settings (`config.yaml`).** For the rule engine — markers,
 programs, rules, actions, universal, template variables — see
@@ -58,9 +57,8 @@ tray) when you log in — recommended, since the app is only useful when it's
 already running to catch the hotkey. It applies immediately, not on Save, and
 the OS is the source of truth: the checkbox reflects the actual autostart entry.
 
-- **Windows / native Linux / macOS** — writes the platform autostart entry
-  directly (`~/.config/autostart/dev-prompt.desktop`, a `Run` key, or a
-  LaunchAgent).
+- **Windows / native Linux** — writes the platform autostart entry directly
+  (`~/.config/autostart/dev-prompt.desktop` or a `Run` key).
 - **Flatpak** — the sandbox can't write that file, so the toggle asks
   `xdg-desktop-portal` to do it. The **first** enable shows a system consent
   dialog ("Allow dev-prompt to start automatically?"); after that it's silent.
@@ -91,6 +89,14 @@ choose *Custom…* and give a `terminal_template`: it's run verbatim with `{{dir
 and `{{cmd}}` substituted (put `{{cmd}}` after `--` or in quotes so its arguments
 stay together).
 
+Leaving `terminal:` unset (**Auto**) tries `wt.exe` first — except if you've
+explicitly set Windows' own **Settings ▸ For developers ▸ Terminal** to the
+classic **Windows Console Host**, in which case dev-prompt honors that and
+skips straight to the next candidate (or, if nothing else resolves, runs the
+shell directly instead of forcing Windows Terminal open against your choice).
+Picking Windows Terminal there, or leaving it on "Let Windows decide", changes
+nothing — both already agree with dev-prompt's own default.
+
 ### Shell
 
 A one-shot command is wrapped in a shell so the window stays open and keeps a
@@ -98,6 +104,27 @@ real console (ANSI colour, a live TTY — tools like Claude Code need it). The
 shell is `pwsh` (else Windows PowerShell) unless you set **Settings ▸ Shell** /
 `shell:` — `cmd`, `bash`, `nu`, … are recognised for their "run and hold" flags.
 The **Run command…** action picks a shell per-run, defaulting to that setting.
+
+### File manager
+
+Which program "Reveal in file manager" opens. Set from **Settings ▸ File
+manager**. Unlike Terminal, dev-prompt doesn't need a table of known
+invocations here — nearly every file manager opens a folder given as a bare
+path argument, the same contract `explorer.exe` has, so every installed
+candidate found via `programs.filemanager` shows up in the dropdown.
+
+```yaml
+# config.yaml
+filemanager: dopus                        # a programs.filemanager key, a PATH
+                                          #   name, or an absolute path.
+                                          #   Absent = first one that resolves.
+filemanager_template: dopus /cmd Go {{path}}   # only for a file manager that
+                                          #   wants more than a bare path.
+```
+
+If the one you pick needs more than a bare path (Directory Opus's `/cmd Go`,
+say), choose *Custom…* and give a `filemanager_template`: it's expanded and
+run verbatim, with `{{path}}` substituted for the folder.
 
 ---
 
@@ -110,8 +137,7 @@ always the default when the overlay opens the normal way. Enter launches the
 selected app; `Ctrl+R` re-enumerates. Frecency: apps you launch from dev-prompt
 float to the top of the empty-query list.
 
-Supported on **Windows** and **Linux**; on macOS the `>` scope shows an empty
-list.
+Supported on **Windows** and **Linux**.
 
 **Windows** discovery unions four sources and de-duplicates by executable path:
 

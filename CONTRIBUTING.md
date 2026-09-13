@@ -34,7 +34,7 @@ Rust required. That file has inline docs, and every field is spelled out in
 
 - **`markers`** — filenames/globs that make a directory show up as a repo.
 - **`programs`** — how to find an executable, with per-OS candidate lists
-  (`any` / `windows` / `linux` / `macos`): a bare name (PATH lookup), an absolute
+  (`any` / `windows` / `linux`): a bare name (PATH lookup), an absolute
   path, or a glob.
 - **`rules`** — `match` a manifest glob, emit `actions`. A rule's `match` also
   counts as a discovery marker.
@@ -61,18 +61,19 @@ Rust lives in `src-tauri/src/` (see the layout in the README), the Svelte UI in
 
 ## Platforms
 
-Windows and Linux are built and packaged by the release workflow (Linux:
-`deb` / `rpm` / `AppImage`); Windows is the most exercised. macOS shares the same
-codebase and compiles but isn't packaged yet. Fixes for any platform are very
+**Windows and Linux only — see [`CLAUDE.md`](CLAUDE.md).** macOS is not a
+target and PRs shouldn't add macOS-specific code, config, or docs. Windows and
+Linux are built and packaged by the release workflow (Linux: `deb` / `rpm` /
+`AppImage`); Windows is the most exercised. Fixes for either platform are very
 welcome. The platform-specific seams are small and localized:
 
 - `#[cfg(windows)]` blocks in `src-tauri/src/lib.rs` (acrylic blur, rounded
   corners).
 - `terminalize()` in `src-tauri/src/rules.rs` — Windows wraps commands in
-  `wt.exe`; other platforms need per-emulator working-directory flags (see
+  `wt.exe`; Linux needs per-emulator working-directory flags (see
   `docs/future-work.md`).
-- Global hotkey on Wayland needs the XDG global-shortcuts portal; X11 and macOS
-  work through the plugin as-is.
+- Global hotkey on Wayland needs the XDG global-shortcuts portal; X11 works
+  through the plugin as-is.
 
 ## Commits & PRs
 

@@ -1,10 +1,13 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import {
+    autoTerminal,
     configSummary,
+    defaultShell,
     getAutostart,
     isFlatpak,
     getConfig,
+    listFileManagers,
     listRepos,
     listShells,
     listTerminals,
@@ -18,7 +21,12 @@
     setAutostart,
     setAutostartPortal,
   } from "../ipc";
-  import type { ConfigSummary, RepoTrace, TerminalOption } from "../types";
+  import type {
+    ConfigSummary,
+    FileManagerOption,
+    RepoTrace,
+    TerminalOption,
+  } from "../types";
   import HotkeyRecorder from "./HotkeyRecorder.svelte";
   import { icons, iconKeys } from "../icons";
   import { glyphFor, glyphDim } from "../glyph";
@@ -44,9 +52,17 @@
   let terminalSel = $state("");
   let terminalTemplate = $state("");
   let terminals = $state<TerminalOption[]>([]);
+  // What "Auto" actually opens right now — names the dropdown's Auto option.
+  let autoTerminalLabel = $state("");
   // "" = default shell (pwsh -> powershell), else a shell name.
   let shellSel = $state("");
   let shells = $state<string[]>([]);
+  // What "Default" actually runs right now — names the dropdown's option.
+  let defaultShellLabel = $state("");
+  // "" = auto, "__custom__" = raw template, else a file manager id.
+  let filemanagerSel = $state("");
+  let filemanagerTemplate = $state("");
+  let filemanagers = $state<FileManagerOption[]>([]);
   // Installed-app launcher (the ">" scope).
   let appsEnabled = $state(true);
   let appExtraDirs = $state<string[]>([]);
@@ -131,9 +147,24 @@
       terminals = [];
     }
     try {
+      autoTerminalLabel = await autoTerminal();
+    } catch {
+      autoTerminalLabel = "";
+    }
+    try {
+      filemanagers = await listFileManagers();
+    } catch {
+      filemanagers = [];
+    }
+    try {
       shells = await listShells();
     } catch {
       shells = [];
+    }
+    try {
+      defaultShellLabel = await defaultShell();
+    } catch {
+      defaultShellLabel = "";
     }
     void pollUpdates();
   });
@@ -214,6 +245,8 @@
     terminal?: string | null;
     terminal_template?: string | null;
     shell?: string | null;
+    filemanager?: string | null;
+    filemanager_template?: string | null;
     apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
   }) {
     hotkey = c.hotkey;
@@ -229,6 +262,8 @@
     terminalTemplate = c.terminal_template ?? "";
     terminalSel = terminalTemplate ? "__custom__" : (c.terminal ?? "");
     shellSel = c.shell ?? "";
+    filemanagerTemplate = c.filemanager_template ?? "";
+    filemanagerSel = filemanagerTemplate ? "__custom__" : (c.filemanager ?? "");
     appsEnabled = c.apps?.enabled ?? true;
     appExtraDirs = [...(c.apps?.extra_dirs ?? [])];
     appExclude = [...(c.apps?.exclude ?? [])];
@@ -295,6 +330,9 @@
         terminal_template:
           terminalSel === "__custom__" ? terminalTemplate.trim() : "",
         shell: shellSel,
+        filemanager: filemanagerSel === "__custom__" ? "" : filemanagerSel,
+        filemanager_template:
+          filemanagerSel === "__custom__" ? filemanagerTemplate.trim() : "",
         apps: { enabled: appsEnabled, extra_dirs: appExtra, exclude: appExcl },
       });
       const next = JSON.stringify([appsEnabled, appExtra, appExcl]);
@@ -589,14 +627,14 @@
     </label>
 
     <div class="flex flex-wrap gap-6">
-      <label class="block space-y-1.5">
+      <label class="flex-1 min-w-[18rem] space-y-1.5">
         <span class="text-orange-400">Terminal</span>
         <select
           bind:value={terminalSel}
           title="Which terminal emulator dev-prompt opens for terminal actions"
-          class="w-72 rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+          class="w-full rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
         >
-          <option value="">Auto (first available)</option>
+          <option value="">Auto{autoTerminalLabel ? ` (${autoTerminalLabel})` : ""}</option>
           {#each terminals as t (t.id)}
             <option value={t.id}>{t.label}</option>
           {/each}
@@ -619,14 +657,14 @@
         {/if}
       </label>
 
-      <label class="block space-y-1.5">
+      <label class="flex-1 min-w-[18rem] space-y-1.5">
         <span class="text-orange-400">Shell</span>
         <select
           bind:value={shellSel}
           title="Shell a one-shot terminal command runs inside"
-          class="w-56 rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+          class="w-full rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
         >
-          <option value="">Default (PowerShell)</option>
+          <option value="">Default{defaultShellLabel ? ` (${defaultShellLabel})` : ""}</option>
           {#each shells as s (s)}
             <option value={s}>{s}</option>
           {/each}
@@ -634,6 +672,37 @@
             <option value={shellSel}>{shellSel}</option>
           {/if}
         </select>
+      </label>
+    </div>
+
+    <div class="flex flex-wrap gap-6">
+      <label class="flex-1 min-w-[18rem] space-y-1.5">
+        <span class="text-orange-400">File manager</span>
+        <select
+          bind:value={filemanagerSel}
+          title="Which file manager 'Reveal in file manager' opens"
+          class="w-full rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+        >
+          <option value="">Auto{filemanagers[0] ? ` (${filemanagers[0].label})` : ""}</option>
+          {#each filemanagers as f (f.id)}
+            <option value={f.id}>{f.label}</option>
+          {/each}
+          {#if filemanagerSel && filemanagerSel !== "__custom__" && !filemanagers.some((f) => f.id === filemanagerSel)}
+            <option value={filemanagerSel}>{filemanagerSel}</option>
+          {/if}
+          <option value="__custom__">Custom…</option>
+        </select>
+        {#if filemanagerSel === "__custom__"}
+          <input
+            bind:value={filemanagerTemplate}
+            spellcheck="false"
+            placeholder="dopus /cmd Go {'{{path}}'}"
+            class="w-full rounded border border-hair bg-white/[0.04] px-2 py-1.5 font-mono text-[12px] text-white/90 focus:border-white/25 focus:outline-none"
+          />
+          <span class="block text-[11px] text-white/25">
+            <span class="font-mono">{"{{path}}"}</span> = the folder to open.
+          </span>
+        {/if}
       </label>
     </div>
 

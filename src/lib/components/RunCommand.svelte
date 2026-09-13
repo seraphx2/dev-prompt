@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { getConfig, listShells } from "../ipc";
+  import { defaultShell, getConfig, listShells } from "../ipc";
   import { middleTruncate } from "../text";
 
   let {
@@ -47,7 +47,8 @@
       shells = [];
     }
     try {
-      shellSel = (await getConfig()).shell ?? "";
+      const pinned = (await getConfig()).shell?.trim();
+      shellSel = pinned || (await defaultShell());
     } catch {
       shellSel = "";
     }
@@ -82,10 +83,12 @@
     title="Shell to run in"
     class="shrink-0 rounded border border-hair bg-white/[0.04] py-1 pl-1.5 pr-6 text-[12px] text-white/80 focus:outline-none"
   >
-    <option value="">default</option>
     {#each shells as s (s)}
       <option value={s}>{s}</option>
     {/each}
+    {#if shellSel && !shells.includes(shellSel)}
+      <option value={shellSel}>{shellSel}</option>
+    {/if}
   </select>
 </div>
 

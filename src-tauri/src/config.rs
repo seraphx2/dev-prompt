@@ -51,6 +51,15 @@ pub struct Config {
     /// / …). `None` = `pwsh`, falling back to Windows PowerShell.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell: Option<String>,
+    /// File manager to open (`programs.filemanager` key, a bare name, or an
+    /// absolute path). `None` = first `programs.filemanager` candidate that
+    /// resolves.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filemanager: Option<String>,
+    /// Raw invocation override for a file manager that wants more than a bare
+    /// path (e.g. Directory Opus's `/cmd Go`). `{{path}}` = the folder to open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filemanager_template: Option<String>,
     /// Installed-app launcher (`>` scope) settings.
     pub apps: AppsConfig,
     /// Discovery markers — "this folder is a project". Every `rules[].match`
@@ -82,6 +91,8 @@ impl Default for Config {
             terminal: None,
             terminal_template: None,
             shell: None,
+            filemanager: None,
+            filemanager_template: None,
             apps: AppsConfig::default(),
             markers: Vec::new(),
             programs: BTreeMap::new(),
@@ -242,7 +253,6 @@ pub struct ProgramSpec {
     pub any: Vec<ProgramCandidate>,
     pub windows: Vec<ProgramCandidate>,
     pub linux: Vec<ProgramCandidate>,
-    pub macos: Vec<ProgramCandidate>,
 }
 
 impl ProgramSpec {
@@ -253,8 +263,6 @@ impl ProgramSpec {
         v.extend(self.windows.iter());
         #[cfg(target_os = "linux")]
         v.extend(self.linux.iter());
-        #[cfg(target_os = "macos")]
-        v.extend(self.macos.iter());
         v
     }
 }
@@ -394,6 +402,10 @@ pub struct UserConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub filemanager: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filemanager_template: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub apps: Option<AppsConfig>,
 }
 
@@ -463,6 +475,12 @@ fn merge_settings(cfg: &mut Config, u: UserConfig) {
     }
     if let Some(s) = u.shell {
         cfg.shell = Some(s);
+    }
+    if let Some(f) = u.filemanager {
+        cfg.filemanager = Some(f);
+    }
+    if let Some(f) = u.filemanager_template {
+        cfg.filemanager_template = Some(f);
     }
     if let Some(a) = u.apps {
         cfg.apps = a;
@@ -592,6 +610,8 @@ fn first_run_user() -> UserConfig {
         terminal: None,
         terminal_template: None,
         shell: None,
+        filemanager: None,
+        filemanager_template: None,
         // Bundled default is already `enabled: true`; leave the key out of the
         // starter file so it stays uncluttered.
         apps: None,
@@ -876,6 +896,21 @@ mod tests {
         assert_eq!(cfg.terminal.as_deref(), Some("wezterm"));
         assert_eq!(cfg.terminal_template.as_deref(), Some("x --cd {{dir}}"));
         assert_eq!(cfg.shell.as_deref(), Some("bash"));
+    }
+
+    #[test]
+    fn settings_file_carries_filemanager() {
+        let mut cfg = bundled_defaults();
+        let user: UserConfig = serde_yaml_ng::from_str(
+            "filemanager: dopus\nfilemanager_template: \"dopus /cmd Go {{path}}\"\n",
+        )
+        .unwrap();
+        merge_settings(&mut cfg, user);
+        assert_eq!(cfg.filemanager.as_deref(), Some("dopus"));
+        assert_eq!(
+            cfg.filemanager_template.as_deref(),
+            Some("dopus /cmd Go {{path}}")
+        );
     }
 
     #[test]

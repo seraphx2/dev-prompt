@@ -35,8 +35,6 @@ there's a real CachyOS/KDE box to validate against now. Left:
   - `konsole --workdir D -e CMD` · `foot --working-directory=D CMD`
   - `xterm -e sh -c 'cd D; CMD; exec $SHELL'`
   - Wayland-only emulators + the `x-terminal-emulator` alias. Verify on WSLg / VM.
-- **macOS** — `open -a Terminal D` opens a window; running a *command* needs
-  `osascript` (`tell app "Terminal" to do script …`) or a temp script.
 - **`shell_wrap` on non-Windows** — currently the branch runs the command
   bare; wire `config.shell` + the per-shell "run and hold" flags in there too.
 
@@ -56,9 +54,6 @@ icons, frecency, `apps.{enabled,extra_dirs,exclude}`, Settings controls. Left:
   action menu, app → launch).
 - **App action menu** — Tab on an app row → Open / Open file location / Run as
   administrator / Copy path. Currently Tab is a no-op in the `>` scope.
-- **macOS discovery** — `apps::discover` returns `[]` on macOS (Windows and
-  Linux are implemented). Enumerate `/Applications` + `~/Applications` `.app`
-  bundles, launch via `open -a`.
 - **Native enumeration** — replace the embedded PowerShell script with direct
   registry reads + `IShellLink` if the ~4 s cold rescan ever matters.
 
@@ -139,9 +134,6 @@ ecosystems that need more than a flat parse:
   globs (`crates/*`). Needs a TOML parser (new dep) or a careful hand-parse.
   `cargo build -p <member>` from the root. Largely redundant with `inspect`'s
   `crates/` discovery — low ROI.
-- **Xcode** — `.xcworkspace/contents.xcworkspacedata` (XML FileRefs) →
-  `.xcodeproj`s, then `xcshareddata/xcschemes/*.xcscheme` per project.
-  `xcodebuild -workspace X -scheme Y`. macOS-only; untestable off a Mac.
 - **Nx / Turborepo / Bazel** — build graphs, not flat lists: `nx.json` +
   scattered `project.json`, `turbo.json` + workspace globs, or `bazel query
   //...`. Heavier; niche.

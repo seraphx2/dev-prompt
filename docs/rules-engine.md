@@ -11,7 +11,6 @@ the canonical, inline-documented schema). You extend or override them in
 
 - Windows — `%APPDATA%\dev-prompt\rules.yaml`
 - Linux — `~/.config/dev-prompt/rules.yaml`
-- macOS — `~/Library/Application Support/dev-prompt/rules.yaml`
 
 Open it from **Settings ▸ Rules ▸ Open rules file**; it ships as a commented
 scaffold. After editing, hit **Settings ▸ Rules ▸ Reload config** (or restart) —
@@ -92,7 +91,7 @@ Match a manifest, emit actions.
 rules:
   - id: maven                 # optional; used by rules_disable and action ids
     match: pom.xml            # string or list; globs allowed ("*.csproj")
-    when: windows             # optional: windows | linux | macos | unix
+    when: windows             # optional: windows | linux | unix
     scope: project            # project (default) = run in the project dir
                               # repo = run at the repo root
     per_file: false           # true = one action set per matched file,

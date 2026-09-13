@@ -113,8 +113,8 @@ fn apply_overlay_effects(window: &WebviewWindow) {
         // corners outside the panel show the desktop, not the acrylic fill.
         round_window_corners(window);
     }
-    // macOS (NSVisualEffect vibrancy) and Linux blur are wired up in a later
-    // milestone; on those platforms the panel simply renders opaque for now.
+    // Linux blur is wired up in a later milestone; the panel simply renders
+    // opaque there for now.
     #[cfg(not(windows))]
     let _ = window;
 }
@@ -341,7 +341,8 @@ pub fn run() {
                             cfg.terminal.as_deref(),
                             cfg.terminal_template.as_deref(),
                         )
-                        .with_shell(cfg.shell.as_deref());
+                        .with_shell(cfg.shell.as_deref())
+                        .with_filemanager(cfg.filemanager.as_deref());
                     for key in cfg.programs.keys() {
                         let _ = resolver.resolve(key);
                     }
@@ -395,7 +396,10 @@ pub fn run() {
             commands::reload_config,
             commands::save_config,
             commands::list_terminals,
+            commands::auto_terminal,
+            commands::list_file_managers,
             commands::list_shells,
+            commands::default_shell,
             commands::run_command,
             commands::list_apps,
             commands::rescan_apps,

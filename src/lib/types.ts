@@ -69,12 +69,22 @@ export interface AppConfig {
   terminal_template?: string | null;
   /** Shell a one-shot terminal command runs inside; absent = pwsh/powershell. */
   shell?: string | null;
+  /** Pinned file manager (name / path); absent = auto-probe. */
+  filemanager?: string | null;
+  /** Raw `{{path}}` invocation for a file manager that wants more than a bare path. */
+  filemanager_template?: string | null;
   /** Installed-app launcher (`>` scope) settings. */
   apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
 }
 
 /** An installed terminal emulator dev-prompt can drive — for the Settings dropdown. */
 export interface TerminalOption {
+  id: string;
+  label: string;
+}
+
+/** An installed file manager dev-prompt found — for the Settings dropdown. */
+export interface FileManagerOption {
   id: string;
   label: string;
 }
