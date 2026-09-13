@@ -399,6 +399,8 @@ pub struct ConfigPatch {
     pub terminal: Option<String>,
     pub terminal_template: Option<String>,
     pub shell: Option<String>,
+    pub filemanager: Option<String>,
+    pub filemanager_template: Option<String>,
     pub apps: Option<config::AppsConfig>,
 }
 
@@ -415,9 +417,9 @@ pub fn save_config(
 ) -> AppResult<Config> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-    let (old_hotkey, old_apps_hotkey) = {
+    let (old_hotkey, old_apps_hotkey, old_apps_enabled) = {
         let cfg = state.config.lock().unwrap();
-        (cfg.hotkey.clone(), cfg.apps_hotkey.clone())
+        (cfg.hotkey.clone(), cfg.apps_hotkey.clone(), cfg.apps.enabled)
     };
     let mut user = config::load_user()?;
 
@@ -461,6 +463,14 @@ pub fn save_config(
     if let Some(s) = patch.shell {
         let s = s.trim();
         user.shell = (!s.is_empty()).then(|| s.to_string());
+    }
+    if let Some(f) = patch.filemanager {
+        let f = f.trim();
+        user.filemanager = (!f.is_empty()).then(|| f.to_string());
+    }
+    if let Some(f) = patch.filemanager_template {
+        let f = f.trim();
+        user.filemanager_template = (!f.is_empty()).then(|| f.to_string());
     }
     if let Some(mut a) = patch.apps {
         a.extra_dirs = a
@@ -510,8 +520,18 @@ pub fn save_config(
     }
 
     let hotkey_changed = !crate::same_shortcut(&new_hotkey, &old_hotkey);
-    let old_apps_nonempty = old_apps_hotkey.as_deref().filter(|s| !s.is_empty());
-    let apps_changed = match (new_apps_hotkey.as_deref(), old_apps_nonempty) {
+    // Registered iff the accelerator is set *and* the feature it opens is
+    // enabled — unchecking "Index installed apps" must release the hotkey,
+    // not just leave it opening an always-empty scope.
+    let new_apps_enabled = user.apps.as_ref().map(|a| a.enabled).unwrap_or(true);
+    let old_registered = old_apps_enabled
+        .then_some(old_apps_hotkey.as_deref())
+        .flatten()
+        .filter(|s| !s.is_empty());
+    let new_registered = new_apps_enabled
+        .then_some(new_apps_hotkey.as_deref())
+        .flatten();
+    let apps_changed = match (new_registered, old_registered) {
         (Some(a), Some(b)) => !crate::same_shortcut(a, b),
         (None, None) => false,
         _ => true,
@@ -537,18 +557,18 @@ pub fn save_config(
         claimed.push(new_hotkey.as_str());
     }
     if apps_changed {
-        if let Some(h) = &new_apps_hotkey {
+        if let Some(h) = new_registered {
             if let Err(e) = register(h) {
                 for a in &claimed {
                     unregister(a);
                 }
                 return Err(e);
             }
-            claimed.push(h.as_str());
+            claimed.push(h);
         }
     }
 
-    // A changed `terminal` pin must not lose to a memoized `terminal` lookup.
+    // A changed `terminal` / `filemanager` pin must not lose to a memoized lookup.
     crate::rules::clear_program_cache();
 
     if let Err(e) = config::save_user(&user) {
@@ -563,8 +583,8 @@ pub fn save_config(
         unregister(old_hotkey.as_str());
     }
     if apps_changed {
-        if let Some(old) = old_apps_nonempty {
-            if new_apps_hotkey.as_deref() != Some(old) {
+        if let Some(old) = old_registered {
+            if new_registered != Some(old) {
                 unregister(old);
             }
         }
@@ -596,6 +616,33 @@ pub fn list_terminals(state: State<'_, AppState>) -> Vec<TerminalOption> {
         .collect()
 }
 
+/// What "Auto" actually opens right now — names the Settings dropdown's Auto
+/// option instead of leaving it a vague "first available".
+#[tauri::command]
+pub fn auto_terminal(state: State<'_, AppState>) -> String {
+    crate::rules::auto_terminal_label(&state.config.lock().unwrap())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileManagerOption {
+    /// Value to store in `config.filemanager` (bare name / path).
+    pub id: String,
+    /// Display name (the binary's basename).
+    pub label: String,
+}
+
+/// Installed file managers found via `programs.filemanager` — feeds the
+/// Settings dropdown.
+#[tauri::command]
+pub fn list_file_managers(state: State<'_, AppState>) -> Vec<FileManagerOption> {
+    let cfg = state.config.lock().unwrap();
+    crate::rules::filemanager_options(&cfg)
+        .into_iter()
+        .map(|(id, label)| FileManagerOption { id, label })
+        .collect()
+}
+
 /// Shells found on PATH — feeds the Settings "Shell" dropdown and the
 /// "Run command…" picker.
 #[tauri::command]
@@ -624,6 +671,15 @@ pub fn list_shells() -> Vec<String> {
     out
 }
 
+/// The shell a one-shot command runs in with nothing pinned — names the
+/// Settings dropdown's "Default (…)" option instead of just saying
+/// "PowerShell" (which of the two — `pwsh` or legacy `powershell` — depends
+/// on what's actually installed).
+#[tauri::command]
+pub fn default_shell() -> String {
+    crate::rules::default_shell()
+}
+
 /// Run a free-form command in `path`'s terminal. Blank `command` opens the
 /// chosen shell interactively. Feeds the "Run command…" action.
 /// `async` + `spawn_blocking`: terminal/shell resolution (`which`, globs) and the
@@ -647,13 +703,7 @@ pub async fn run_command(
 
         let command = command.trim();
         let (program, args, cwd) = if command.is_empty() {
-            let sh = shell.clone().unwrap_or_else(|| {
-                if crate::rules::which("pwsh").is_some() {
-                    "pwsh".into()
-                } else {
-                    "powershell".into()
-                }
-            });
+            let sh = shell.clone().unwrap_or_else(crate::rules::default_shell);
             terminal_command(&sh, &repo.path, &resolver, false)
         } else {
             terminal_command(command, &repo.path, &resolver, true)
@@ -664,7 +714,6 @@ pub async fn run_command(
             label: command.to_string(),
             hint: command.to_string(),
             group: String::new(),
-            default: false,
             icon: None,
             program,
             args,
@@ -866,7 +915,7 @@ fn clear_startup_approved() {
 /// it so a package-manager install never tries (and fails) to replace its own
 /// root-owned binary.
 ///
-/// - `"self"`      the bundle can swap itself out (AppImage, NSIS/MSI, macOS .app)
+/// - `"self"`      the bundle can swap itself out (AppImage, NSIS/MSI)
 /// - `"managed"`   a package manager owns it: `.deb` / `.rpm`, or any other
 ///                 non-AppImage Linux install (assume a distro / AUR package)
 /// - `"unmanaged"` nothing updates it (Windows portable zip, a bare binary)
@@ -924,9 +973,7 @@ pub fn open_rules_file(window: tauri::WebviewWindow) -> AppResult<()> {
 
     #[cfg(windows)]
     let program = "explorer";
-    #[cfg(target_os = "macos")]
-    let program = "open";
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(unix)]
     let program = "xdg-open";
 
     std::process::Command::new(program)
@@ -946,9 +993,7 @@ pub fn open_releases_page(window: tauri::WebviewWindow) -> AppResult<()> {
 
     #[cfg(windows)]
     let program = "explorer";
-    #[cfg(target_os = "macos")]
-    let program = "open";
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(unix)]
     let program = "xdg-open";
 
     std::process::Command::new(program)

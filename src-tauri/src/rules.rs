@@ -29,8 +29,6 @@ pub struct Action {
     pub hint: String,
     /// Section header; "" is just a divider.
     pub group: String,
-    /// The action `Enter` runs on a repo.
-    pub default: bool,
     /// Icon key resolved against `src/lib/icons.ts` in the frontend.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
@@ -81,6 +79,8 @@ pub struct Resolver<'a> {
     terminal_template: Option<&'a str>,
     /// `config.shell` — shell a one-shot terminal command runs inside.
     shell: Option<&'a str>,
+    /// `config.filemanager` — a pinned file manager (key / bare name / absolute path).
+    filemanager: Option<&'a str>,
 }
 
 impl<'a> Resolver<'a> {
@@ -90,6 +90,7 @@ impl<'a> Resolver<'a> {
             terminal: None,
             terminal_template: None,
             shell: None,
+            filemanager: None,
         }
     }
 
@@ -106,8 +107,25 @@ impl<'a> Resolver<'a> {
         self
     }
 
+    /// Attach `config.filemanager`.
+    pub fn with_filemanager(mut self, filemanager: Option<&'a str>) -> Self {
+        self.filemanager = filemanager;
+        self
+    }
+
     /// Resolve a program key to an absolute path, memoized for the process.
     pub fn resolve(&self, key: &str) -> Option<String> {
+        // A pinned file manager skips the candidate list entirely — same
+        // "path/bare-name" contract `terminalize` uses for a pinned terminal.
+        if key == "filemanager" {
+            if let Some(pinned) = self.filemanager {
+                return if pinned.contains(['/', '\\']) {
+                    Some(pinned.to_string())
+                } else {
+                    which(pinned)
+                };
+            }
+        }
         if let Some(hit) = program_cache().lock().unwrap().get(key) {
             return hit.clone();
         }
@@ -458,6 +476,52 @@ fn term_kind(binary: &str) -> TermKind {
     }
 }
 
+/// Windows 11's own "default terminal application" choice — the GUID pair
+/// Settings ▸ For developers ▸ Terminal writes to `HKCU\Console\%%Startup`.
+/// `true` only when the user explicitly picked the classic Console Host over
+/// Windows Terminal; the unset ("let Windows decide") all-zero GUID, an
+/// explicit Windows Terminal pick, or a missing key all return `false` —
+/// today's `wt.exe`-first `Auto` behavior is already what Windows itself
+/// would pick in every one of those cases.
+/// <https://learn.microsoft.com/en-us/answers/questions/3913308/win11-registry-keys-to-change-default-terminal-app>
+#[cfg(windows)]
+fn windows_default_terminal_is_console_host() -> bool {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+
+    const CONSOLE_HOST: &str = "{b23d10c0-e52e-411e-9d5b-c09fdf709c7d}";
+    let Ok(key) = RegKey::predef(HKEY_CURRENT_USER).open_subkey(r"Console\%%Startup") else {
+        return false;
+    };
+    let read = |name: &str| -> Option<String> {
+        key.get_value::<String, _>(name)
+            .ok()
+            .map(|v| v.trim().to_lowercase())
+    };
+    read("DelegationConsole").as_deref() == Some(CONSOLE_HOST)
+        && read("DelegationTerminal").as_deref() == Some(CONSOLE_HOST)
+}
+
+#[cfg(not(windows))]
+fn windows_default_terminal_is_console_host() -> bool {
+    false
+}
+
+/// Same candidate walk as `Resolver::resolve("terminal")`, but skipping any
+/// candidate that resolves to Windows Terminal — used only when
+/// [`windows_default_terminal_is_console_host`] says the user explicitly
+/// opted out of it.
+#[cfg(windows)]
+fn resolve_terminal_skip_wt(
+    programs: &std::collections::BTreeMap<String, ProgramSpec>,
+) -> Option<String> {
+    let spec = programs.get("terminal")?;
+    spec.candidates().into_iter().find_map(|c| {
+        let resolved = resolve_candidate(c)?;
+        (term_kind(&resolved) != TermKind::WindowsTerminal).then_some(resolved)
+    })
+}
+
 /// `(id, label)` for every configured terminal candidate that resolves on this
 /// machine *and* has a known invocation. Feeds the Settings dropdown.
 pub fn terminal_options(config: &Config) -> Vec<(String, String)> {
@@ -489,21 +553,69 @@ pub fn terminal_options(config: &Config) -> Vec<(String, String)> {
     out
 }
 
+/// `(id, label)` for every configured `programs.filemanager` candidate that
+/// resolves on this machine. Feeds the Settings dropdown. Unlike
+/// [`terminal_options`] there's no known-invocation gate — "open with a bare
+/// path" is the near-universal contract for a file manager, so every resolving
+/// candidate is offered; `filemanager_template` covers the rare exception.
+pub fn filemanager_options(config: &Config) -> Vec<(String, String)> {
+    let Some(spec) = config.programs.get("filemanager") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for c in spec.candidates() {
+        let ProgramCandidate::Path(raw) = c else {
+            continue;
+        };
+        let Some(resolved) = resolve_path_candidate(raw) else {
+            continue;
+        };
+        let id = if raw.contains(['*', '?', '[']) {
+            resolved.clone()
+        } else {
+            raw.clone()
+        };
+        let label = basename(&resolved);
+        if !out.iter().any(|(_, l): &(String, String)| *l == label) {
+            out.push((id, label));
+        }
+    }
+    out
+}
+
+/// The terminal `Auto` resolves to right now, with nothing pinned — feeds the
+/// Settings dropdown's "Auto (…)" label so it names the actual outcome
+/// instead of a vague "first available". Not the same list `terminal_options`
+/// returns: that one is gated to known-invocation emulators for what's safe
+/// to *pin*, while this reflects the unfiltered walk `terminalize` really does.
+pub fn auto_terminal_label(config: &Config) -> String {
+    let resolver = Resolver::new(&config.programs).with_shell(config.shell.as_deref());
+    basename(&pick_terminal_binary(&resolver).0)
+}
+
+/// The shell a one-shot command runs in when nothing is pinned (`config.shell`
+/// absent) — `pwsh` if it's installed, else the legacy Windows PowerShell
+/// that's always present. Feeds the Settings dropdown's "Default (…)" label
+/// too, so it names the actual outcome instead of just saying "PowerShell".
+pub fn default_shell() -> String {
+    if which("pwsh").is_some() {
+        "pwsh".to_string()
+    } else {
+        "powershell".to_string()
+    }
+}
+
 /// Wrap `argv` in a shell that runs the command and then stays open with a real
 /// console (ANSI colour, a live TTY — tools like Claude Code render monochrome
-/// otherwise). `shell` = `config.shell`, else `pwsh` → Windows PowerShell.
+/// otherwise). `shell` = `config.shell`, else [`default_shell`].
 ///
 /// Each of these shells takes the command as one string, so every `argv` element
 /// is quoted for that shell first — `argv.join(" ")` alone lets the shell
 /// re-split on a space inside a path (`C:\Users\First Last\...`).
 #[cfg(windows)]
 fn shell_wrap(argv: &[String], shell: Option<&str>) -> Vec<String> {
-    let shell = shell.unwrap_or(if which("pwsh").is_some() {
-        "pwsh"
-    } else {
-        "powershell"
-    });
-    let kind = basename(shell).to_lowercase();
+    let shell = shell.map(str::to_string).unwrap_or_else(default_shell);
+    let kind = basename(&shell).to_lowercase();
     let kind = kind.trim_end_matches(".exe");
 
     fn join_quoted(argv: &[String], q: impl Fn(&str) -> String) -> String {
@@ -555,6 +667,49 @@ fn shell_wrap(argv: &[String], shell: Option<&str>) -> Vec<String> {
     }
 }
 
+/// Which terminal binary `Auto` resolves to (or the pinned `terminal:`, if
+/// set) — the exact walk `terminalize()` uses to pick a binary, extracted so
+/// the Settings dropdown can show what "Auto" actually means instead of a
+/// vague "first available". Second element: `true` only for the Windows
+/// "no GUI terminal, run the shell directly" fallback (see `terminalize`).
+#[cfg(windows)]
+fn pick_terminal_binary(resolver: &Resolver) -> (String, bool) {
+    let skip_wt = resolver.terminal.is_none() && windows_default_terminal_is_console_host();
+    let resolved = resolver
+        .terminal
+        .and_then(|t| {
+            if t.contains(['/', '\\']) {
+                Some(t.to_string()) // absolute / relative path, use as-is
+            } else {
+                which(t) // bare name → PATH
+            }
+        })
+        .or_else(|| {
+            if skip_wt {
+                resolve_terminal_skip_wt(resolver.programs)
+            } else {
+                resolver.resolve("terminal")
+            }
+        });
+    let no_gui_terminal = skip_wt && resolved.is_none();
+    let term = resolved.unwrap_or_else(|| {
+        if skip_wt {
+            resolver.shell.map(String::from).unwrap_or_else(default_shell)
+        } else {
+            "wt.exe".to_string()
+        }
+    });
+    (term, no_gui_terminal)
+}
+
+#[cfg(not(windows))]
+fn pick_terminal_binary(resolver: &Resolver) -> (String, bool) {
+    (
+        resolver.resolve("terminal").unwrap_or_else(|| "xterm".to_string()),
+        false,
+    )
+}
+
 /// `(program, args, cwd)` to run `argv` in a terminal at `cwd`. Empty `argv`
 /// means "just open a terminal there". `wrap` = run `argv` inside a shell that
 /// stays open (one-shot commands); `false` = hand `argv` to the emulator raw
@@ -567,19 +722,8 @@ fn terminalize(
 ) -> (String, Vec<String>, Option<String>) {
     #[cfg(windows)]
     {
-        // 1. Which binary — a pinned `terminal:`, else the first resolving
-        //    `programs.terminal` candidate, else Windows Terminal.
-        let term = resolver
-            .terminal
-            .and_then(|t| {
-                if t.contains(['/', '\\']) {
-                    Some(t.to_string()) // absolute / relative path, use as-is
-                } else {
-                    which(t) // bare name → PATH
-                }
-            })
-            .or_else(|| resolver.resolve("terminal"))
-            .unwrap_or_else(|| "wt.exe".to_string());
+        // 1. Which binary.
+        let (term, no_gui_terminal) = pick_terminal_binary(resolver);
 
         // 2. Raw template override. Split the template first, then splice `argv`
         //    in where `{{cmd}}` stands as its own token — joining `argv` and
@@ -608,6 +752,14 @@ fn terminalize(
         } else {
             argv.to_vec()
         };
+
+        if no_gui_terminal {
+            return if run.is_empty() {
+                (term, Vec::new(), Some(cwd.to_string()))
+            } else {
+                (run[0].clone(), run[1..].to_vec(), Some(cwd.to_string()))
+            };
+        }
 
         // 3. Known-emulator table.
         match term_kind(&term) {
@@ -646,9 +798,7 @@ fn terminalize(
         // (docs/future-work.md #10); run the command directly in `cwd`.
         let _ = wrap;
         if argv.is_empty() {
-            let term = resolver
-                .resolve("terminal")
-                .unwrap_or_else(|| "xterm".to_string());
+            let (term, _) = pick_terminal_binary(resolver);
             (term, Vec::new(), Some(cwd.to_string()))
         } else {
             (argv[0].clone(), argv[1..].to_vec(), Some(cwd.to_string()))
@@ -684,7 +834,6 @@ fn build_action(
             label: expand(&ra.name, t),
             hint: String::new(),
             group: group.to_string(),
-            default: ra.default,
             icon: ra.icon.clone(),
             program: String::new(),
             args: Vec::new(),
@@ -706,7 +855,6 @@ fn build_action(
             label: expand(&ra.name, t),
             hint: ra.run.as_deref().map(|r| expand(r, t)).unwrap_or_default(),
             group: group.to_string(),
-            default: ra.default,
             icon: ra.icon.clone(),
             program: String::new(),
             args: Vec::new(),
@@ -755,7 +903,6 @@ fn build_action(
         label: expand(&ra.name, t),
         hint,
         group: group.to_string(),
-        default: ra.default,
         icon: ra.icon.clone(),
         program: final_prog,
         args: final_args,
@@ -791,7 +938,6 @@ fn provider_actions(
             label,
             hint,
             group: group.to_string(),
-            default: false,
             icon: None,
             program: p,
             args: a,
@@ -1111,7 +1257,6 @@ fn os_matches(when: Option<&str>) -> bool {
         None => true,
         Some("windows" | "win") => cfg!(windows),
         Some("linux") => cfg!(target_os = "linux"),
-        Some("macos" | "mac" | "darwin") => cfg!(target_os = "macos"),
         Some("unix") => cfg!(unix),
         Some(_) => true,
     }
@@ -1235,7 +1380,20 @@ fn universal_actions(config: &Config, repo: &Repo, resolver: &Resolver) -> Vec<A
         .filter_map(|ra| {
             let id = ra.action_id();
             let mut ra = ra.clone();
-            ra.default = ra.default || config.universal.default.as_deref() == Some(&id);
+            // A file manager that needs more than a bare path (Directory Opus,
+            // say) replaces the built-in `program`/`args` with a `run:` line —
+            // same `expand` + `shell_split` pipeline any other `run:` action uses.
+            if id == "filemanager" {
+                if let Some(tmpl) = config
+                    .filemanager_template
+                    .as_deref()
+                    .filter(|t| !t.trim().is_empty())
+                {
+                    ra.program = None;
+                    ra.args = Vec::new();
+                    ra.run = Some(tmpl.to_string());
+                }
+            }
             let t = Tmpl {
                 repo: &repo.path,
                 path: &repo.path,
@@ -1253,6 +1411,7 @@ fn resolver_for(config: &Config) -> Resolver<'_> {
     Resolver::new(&config.programs)
         .with_terminal(config.terminal.as_deref(), config.terminal_template.as_deref())
         .with_shell(config.shell.as_deref())
+        .with_filemanager(config.filemanager.as_deref())
 }
 
 /// "Open in terminal / editor / file manager" and friends — no filesystem walk
@@ -1337,7 +1496,8 @@ pub struct ProjectHit {
 pub fn trace(config: &Config, ctx: &RepoContext, repo: &Repo) -> RepoTrace {
     let resolver = Resolver::new(&config.programs)
         .with_terminal(config.terminal.as_deref(), config.terminal_template.as_deref())
-        .with_shell(config.shell.as_deref());
+        .with_shell(config.shell.as_deref())
+        .with_filemanager(config.filemanager.as_deref());
 
     let universal = universal_actions(config, repo, &resolver)
         .into_iter()
@@ -1441,7 +1601,6 @@ pub struct UniversalStatus {
     pub label: String,
     /// `icon:` key from the action def, for the settings preview.
     pub icon: Option<String>,
-    pub default: bool,
     pub available: bool,
     /// The user turned this built-in off (`universal.disable`).
     pub disabled: bool,
@@ -1498,7 +1657,6 @@ pub fn summarize(config: &Config, rules_path: String) -> ConfigSummary {
     let universal_status = |a: &RuleAction, disabled: bool| {
         let id = a.action_id();
         UniversalStatus {
-            default: a.default || config.universal.default.as_deref() == Some(&id),
             available: !disabled
                 && (a.client || a.needs.iter().all(|k| resolver.resolve(k).is_some())),
             label: a.name.clone(),
@@ -1718,6 +1876,16 @@ mod tests {
     }
 
     #[test]
+    fn windows_default_terminal_reads_without_panicking() {
+        // No real environment (this dev machine included, confirmed via
+        // `Get-ItemProperty HKCU:\Console\%%Startup`) has explicitly opted
+        // into Console Host, so this should read `false` everywhere CI runs
+        // it. A `true` here would mean the registry read matched the wrong
+        // value, not that the machine actually chose Console Host.
+        assert!(!windows_default_terminal_is_console_host());
+    }
+
+    #[test]
     fn template_expands_known_vars() {
         let programs = std::collections::BTreeMap::new();
         let r = Resolver::new(&programs);
@@ -1734,12 +1902,10 @@ mod tests {
     }
 
     #[test]
-    fn defaults_produce_universal_actions_with_one_default() {
+    fn defaults_produce_a_client_side_copy_path_action() {
         let cfg = bundled_defaults();
         let acts = build_actions(&repo(), &ctx_one(Project::default()), &cfg);
         assert!(acts.iter().any(|a| a.id == "copy-path" && a.client_side));
-        assert_eq!(acts.iter().filter(|a| a.default).count(), 1);
-        assert_eq!(acts.iter().find(|a| a.default).unwrap().id, "terminal");
     }
 
     #[test]

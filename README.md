@@ -156,11 +156,12 @@ The discovered repo list is cached at `<OS cache dir>/dev-prompt/repos.json`.
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Windows 10/11** | Built, packaged (NSIS installer + portable zip), and tested. Acrylic blur + rounded corners, Windows Terminal integration, Visual Studio / Rider detection.                                                                                                                                                                |
 | **Linux**         | Same codebase, compiles. Built and packaged (`deb` / `rpm` / `AppImage` + a signed apt/dnf/pacman repo and a self-hosted Flatpak) by the release workflow; AppImage installs auto-update, everything else updates through its package manager. Hotkey works on X11; Wayland needs the XDG global-shortcuts portal (tray-click fallback otherwise). The `>` app launcher reads freedesktop `.desktop` entries (theme icons, `gtk-launch`). Terminal-command actions need per-emulator working-dir flags (in progress) — plain "open a terminal" works. Panel is translucent but unblurred (no compositor backing yet), so it paints a little more solid than on Windows. |
-| **macOS**         | Same codebase, compiles; not yet run on a Mac. Global hotkey and process launching are supported by the underlying plugins; vibrancy and `.dmg` packaging are unimplemented.                                                                                                                                               |
 
-The architecture is platform-neutral — program paths and OS quirks are isolated
-in the `programs` config (`any` / `windows` / `linux` / `macos` candidate lists)
-and a handful of `#[cfg]` blocks. The remaining cross-platform work is tracked in
+Windows and Linux are the only supported targets — see [`CLAUDE.md`](CLAUDE.md).
+The architecture is still platform-neutral where it costs nothing — program
+paths and OS quirks are isolated in the `programs` config (`any` / `windows` /
+`linux` candidate lists) and a handful of `#[cfg]` blocks. The remaining
+cross-platform work is tracked in
 [`docs/future-work.md`](docs/future-work.md).
 
 ## Prerequisites
@@ -169,7 +170,7 @@ and a handful of `#[cfg]` blocks. The remaining cross-platform work is tracked i
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Node.js 22+ (`.nvmrc` pins 24; CI builds on 24) | frontend build (`npm`)                                                                                                                                                                             |
 | Rust (stable, 1.77+) | <https://rustup.rs>                                                                                                                                                                                                                 |
-| Platform toolchain   | **Windows:** MSVC Build Tools ("Desktop development with C++") + WebView2 (preinstalled on Win 11). **Linux:** `webkit2gtk-4.1`, `libayatana-appindicator3`, `librsvg2`, standard build tools. **macOS:** Xcode Command Line Tools. |
+| Platform toolchain   | **Windows:** MSVC Build Tools ("Desktop development with C++") + WebView2 (preinstalled on Win 11). **Linux:** `webkit2gtk-4.1`, `libayatana-appindicator3`, `librsvg2`, standard build tools. |
 
 ## Run (development)
 
@@ -188,9 +189,9 @@ npm run tauri build
 ```
 
 Produces a Windows NSIS installer, or the Linux `deb` / `rpm` / `AppImage`
-bundles, depending on the host OS. The release workflow builds both (macOS is
-still pending) — see [`docs/releasing.md`](docs/releasing.md), which also has a
-recipe for smoke-testing a Linux bundle locally.
+bundles, depending on the host OS. The release workflow builds both — see
+[`docs/releasing.md`](docs/releasing.md), which also has a recipe for
+smoke-testing a Linux bundle locally.
 
 ## Usage
 
@@ -206,8 +207,7 @@ via your desktop's session settings.)
 | -------------------- | ----------------------------------------------------- |
 | type                 | fuzzy-filter repos                                    |
 | `Up` / `Down`        | move selection                                        |
-| `Enter`              | run the repo's default action (open a terminal there) |
-| `Tab` / `Ctrl+Enter` | open the full action menu for the selected repo       |
+| `Enter`              | open the action menu for the selected repo            |
 | `Ctrl+R`             | force a rescan                                        |
 | `Delete`             | clear the query                                       |
 | `Ctrl+,`             | open Settings                                         |
@@ -223,7 +223,8 @@ via your desktop's session settings.)
 | `Esc`   | step back one level (sub-project → menu → repo list) |
 
 The mouse **back / forward** buttons work throughout: back == `Esc` for the
-current screen, forward == `Tab` (open actions / drill into a sub-project).
+current screen, forward == open the action menu on the repo list, or drill
+into a sub-project from within it.
 
 ## Releasing
 

@@ -6,7 +6,7 @@
 #   rules.yaml  (hand-authored)    — markers  : appended (markers_replace: true to reset)
 #                                    programs : merged by key
 #                                    rules    : prepended; rules_disable: [id] drops built-ins
-#                                    universal: universal.disable / .add / .default
+#                                    universal: universal.disable / .add
 #                                    docs/rules-engine.md
 #
 # Every rules[].match also acts as a discovery marker, so adding a rule for an
@@ -217,11 +217,23 @@ programs:
     windows: [wt.exe, alacritty, wezterm]
     linux:
       [alacritty, kitty, wezterm, foot, gnome-terminal, konsole, xfce4-terminal, x-terminal-emulator, xterm]
-    macos: [open]
+  # explorer.exe stays first so "Auto" behaves exactly as before for anyone who
+  # hasn't pinned a choice. The rest are common alternatives that resolve only
+  # if actually installed — see `filemanager_template` in config.yaml for one
+  # that needs more than a bare path arg (e.g. Directory Opus's `/cmd Go`).
   filemanager:
-    windows: [explorer.exe]
-    linux: [xdg-open]
-    macos: [open]
+    windows:
+      - explorer.exe
+      - "%LOCALAPPDATA%/Programs/*Directory Opus*/dopus.exe"
+      - "%ProgramFiles%/GPSoftware/Directory Opus/dopus.exe"
+      - "%COMMONPROGRAMFILES%/totalcmd/TOTALCMD64.EXE"
+      - "%ProgramFiles%/Total Commander/TOTALCMD64.EXE"
+      - "%ProgramFiles(x86)%/Total Commander/TOTALCMD.EXE"
+      - "%ProgramFiles%/Explorer++/Explorer++.exe"
+      - "%LOCALAPPDATA%/Programs/Explorer++/Explorer++.exe"
+      - "%ProgramFiles%/Q-Dir/Q-Dir.exe"
+      - "%ProgramFiles%/FreeCommander XE/FreeCommander.exe"
+    linux: [xdg-open, nautilus, dolphin, thunar, pcmanfm, nemo, caja]
 
 # --- rules ---------------------------------------------------------------
 rules:
@@ -421,7 +433,6 @@ rules:
 # may not be installed (and is hidden via `needs:` when it isn't). Grouped:
 # AI CLIs, then AI editors, then editors/IDEs, then git tools.
 universal:
-  default: terminal
   actions:
     - { id: terminal, name: "Open in terminal", terminal: true, icon: terminal }
     - { id: filemanager, name: "Reveal in file manager", program: "{{filemanager}}", args: ["{{path}}"], icon: folder }

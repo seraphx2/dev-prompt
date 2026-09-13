@@ -24,8 +24,6 @@ export interface Action {
   hint: string;
   /** Section header to show above this action; "" means "just a divider". */
   group: string;
-  /** Enter on a repo runs the action flagged `default` (falls back to first). */
-  default: boolean;
   /** Icon key resolved against `lib/icons.ts`; absent -> fallback glyph. */
   icon?: string | null;
   /** True when this action is handled purely in the frontend (e.g. copy path). */
@@ -69,12 +67,22 @@ export interface AppConfig {
   terminal_template?: string | null;
   /** Shell a one-shot terminal command runs inside; absent = pwsh/powershell. */
   shell?: string | null;
+  /** Pinned file manager (name / path); absent = auto-probe. */
+  filemanager?: string | null;
+  /** Raw `{{path}}` invocation for a file manager that wants more than a bare path. */
+  filemanager_template?: string | null;
   /** Installed-app launcher (`>` scope) settings. */
   apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
 }
 
 /** An installed terminal emulator dev-prompt can drive — for the Settings dropdown. */
 export interface TerminalOption {
+  id: string;
+  label: string;
+}
+
+/** An installed file manager dev-prompt found — for the Settings dropdown. */
+export interface FileManagerOption {
   id: string;
   label: string;
 }
@@ -96,7 +104,6 @@ export interface ConfigSummary {
     id: string;
     label: string;
     icon: string | null;
-    default: boolean;
     available: boolean;
     disabled: boolean;
   }[];

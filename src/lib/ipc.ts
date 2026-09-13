@@ -8,6 +8,7 @@ import type {
   AppEntry,
   AppListPayload,
   ConfigSummary,
+  FileManagerOption,
   RepoListPayload,
   RepoTrace,
   ScoredRepo,
@@ -103,6 +104,9 @@ export function saveConfig(patch: {
   terminal?: string;
   terminal_template?: string;
   shell?: string;
+  /** "" clears the pin / template back to auto. */
+  filemanager?: string;
+  filemanager_template?: string;
   apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
 }): Promise<AppConfig> {
   return invoke<AppConfig>("save_config", { patch });
@@ -113,9 +117,24 @@ export function listTerminals(): Promise<TerminalOption[]> {
   return invoke<TerminalOption[]>("list_terminals");
 }
 
+/** What "Auto" actually opens right now — names the dropdown's Auto option. */
+export function autoTerminal(): Promise<string> {
+  return invoke<string>("auto_terminal");
+}
+
+/** Installed file managers found via `programs.filemanager`. */
+export function listFileManagers(): Promise<FileManagerOption[]> {
+  return invoke<FileManagerOption[]>("list_file_managers");
+}
+
 /** Shells found on PATH (`pwsh`, `bash`, `nu`, …). */
 export function listShells(): Promise<string[]> {
   return invoke<string[]>("list_shells");
+}
+
+/** The shell a one-shot command runs in with nothing pinned. */
+export function defaultShell(): Promise<string> {
+  return invoke<string>("default_shell");
 }
 
 /** Run a free-form command in `path`'s terminal (blank = open the shell). */

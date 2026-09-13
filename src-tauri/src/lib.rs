@@ -113,8 +113,8 @@ fn apply_overlay_effects(window: &WebviewWindow) {
         // corners outside the panel show the desktop, not the acrylic fill.
         round_window_corners(window);
     }
-    // macOS (NSVisualEffect vibrancy) and Linux blur are wired up in a later
-    // milestone; on those platforms the panel simply renders opaque for now.
+    // Linux blur is wired up in a later milestone; the panel simply renders
+    // opaque there for now.
     #[cfg(not(windows))]
     let _ = window;
 }
@@ -240,18 +240,22 @@ pub fn run() {
             }
 
             // Register the configured global hotkey(s).
-            let (hotkey, apps_hotkey) = {
+            let (hotkey, apps_hotkey, apps_enabled) = {
                 let state = app.state::<AppState>();
                 let cfg = state.config.lock().unwrap();
-                (cfg.hotkey.clone(), cfg.apps_hotkey.clone())
+                (cfg.hotkey.clone(), cfg.apps_hotkey.clone(), cfg.apps.enabled)
             };
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
             if let Err(e) = app.global_shortcut().register(hotkey.as_str()) {
                 eprintln!("failed to register hotkey `{hotkey}`: {e}");
             }
-            if let Some(ah) = apps_hotkey.as_deref().filter(|h| !h.is_empty()) {
-                if let Err(e) = app.global_shortcut().register(ah) {
-                    eprintln!("failed to register apps hotkey `{ah}`: {e}");
+            // Unchecking "Index installed apps" turns the whole `>` scope off,
+            // so this hotkey shouldn't even be claimed — nothing would open it.
+            if apps_enabled {
+                if let Some(ah) = apps_hotkey.as_deref().filter(|h| !h.is_empty()) {
+                    if let Err(e) = app.global_shortcut().register(ah) {
+                        eprintln!("failed to register apps hotkey `{ah}`: {e}");
+                    }
                 }
             }
 
@@ -341,7 +345,8 @@ pub fn run() {
                             cfg.terminal.as_deref(),
                             cfg.terminal_template.as_deref(),
                         )
-                        .with_shell(cfg.shell.as_deref());
+                        .with_shell(cfg.shell.as_deref())
+                        .with_filemanager(cfg.filemanager.as_deref());
                     for key in cfg.programs.keys() {
                         let _ = resolver.resolve(key);
                     }
@@ -395,7 +400,10 @@ pub fn run() {
             commands::reload_config,
             commands::save_config,
             commands::list_terminals,
+            commands::auto_terminal,
+            commands::list_file_managers,
             commands::list_shells,
+            commands::default_shell,
             commands::run_command,
             commands::list_apps,
             commands::rescan_apps,

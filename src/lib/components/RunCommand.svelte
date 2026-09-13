@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { getConfig, listShells } from "../ipc";
+  import { defaultShell, getConfig, listShells } from "../ipc";
   import { middleTruncate } from "../text";
 
   let {
@@ -47,7 +47,8 @@
       shells = [];
     }
     try {
-      shellSel = (await getConfig()).shell ?? "";
+      const pinned = (await getConfig()).shell?.trim();
+      shellSel = pinned || (await defaultShell());
     } catch {
       shellSel = "";
     }
@@ -56,9 +57,15 @@
   function onKey(e: KeyboardEvent) {
     if (e.key === "Enter") {
       e.preventDefault();
+      e.stopPropagation();
       onrun(command.trim(), shellSel);
     } else if (e.key === "Escape") {
       e.preventDefault();
+      // Without this the event still bubbles to the window-level handler,
+      // which by then sees `mode` already flipped to "action-menu" and
+      // applies its own Escape handling on the same keystroke — stepping
+      // back a second time, straight past the action menu to the repo list.
+      e.stopPropagation();
       onback();
     }
   }
@@ -79,13 +86,16 @@
   <span class="shrink-0 text-white/15">/</span>
   <select
     bind:value={shellSel}
+    onkeydown={onKey}
     title="Shell to run in"
-    class="shrink-0 rounded border border-hair bg-white/[0.04] py-1 pl-1.5 pr-6 text-[12px] text-white/80 focus:outline-none"
+    class="shrink-0 cursor-pointer rounded border border-hair bg-white/[0.04] py-1 pl-1.5 pr-6 text-[12px] text-white/80 focus:outline-none"
   >
-    <option value="">default</option>
     {#each shells as s (s)}
       <option value={s}>{s}</option>
     {/each}
+    {#if shellSel && !shells.includes(shellSel)}
+      <option value={shellSel}>{shellSel}</option>
+    {/if}
   </select>
 </div>
 

@@ -38,6 +38,12 @@
 
   type Mode = "repo-list" | "action-menu" | "settings" | "run-command";
 
+  let settingsPanel: Settings | undefined = $state();
+  // Whether Settings has unsaved edits — Esc and the mouse back-button call
+  // `backToList()` directly, bypassing Settings' own `onback`, so they need
+  // this to gate leaving too.
+  let settingsDirty = $state(false);
+
   let query = $state("");
   let results = $state<ScoredRepo[]>([]);
   let selected = $state(0);
@@ -47,7 +53,12 @@
   let apps = $state<AppEntry[]>([]);
   let appStatus = $state("");
   let appsScanning = $state(false);
-  const appScope = $derived(query.startsWith(">"));
+  // Whether the "> apps" scope is usable at all — loaded on mount and
+  // refreshed after a settings save. Unchecking "Index installed apps" turns
+  // the whole scope off rather than leaving it reachable but always empty.
+  let appsEnabled = $state(true);
+  getConfig().then((c) => (appsEnabled = c.apps?.enabled ?? true));
+  const appScope = $derived(appsEnabled && query.startsWith(">"));
   const term = $derived(
     appScope ? query.slice(1).replace(/^\s+/, "") : query.trim(),
   );
@@ -231,8 +242,7 @@
       : mode === "repo-list"
       ? [
           ["Up/Down", "move"],
-          ["Enter", "launch"],
-          ["Tab", "actions"],
+          ["Enter", "actions"],
           ["Esc", "close"],
         ]
       : mode === "settings"
@@ -448,25 +458,6 @@
     }
   }
 
-  /** Enter on a repo runs its default action (the terminal), else the first. */
-  async function activateRepo(i: number) {
-    const entry = results[i];
-    if (!entry) return;
-    // The default action is "terminal" (universal) unless a rule's own action
-    // was configured as the default — so try the fast, `requires:`-free path
-    // first and only fall back to the full (slower) evaluation on a miss.
-    const uni = await buildUniversalActions(entry.repo.path);
-    const def = uni.find((a) => a.default) ?? (await fullDefaultAction(entry.repo.path));
-    if (def) await execute(def, entry.repo.path);
-  }
-
-  /** Fallback for `activateRepo` when no universal action is the default —
-   *  a user-configured rule action must be. Pays the full `requires:` walk. */
-  async function fullDefaultAction(path: string): Promise<Action | undefined> {
-    const acts = await buildActions(path);
-    return acts.find((a) => a.default) ?? acts[0];
-  }
-
   function onListKeydown(e: KeyboardEvent) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -479,15 +470,9 @@
       if (appScope) {
         const hit = filteredApps[selected];
         if (hit) runAppAndHide(hit.app);
-      } else if (e.shiftKey || e.ctrlKey) {
-        if (results[selected]) openActions(results[selected]);
-      } else {
-        activateRepo(selected);
+      } else if (results[selected]) {
+        openActions(results[selected]);
       }
-    } else if (e.key === "Tab") {
-      // Tab goes "forward" — into the selected repo's actions (repo scope only).
-      e.preventDefault();
-      if (!appScope && results[selected]) openActions(results[selected]);
     } else if (e.key === "Delete") {
       e.preventDefault();
       query = "";
@@ -544,7 +529,8 @@
     } else if (mode === "settings") {
       if (e.key === "Escape") {
         e.preventDefault();
-        backToList();
+        if (settingsDirty) settingsPanel?.nudge();
+        else backToList();
       }
     } else {
       onListKeydown(e);
@@ -558,7 +544,10 @@
     e.preventDefault();
     const back = e.button === 3;
     if (mode === "settings") {
-      if (back) backToList();
+      if (back) {
+        if (settingsDirty) settingsPanel?.nudge();
+        else backToList();
+      }
     } else if (mode === "action-menu") {
       if (back) menuBack();
       else if (menuItems[actionSel]?.kind === "submenu")
@@ -651,7 +640,11 @@
     <SearchInput
       bind:this={search}
       bind:value={query}
-      placeholder={appScope ? "Search apps…" : "Search repos…    › for apps"}
+      placeholder={appScope
+        ? "Search apps…"
+        : appsEnabled
+          ? "Search repos…    › for apps"
+          : "Search repos…"}
     />
     {#if appScope}
       <AppList
@@ -707,10 +700,15 @@
     />
   {:else if mode === "settings"}
     <Settings
+      bind:this={settingsPanel}
       onback={backToList}
+      ondirtychange={(d) => (settingsDirty = d)}
       onsaved={() => {
         rescan();
-        void getConfig().then((c) => (dismissMode = c.dismiss ?? "always"));
+        void getConfig().then((c) => {
+          dismissMode = c.dismiss ?? "always";
+          appsEnabled = c.apps?.enabled ?? true;
+        });
       }}
     />
   {/if}

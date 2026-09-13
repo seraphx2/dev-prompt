@@ -2,8 +2,7 @@
 
 Releases are built by GitHub Actions and published to the repo's **Releases** page.
 Windows (NSIS installer + portable zip) and Linux (`deb` / `rpm` / `AppImage`)
-are built in one matrixed run, each with its auto-update artifacts. macOS is
-still pending.
+are built in one matrixed run, each with its auto-update artifacts.
 
 ## Cutting a release
 
@@ -139,7 +138,5 @@ Notes:
 
 - Linux distribution beyond GitHub Releases (AUR, apt/rpm repo, Flatpak, Snap):
   phased roadmap in [`linux-distribution/`](linux-distribution/README.md).
-- macOS: add `macos-latest` to the matrix; produces `.dmg` + updater
-  `.app.tar.gz` (also needs vibrancy + signing).
 - Store: upload the `.exe` to the Microsoft Store (Store handles signing) — no
   MSIX authoring needed.
