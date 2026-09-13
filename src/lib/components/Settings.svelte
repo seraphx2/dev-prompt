@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   import {
     autoTerminal,
     configSummary,
@@ -39,7 +39,17 @@
     note(`Copied "icon: ${k}"`);
   }
 
-  let { onback, onsaved }: { onback: () => void; onsaved: () => void } = $props();
+  let {
+    onback,
+    onsaved,
+    ondirtychange,
+  }: {
+    onback: () => void;
+    onsaved: () => void;
+    /** Fires whenever `dirty` changes, so the parent can gate other ways to
+     *  leave (Esc, the mouse back-button) that don't go through `onback`. */
+    ondirtychange?: (dirty: boolean) => void;
+  } = $props();
 
   let hotkey = $state("");
   let roots = $state<string[]>([]);
@@ -235,6 +245,9 @@
     confirmIdx = null;
   }
 
+  /** The last-loaded/saved config, kept so Cancel can restore it exactly. */
+  let savedConfig: Parameters<typeof applyConfig>[0] | null = null;
+
   function applyConfig(c: {
     hotkey: string;
     apps_hotkey?: string | null;
@@ -249,6 +262,7 @@
     filemanager_template?: string | null;
     apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
   }) {
+    savedConfig = c;
     hotkey = c.hotkey;
     appsHotkey = c.apps_hotkey ?? "";
     roots = c.roots.length ? [...c.roots] : [""];
@@ -268,7 +282,32 @@
     appExtraDirs = [...(c.apps?.extra_dirs ?? [])];
     appExclude = [...(c.apps?.exclude ?? [])];
     appsSnapshot = JSON.stringify([appsEnabled, appExtraDirs, appExclude]);
+    savedSnapshot = snapshot();
   }
+
+  // Everything Save actually persists — hotkey/apps_hotkey and autostart are
+  // excluded, since those already commit immediately on their own (see
+  // `persistHotkey` / `toggleAutostart`) and are never "pending" here.
+  function snapshot(): string {
+    return JSON.stringify({
+      roots,
+      ttlMin,
+      scanDepth,
+      collapseNested,
+      dismiss,
+      terminalSel,
+      terminalTemplate,
+      shellSel,
+      filemanagerSel,
+      filemanagerTemplate,
+      appsEnabled,
+      appExtraDirs,
+      appExclude,
+    });
+  }
+  let savedSnapshot = $state("");
+  const dirty = $derived(loaded && snapshot() !== savedSnapshot);
+  $effect(() => ondirtychange?.(dirty));
 
   const addAppDir = () => (appExtraDirs = [...appExtraDirs, ""]);
   function removeAppDir(i: number) {
@@ -320,7 +359,7 @@
     try {
       const appExtra = appExtraDirs.map((d) => d.trim()).filter(Boolean);
       const appExcl = appExclude.map((d) => d.trim()).filter(Boolean);
-      await saveConfig({
+      const c = await saveConfig({
         roots: roots.map((r) => r.trim()).filter(Boolean),
         cache_ttl_secs: Math.max(60, Math.round(ttlMin * 60)),
         scan_max_depth: Math.max(1, Math.round(scanDepth)),
@@ -335,9 +374,11 @@
           filemanagerSel === "__custom__" ? filemanagerTemplate.trim() : "",
         apps: { enabled: appsEnabled, extra_dirs: appExtra, exclude: appExcl },
       });
-      const next = JSON.stringify([appsEnabled, appExtra, appExcl]);
-      const appsChanged = next !== appsSnapshot;
-      appsSnapshot = next;
+      const appsChanged = JSON.stringify([appsEnabled, appExtra, appExcl]) !== appsSnapshot;
+      // Refresh every field from the authoritative merged config and reset the
+      // dirty baseline to it — must run *after* computing appsChanged above,
+      // since this is what moves appsSnapshot to the new values.
+      applyConfig(c);
       void loadSummary();
       return { ok: true, appsChanged };
     } catch (e) {
@@ -372,18 +413,48 @@
     onsaved(); // App.svelte refreshes its cached apps.enabled, among other things
     await rescanApps();
   }
+
+  /** Discard edits back to the last-saved values. Stays on this screen. */
+  function cancel() {
+    if (savedConfig) applyConfig(savedConfig);
+    note("Reverted.");
+  }
+
+  /** Attempted the back arrow while dirty — nudge instead of leaving. */
+  function attemptBack() {
+    if (dirty) nudge();
+    else onback();
+  }
+
+  // Briefly highlights the Save/Cancel bar — called from here (the back arrow)
+  // and from App.svelte (Esc / the mouse back-button), which bypass `onback`
+  // entirely and go straight to `backToList()` today.
+  let nudging = $state(false);
+  let nudgeTimer: ReturnType<typeof setTimeout> | undefined;
+  export function nudge() {
+    clearTimeout(nudgeTimer);
+    nudging = false;
+    // Re-trigger the CSS animation even if it's already mid-flight.
+    void tick().then(() => {
+      nudging = true;
+      nudgeTimer = setTimeout(() => (nudging = false), 600);
+    });
+  }
 </script>
 
 <div class="flex items-center gap-2 border-b border-hair px-3 py-2.5">
   <button
     type="button"
     class="shrink-0 rounded px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
-    onclick={onback}
+    onclick={attemptBack}
     aria-label="Back"
   >
     ←
   </button>
   <span class="text-[13px] font-medium text-white/80">Settings</span>
+  {#if dirty}
+    <span class="text-[11px] text-amber-300/70">unsaved changes</span>
+  {/if}
   {#if msg}
     <span
       class="ml-auto truncate pl-2 text-[11px] {msgError
@@ -457,11 +528,23 @@
          it overlays the first row instead of pushing content down. -->
     <div class="relative">
       <div class="pointer-events-none sticky top-0 z-20 h-0">
-        <div class="flex justify-end">
+        <div
+          class="flex justify-end gap-2 {nudging ? 'animate-nudge' : ''}"
+        >
+          {#if dirty}
+            <button
+              type="button"
+              onclick={cancel}
+              disabled={busy}
+              class="pointer-events-auto -mt-1 rounded-md border border-hair bg-white/[0.06] px-3.5 py-1.5 text-[12px] font-medium text-white/70 shadow-lg shadow-black/40 backdrop-blur hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          {/if}
           <button
             type="button"
             onclick={save}
-            disabled={busy}
+            disabled={busy || !dirty}
             class="pointer-events-auto -mt-1 rounded-md border border-sky-400/40 bg-sky-500/90 px-3.5 py-1.5 text-[12px] font-medium text-white shadow-lg shadow-black/40 backdrop-blur hover:bg-sky-500 disabled:opacity-50"
           >
             {busy ? "Saving…" : "Save"}
@@ -515,7 +598,7 @@
       <select
         bind:value={dismiss}
         title="When the overlay closes itself"
-        class="w-72 rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+        class="w-72 cursor-pointer rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
       >
         <option value="always">On focus loss &amp; after an action (default)</option>
         <option value="keep_on_blur">Keep open on focus loss; close after an action</option>
@@ -619,7 +702,7 @@
       <select
         bind:value={collapseNested}
         title="What to do when a discovered repo sits inside another one"
-        class="w-72 rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+        class="w-72 cursor-pointer rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
       >
         <option value="true">Collapse into the parent (default)</option>
         <option value="false">List every one separately</option>
@@ -633,7 +716,7 @@
         <select
           bind:value={terminalSel}
           title="Which terminal emulator dev-prompt opens for terminal actions"
-          class="w-full rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+          class="w-full cursor-pointer rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
         >
           <option value="">Auto{autoTerminalLabel ? ` (${autoTerminalLabel})` : ""}</option>
           {#each terminals as t (t.id)}
@@ -663,7 +746,7 @@
         <select
           bind:value={shellSel}
           title="Shell a one-shot terminal command runs inside"
-          class="w-full rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+          class="w-full cursor-pointer rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
         >
           <option value="">Default{defaultShellLabel ? ` (${defaultShellLabel})` : ""}</option>
           {#each shells as s (s)}
@@ -682,7 +765,7 @@
         <select
           bind:value={filemanagerSel}
           title="Which file manager 'Reveal in file manager' opens"
-          class="w-full rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+          class="w-full cursor-pointer rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
         >
           <option value="">Auto{filemanagers[0] ? ` (${filemanagers[0].label})` : ""}</option>
           {#each filemanagers as f (f.id)}
@@ -932,7 +1015,7 @@
             <select
               bind:value={tracePath}
               onchange={runTrace}
-              class="min-w-0 flex-1 rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
+              class="min-w-0 flex-1 cursor-pointer rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
             >
               <option value="">Pick a repo…</option>
               {#each traceRepos as r (r.path)}
@@ -1044,3 +1127,33 @@
     </details>
   {/if}
 </div>
+
+<style>
+  /* Attempted to leave with unsaved changes — draws the eye to Save/Cancel. */
+  @keyframes nudge {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    20% {
+      transform: translateX(-4px);
+    }
+    40% {
+      transform: translateX(4px);
+    }
+    60% {
+      transform: translateX(-3px);
+    }
+    80% {
+      transform: translateX(3px);
+    }
+  }
+  .animate-nudge {
+    animation: nudge 0.5s ease-in-out;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-nudge {
+      animation: none;
+    }
+  }
+</style>

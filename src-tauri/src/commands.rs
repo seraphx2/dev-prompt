@@ -525,11 +525,11 @@ pub fn save_config(
     // not just leave it opening an always-empty scope.
     let new_apps_enabled = user.apps.as_ref().map(|a| a.enabled).unwrap_or(true);
     let old_registered = old_apps_enabled
-        .then(|| old_apps_hotkey.as_deref())
+        .then_some(old_apps_hotkey.as_deref())
         .flatten()
         .filter(|s| !s.is_empty());
     let new_registered = new_apps_enabled
-        .then(|| new_apps_hotkey.as_deref())
+        .then_some(new_apps_hotkey.as_deref())
         .flatten();
     let apps_changed = match (new_registered, old_registered) {
         (Some(a), Some(b)) => !crate::same_shortcut(a, b),

@@ -38,6 +38,12 @@
 
   type Mode = "repo-list" | "action-menu" | "settings" | "run-command";
 
+  let settingsPanel: Settings | undefined = $state();
+  // Whether Settings has unsaved edits — Esc and the mouse back-button call
+  // `backToList()` directly, bypassing Settings' own `onback`, so they need
+  // this to gate leaving too.
+  let settingsDirty = $state(false);
+
   let query = $state("");
   let results = $state<ScoredRepo[]>([]);
   let selected = $state(0);
@@ -523,7 +529,8 @@
     } else if (mode === "settings") {
       if (e.key === "Escape") {
         e.preventDefault();
-        backToList();
+        if (settingsDirty) settingsPanel?.nudge();
+        else backToList();
       }
     } else {
       onListKeydown(e);
@@ -537,7 +544,10 @@
     e.preventDefault();
     const back = e.button === 3;
     if (mode === "settings") {
-      if (back) backToList();
+      if (back) {
+        if (settingsDirty) settingsPanel?.nudge();
+        else backToList();
+      }
     } else if (mode === "action-menu") {
       if (back) menuBack();
       else if (menuItems[actionSel]?.kind === "submenu")
@@ -690,7 +700,9 @@
     />
   {:else if mode === "settings"}
     <Settings
+      bind:this={settingsPanel}
       onback={backToList}
+      ondirtychange={(d) => (settingsDirty = d)}
       onsaved={() => {
         rescan();
         void getConfig().then((c) => {

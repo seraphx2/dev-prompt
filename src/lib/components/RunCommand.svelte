@@ -88,7 +88,7 @@
     bind:value={shellSel}
     onkeydown={onKey}
     title="Shell to run in"
-    class="shrink-0 rounded border border-hair bg-white/[0.04] py-1 pl-1.5 pr-6 text-[12px] text-white/80 focus:outline-none"
+    class="shrink-0 cursor-pointer rounded border border-hair bg-white/[0.04] py-1 pl-1.5 pr-6 text-[12px] text-white/80 focus:outline-none"
   >
     {#each shells as s (s)}
       <option value={s}>{s}</option>
