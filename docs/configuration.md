@@ -172,6 +172,8 @@ apps:
 Installer stubs, updaters, redistributables, crash handlers and OS components
 under `\Windows\` are filtered out automatically; `exclude` is for the rest.
 
+The discovered app list is cached at `<OS cache dir>/dev-prompt/apps.json`.
+
 ---
 
 ## Roots, scan depth, cache
