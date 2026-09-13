@@ -47,7 +47,12 @@
   let apps = $state<AppEntry[]>([]);
   let appStatus = $state("");
   let appsScanning = $state(false);
-  const appScope = $derived(query.startsWith(">"));
+  // Whether the "> apps" scope is usable at all — loaded on mount and
+  // refreshed after a settings save. Unchecking "Index installed apps" turns
+  // the whole scope off rather than leaving it reachable but always empty.
+  let appsEnabled = $state(true);
+  getConfig().then((c) => (appsEnabled = c.apps?.enabled ?? true));
+  const appScope = $derived(appsEnabled && query.startsWith(">"));
   const term = $derived(
     appScope ? query.slice(1).replace(/^\s+/, "") : query.trim(),
   );
@@ -625,7 +630,11 @@
     <SearchInput
       bind:this={search}
       bind:value={query}
-      placeholder={appScope ? "Search apps…" : "Search repos…    › for apps"}
+      placeholder={appScope
+        ? "Search apps…"
+        : appsEnabled
+          ? "Search repos…    › for apps"
+          : "Search repos…"}
     />
     {#if appScope}
       <AppList
@@ -684,7 +693,10 @@
       onback={backToList}
       onsaved={() => {
         rescan();
-        void getConfig().then((c) => (dismissMode = c.dismiss ?? "always"));
+        void getConfig().then((c) => {
+          dismissMode = c.dismiss ?? "always";
+          appsEnabled = c.apps?.enabled ?? true;
+        });
       }}
     />
   {/if}

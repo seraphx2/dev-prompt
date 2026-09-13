@@ -417,9 +417,9 @@ pub fn save_config(
 ) -> AppResult<Config> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-    let (old_hotkey, old_apps_hotkey) = {
+    let (old_hotkey, old_apps_hotkey, old_apps_enabled) = {
         let cfg = state.config.lock().unwrap();
-        (cfg.hotkey.clone(), cfg.apps_hotkey.clone())
+        (cfg.hotkey.clone(), cfg.apps_hotkey.clone(), cfg.apps.enabled)
     };
     let mut user = config::load_user()?;
 
@@ -520,8 +520,18 @@ pub fn save_config(
     }
 
     let hotkey_changed = !crate::same_shortcut(&new_hotkey, &old_hotkey);
-    let old_apps_nonempty = old_apps_hotkey.as_deref().filter(|s| !s.is_empty());
-    let apps_changed = match (new_apps_hotkey.as_deref(), old_apps_nonempty) {
+    // Registered iff the accelerator is set *and* the feature it opens is
+    // enabled — unchecking "Index installed apps" must release the hotkey,
+    // not just leave it opening an always-empty scope.
+    let new_apps_enabled = user.apps.as_ref().map(|a| a.enabled).unwrap_or(true);
+    let old_registered = old_apps_enabled
+        .then(|| old_apps_hotkey.as_deref())
+        .flatten()
+        .filter(|s| !s.is_empty());
+    let new_registered = new_apps_enabled
+        .then(|| new_apps_hotkey.as_deref())
+        .flatten();
+    let apps_changed = match (new_registered, old_registered) {
         (Some(a), Some(b)) => !crate::same_shortcut(a, b),
         (None, None) => false,
         _ => true,
@@ -547,14 +557,14 @@ pub fn save_config(
         claimed.push(new_hotkey.as_str());
     }
     if apps_changed {
-        if let Some(h) = &new_apps_hotkey {
+        if let Some(h) = new_registered {
             if let Err(e) = register(h) {
                 for a in &claimed {
                     unregister(a);
                 }
                 return Err(e);
             }
-            claimed.push(h.as_str());
+            claimed.push(h);
         }
     }
 
@@ -573,8 +583,8 @@ pub fn save_config(
         unregister(old_hotkey.as_str());
     }
     if apps_changed {
-        if let Some(old) = old_apps_nonempty {
-            if new_apps_hotkey.as_deref() != Some(old) {
+        if let Some(old) = old_registered {
+            if new_registered != Some(old) {
                 unregister(old);
             }
         }

@@ -369,6 +369,7 @@
     const { ok } = await persist();
     if (!ok) return;
     note("Saved — rescanning apps…");
+    onsaved(); // App.svelte refreshes its cached apps.enabled, among other things
     await rescanApps();
   }
 </script>
@@ -470,12 +471,12 @@
 
       <div class="space-y-5">
         <div class="space-y-1">
-          <label class="flex items-center gap-2">
+          <label class="flex cursor-pointer items-center gap-2">
             <input
               type="checkbox"
               bind:checked={autostart}
               onchange={toggleAutostart}
-              class="h-3.5 w-3.5 accent-sky-500"
+              class="h-3.5 w-3.5 cursor-pointer accent-sky-500"
             />
             <span class="text-orange-400">Start at login</span>
           </label>
@@ -707,15 +708,19 @@
     </div>
 
     <div class="space-y-2">
-      <label class="flex items-center gap-2">
+      <label class="flex cursor-pointer items-center gap-2">
         <input
           type="checkbox"
           bind:checked={appsEnabled}
-          class="h-3.5 w-3.5 accent-sky-500"
+          class="h-3.5 w-3.5 cursor-pointer accent-sky-500"
         />
         <span class="text-orange-400">Index installed apps</span>
         <span class="text-white/25">— type <span class="font-mono">›</span> in the search bar</span>
       </label>
+      <p class="pl-5 text-[11px] text-white/25">
+        Unchecking this turns the <span class="font-mono">›</span> scope off entirely
+        — typing it does nothing and the app-launcher hotkey won't open it either.
+      </p>
       {#if appsEnabled}
         <div class="space-y-1.5 pl-5">
           <span class="text-[11px] text-white/30"
@@ -934,11 +939,11 @@
                 <option value={r.path}>{r.name}</option>
               {/each}
             </select>
-            <label class="flex shrink-0 items-center gap-1.5 text-white/50">
+            <label class="flex shrink-0 cursor-pointer items-center gap-1.5 text-white/50">
               <input
                 type="checkbox"
                 bind:checked={traceAll}
-                class="h-3.5 w-3.5 accent-sky-500"
+                class="h-3.5 w-3.5 cursor-pointer accent-sky-500"
               />
               show idle rules
             </label>

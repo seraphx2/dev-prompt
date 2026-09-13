@@ -240,18 +240,22 @@ pub fn run() {
             }
 
             // Register the configured global hotkey(s).
-            let (hotkey, apps_hotkey) = {
+            let (hotkey, apps_hotkey, apps_enabled) = {
                 let state = app.state::<AppState>();
                 let cfg = state.config.lock().unwrap();
-                (cfg.hotkey.clone(), cfg.apps_hotkey.clone())
+                (cfg.hotkey.clone(), cfg.apps_hotkey.clone(), cfg.apps.enabled)
             };
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
             if let Err(e) = app.global_shortcut().register(hotkey.as_str()) {
                 eprintln!("failed to register hotkey `{hotkey}`: {e}");
             }
-            if let Some(ah) = apps_hotkey.as_deref().filter(|h| !h.is_empty()) {
-                if let Err(e) = app.global_shortcut().register(ah) {
-                    eprintln!("failed to register apps hotkey `{ah}`: {e}");
+            // Unchecking "Index installed apps" turns the whole `>` scope off,
+            // so this hotkey shouldn't even be claimed — nothing would open it.
+            if apps_enabled {
+                if let Some(ah) = apps_hotkey.as_deref().filter(|h| !h.is_empty()) {
+                    if let Err(e) = app.global_shortcut().register(ah) {
+                        eprintln!("failed to register apps hotkey `{ah}`: {e}");
+                    }
                 }
             }
 
