@@ -2,6 +2,11 @@
 
 Public image assets referenced by docs and packaging metadata.
 
+## Demo
+
+`0_dev-prompt_demo.gif` is embedded at the top of the root `README.md` — the
+hotkey → fuzzy search → action-menu flow, captured end to end.
+
 ## Screenshots
 
 `packaging/linux/io.github.seraphx2.devprompt.metainfo.xml` references these as

@@ -3,6 +3,8 @@
 **A command palette for every repo you own — one that reads each project and
 hands you its actual scripts, builds, and sub-packages.**
 
+![dev-prompt demo](docs/img/0_dev-prompt_demo.gif)
+
 Press a global shortcut from anywhere and a fuzzy-searchable list of every
 repository under your code folders appears. Type a few letters, hit `Enter`, and
 you're in a terminal at its root.
@@ -26,7 +28,7 @@ WebView.
 ## What it does
 
 - **Global-hotkey overlay** — frameless, centered, dismiss-on-blur. Toggle with
-  `Ctrl/Cmd+Shift+Space` (rebindable via a click-to-record field in Settings).
+  `Ctrl/Cmd+Backslash` (rebindable via a click-to-record field in Settings).
 - **Multi-root scan + cache** — walks the directories you list, respects
   `.gitignore`, collapses nested repos, caches the result for instant startup and
   refreshes in the background when stale.
@@ -121,8 +123,8 @@ not Flathub — see [`docs/linux-distribution/phase-4-flatpak.md`](docs/linux-di
 
 ## Configuration
 
-First run creates two files in your OS config directory (`%APPDATA%\dev-prompt\`,
-`~/.config/dev-prompt/`, or `~/Library/Application Support/dev-prompt/`):
+First run creates two files in your OS config directory (`%APPDATA%\dev-prompt\`
+or `~/.config/dev-prompt/`):
 
 - **`config.yaml`** — your settings (hotkey, roots, scan depth, cache lifetime).
   Managed entirely by the **Settings** screen; you don't normally touch it.
@@ -136,7 +138,9 @@ build rule, disable a built-in, change the Enter action) —
 [`docs/rules-engine.md`](docs/rules-engine.md); the canonical schema with inline
 docs is [`src-tauri/src/default_config.yaml`](src-tauri/src/default_config.yaml).
 
-The discovered repo list is cached at `<OS cache dir>/dev-prompt/repos.json`.
+The discovered repo list is cached at `<OS cache dir>/dev-prompt/repos.json`; the
+installed-app list (`>` scope) is cached alongside it at
+`<OS cache dir>/dev-prompt/apps.json`.
 
 ### How detection works
 

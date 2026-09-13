@@ -36,8 +36,8 @@ describe("classifyHotkey", () => {
   });
 
   it("accepts the shipped defaults and other roomy combos", () => {
-    expect(level("CmdOrCtrl+Shift+Space")).toBe("ok"); // repo browser default
-    expect(level("CmdOrCtrl+Shift+Period")).toBe("ok"); // app launcher default
+    expect(level("CmdOrCtrl+Backslash")).toBe("ok"); // repo browser default
+    expect(level("CmdOrCtrl+Period")).toBe("ok"); // app launcher default
     expect(level("CmdOrCtrl+Alt+J")).toBe("ok");
     expect(level("CmdOrCtrl+Shift+F9")).toBe("ok");
   });
@@ -51,6 +51,6 @@ describe("classifyHotkey", () => {
   it("carries a reason for non-ok verdicts", () => {
     expect(classifyHotkey("Alt+Tab").reason).toBeTruthy();
     expect(classifyHotkey("CmdOrCtrl+Shift+N").reason).toBeTruthy();
-    expect(classifyHotkey("CmdOrCtrl+Shift+Space").reason).toBeUndefined();
+    expect(classifyHotkey("CmdOrCtrl+Backslash").reason).toBeUndefined();
   });
 });

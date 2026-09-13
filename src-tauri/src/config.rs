@@ -82,7 +82,7 @@ impl Default for Config {
         // Only used if the embedded default_config.yaml fails to parse (a test
         // guards against that).
         Config {
-            hotkey: "CmdOrCtrl+Shift+Space".into(),
+            hotkey: "CmdOrCtrl+Backslash".into(),
             apps_hotkey: None,
             roots: Vec::new(),
             scan: ScanConfig::default(),
@@ -585,7 +585,7 @@ pub fn save_user(u: &UserConfig) -> AppResult<()> {
 
 fn first_run_user() -> UserConfig {
     UserConfig {
-        hotkey: Some("CmdOrCtrl+Shift+Space".into()),
+        hotkey: Some("CmdOrCtrl+Backslash".into()),
         // The default lives in default_config.yaml so it applies to existing
         // configs too; only write here if the user turns it off.
         apps_hotkey: None,
@@ -846,7 +846,7 @@ mod tests {
     #[test]
     fn apps_hotkey_defaults_on_and_treats_empty_as_off() {
         let mut cfg = bundled_defaults();
-        assert_eq!(cfg.apps_hotkey.as_deref(), Some("CmdOrCtrl+Shift+Period"));
+        assert_eq!(cfg.apps_hotkey.as_deref(), Some("CmdOrCtrl+Period"));
 
         merge_settings(&mut cfg, serde_yaml_ng::from_str("apps_hotkey: Alt+Space").unwrap());
         assert_eq!(cfg.apps_hotkey.as_deref(), Some("Alt+Space"));
