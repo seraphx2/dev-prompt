@@ -29,14 +29,14 @@ Two global hotkeys, set from **Settings ▸ Global hotkeys**:
 
 ```yaml
 # config.yaml
-hotkey: CmdOrCtrl+Shift+Space        # opens the overlay on the repo browser
-apps_hotkey: CmdOrCtrl+Shift+Period  # opens straight into the ">" app launcher
-                                     #   ("" = off; the Settings toggle writes it)
+hotkey: CmdOrCtrl+Backslash    # opens the overlay on the repo browser
+apps_hotkey: CmdOrCtrl+Period  # opens straight into the ">" app launcher
+                               #   ("" = off; the Settings toggle writes it)
 ```
 
 `apps_hotkey` is a convenience — it's the same as pressing the main hotkey then
-typing `>`. It's on by default (`Ctrl+Shift+.`, i.e. `Ctrl+>`); the **App
-launcher** field has a *turn off* link. The two must be different.
+typing `>`. It's on by default (`Ctrl+.`); the **App launcher** field has a
+*turn off* link. The two must be different.
 
 The recorder (click a field, press a combination) checks what you pick against a
 built-in list: it **refuses** combos the OS reserves or that can't be

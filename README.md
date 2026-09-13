@@ -28,7 +28,7 @@ WebView.
 ## What it does
 
 - **Global-hotkey overlay** — frameless, centered, dismiss-on-blur. Toggle with
-  `Ctrl/Cmd+Shift+Space` (rebindable via a click-to-record field in Settings).
+  `Ctrl/Cmd+Backslash` (rebindable via a click-to-record field in Settings).
 - **Multi-root scan + cache** — walks the directories you list, respects
   `.gitignore`, collapses nested repos, caches the result for instant startup and
   refreshes in the background when stale.
