@@ -186,6 +186,24 @@ Files: `rules.rs` (`expand` + `build_action`), `config.rs` (schema),
 
 ---
 
+## 17. `glib` RUSTSEC advisory (GHSA-wrw7-89jp-8q8g) · _blocked upstream, nothing to do here_
+
+Dependabot flags a moderate-severity soundness bug in `glib` 0.15–0.19's
+`VariantStrIter` iterator impl (NULL-deref crash under specific `GVariant`
+string-array iteration; RUSTSEC-2024-0429). It's transitive — pulled in by
+`gtk` 0.18.x, itself required by `tauri` 2.11.5's Linux tray/window backend —
+and can't be bumped independently: `cargo update -p glib --precise 0.20.0`
+fails because `tauri` hard-pins `gtk = "^0.18"`.
+
+Linux-only at compile/runtime (Windows never links glib/gtk); dev-prompt
+doesn't call the affected iterator itself, so realistic exposure is low. No
+action possible until Tauri ships on a gtk-rs 0.20+ base — check Tauri's own
+releases rather than re-investigating this alert from scratch.
+
+Tracking: [Dependabot alert #1](https://github.com/seraphx2/dev-prompt/security/dependabot/1).
+
+---
+
 ## Done
 
 - **#1** Fatten `default_config.yaml` — 2026-08-31
