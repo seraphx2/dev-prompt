@@ -39,6 +39,12 @@ pub struct Action {
     /// Icon key resolved against `src/lib/icons.ts` in the frontend.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Fixed keyboard shortcut (e.g. "Ctrl+C"), set only on the handful of
+    /// universal actions rendered as quick-action buttons. `RuleAction::hotkey`
+    /// is the single source of truth — the frontend derives its quick-action
+    /// row from this field instead of hardcoding the id list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hotkey: Option<String>,
     #[serde(skip)]
     pub program: String,
     #[serde(skip)]
@@ -844,6 +850,7 @@ fn build_action(
             cluster: ra.cluster.clone(),
             usage_score: 0.0,
             icon: ra.icon.clone(),
+            hotkey: ra.hotkey.clone(),
             program: String::new(),
             args: Vec::new(),
             cwd: None,
@@ -867,6 +874,7 @@ fn build_action(
             cluster: ra.cluster.clone(),
             usage_score: 0.0,
             icon: ra.icon.clone(),
+            hotkey: ra.hotkey.clone(),
             program: String::new(),
             args: Vec::new(),
             cwd: Some(cwd.to_string()),
@@ -917,6 +925,7 @@ fn build_action(
         cluster: ra.cluster.clone(),
         usage_score: 0.0,
         icon: ra.icon.clone(),
+        hotkey: ra.hotkey.clone(),
         program: final_prog,
         args: final_args,
         cwd: final_cwd,
@@ -954,6 +963,7 @@ fn provider_actions(
             cluster: String::new(),
             usage_score: 0.0,
             icon: None,
+            hotkey: None,
             program: p,
             args: a,
             cwd: c,

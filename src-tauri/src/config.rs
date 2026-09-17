@@ -359,6 +359,11 @@ pub struct RuleAction {
     /// Icon key for the menu row (see `src/lib/icons.ts` / Settings ▸ Icons).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Fixed keyboard shortcut (e.g. "Ctrl+C") shown as a quick-action button
+    /// above the action list, instead of taking up an up/down-arrow slot.
+    /// Only set on a handful of built-in universal actions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hotkey: Option<String>,
     pub needs: Vec<String>,
     /// Which curated group this action sorts into within the universal tier
     /// (`ai-cli`, `ai-editor`, `ide`, `git`, …) — ignored unless the action is

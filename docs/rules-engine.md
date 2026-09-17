@@ -165,6 +165,11 @@ or when the action has no program at all (a gated `terminal: true`).
   on `PATH` rather than `programs` keys.
 - `client: true` is reserved for the built-in `copy-path`; custom client
   actions aren't wired up.
+- `hotkey:` (e.g. `"Ctrl+C"`) is reserved for the four built-in universal quick
+  actions (`terminal`, `filemanager`, `copy-path`, `run-command`) — it renders
+  the action as a quick-action button above the list instead of a normal row,
+  and excludes it from per-repo frecency tracking. Custom actions aren't wired
+  up to a hotkey.
 - `icon:` picks the row glyph. **Settings ▸ Icons** lists every bundled key
   (click one to copy `icon: <key>`); untagged actions fall back to a neutral
   glyph.
@@ -181,7 +186,7 @@ or when the action has no program at all (a gated `terminal: true`).
 
 Actions offered for every repo, regardless of contents. Each entry uses the same
 fields as [`actions`](#actions) above — `program` + `args` or `run`, `terminal`,
-`needs` (`programs` keys), `client`, `cluster` — plus an `id` used by
+`needs` (`programs` keys), `client`, `cluster`, `hotkey` — plus an `id` used by
 `universal.disable`.
 
 ```yaml

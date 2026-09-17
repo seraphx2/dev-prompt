@@ -445,10 +445,10 @@ rules:
 # AI CLIs, then AI editors, then editors/IDEs, then git tools.
 universal:
   actions:
-    - { id: terminal, name: "Open in terminal", terminal: true, icon: terminal }
-    - { id: filemanager, name: "Show in file manager", program: "{{filemanager}}", args: ["{{path}}"], icon: folder }
-    - { id: copy-path, name: "Copy path", client: true, icon: copy }
-    - { id: run-command, name: "Run command…", prompt: true, terminal: true, icon: run }
+    - { id: terminal, name: "Open in terminal", terminal: true, icon: terminal, hotkey: "Ctrl+T" }
+    - { id: filemanager, name: "Show in file manager", program: "{{filemanager}}", args: ["{{path}}"], icon: folder, hotkey: "Ctrl+E" }
+    - { id: copy-path, name: "Copy path", client: true, icon: copy, hotkey: "Ctrl+C" }
+    - { id: run-command, name: "Run command…", prompt: true, terminal: true, icon: run, hotkey: "Ctrl+R" }
 
     # AI coding CLIs (terminal agents), alphabetical. `icon:` names the intended
     # brand key even where no glyph ships yet — it lights up if one is added.

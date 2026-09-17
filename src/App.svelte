@@ -114,20 +114,14 @@
 
   const SUB_PREFIX = "Detected · ";
 
-  // These universal actions get a dedicated hotkey row at the top of the
-  // action menu instead of taking up arrow-key slots in the list below.
-  // Ordered alphabetically by key (C, E, R, T) to match the row's layout.
-  const QUICK_ACTION_IDS: { id: string; key: string }[] = [
-    { id: "copy-path", key: "Ctrl+C" },
-    { id: "filemanager", key: "Ctrl+E" },
-    { id: "run-command", key: "Ctrl+R" },
-    { id: "terminal", key: "Ctrl+T" },
-  ];
+  // Actions with a `hotkey` (set in default_config.yaml, see docs/rules-engine.md)
+  // get a dedicated row at the top of the action menu instead of taking up
+  // arrow-key slots in the list below. Sorted by key so the row reads C, E, R, T.
   const quickActions = $derived(
-    QUICK_ACTION_IDS.map(({ id, key }) => ({
-      key,
-      action: actions.find((a) => a.id === id),
-    })).filter((q): q is { key: string; action: Action } => !!q.action),
+    actions
+      .filter((a): a is Action & { hotkey: string } => !!a.hotkey)
+      .map((action) => ({ key: action.hotkey, action }))
+      .sort((a, b) => a.key.localeCompare(b.key)),
   );
 
   function runQuickAction(action: Action) {
@@ -232,9 +226,7 @@
         true,
       );
     }
-    const rest = actions.filter(
-      (a) => !QUICK_ACTION_IDS.some((q) => q.id === a.id),
-    );
+    const rest = actions.filter((a) => !a.hotkey);
     if (q) return fuzzyItems(rest, q);
 
     // Universal-tier ("General") actions are cluster-sorted as a block up

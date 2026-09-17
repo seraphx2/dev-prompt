@@ -30,6 +30,9 @@ export interface Action {
   usageScore: number;
   /** Icon key resolved against `lib/icons.ts`; absent -> fallback glyph. */
   icon?: string | null;
+  /** Fixed keyboard shortcut (e.g. "Ctrl+C"); set only on the handful of
+   *  built-in universal actions rendered as quick-action buttons. */
+  hotkey?: string | null;
   /** True when this action is handled purely in the frontend (e.g. copy path). */
   clientSide: boolean;
   /** Opens the "Run command…" input instead of running; `hint` is the template. */

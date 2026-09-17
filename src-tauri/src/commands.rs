@@ -205,12 +205,12 @@ pub async fn build_actions(
     path: String,
 ) -> AppResult<Vec<Action>> {
     let repo = repo_for_path(&state, &path);
-    let repo_path = repo.path.clone();
     let cached = state.contexts.lock().unwrap().get(&repo.path).cloned();
     let cfg = state.config.lock().unwrap().clone();
     let actions = tauri::async_runtime::spawn_blocking(move || {
         let ctx = cached.unwrap_or_else(|| inspect_cold(&repo.path, &cfg));
-        build_actions_impl(&repo, &ctx, &cfg)
+        let actions = build_actions_impl(&repo, &ctx, &cfg);
+        with_usage(&repo.path, actions)
     })
     .await
     .unwrap_or_else(|e| {
@@ -220,7 +220,7 @@ pub async fn build_actions(
         eprintln!("build_actions task failed: {e}");
         Vec::new()
     });
-    Ok(with_usage(&repo_path, actions))
+    Ok(actions)
 }
 
 /// The fast half of the action menu: universal actions only ("open in
@@ -234,15 +234,17 @@ pub async fn build_universal_actions(
     path: String,
 ) -> AppResult<Vec<Action>> {
     let repo = repo_for_path(&state, &path);
-    let repo_path = repo.path.clone();
     let cfg = state.config.lock().unwrap().clone();
-    let actions = tauri::async_runtime::spawn_blocking(move || evaluate_universal(&cfg, &repo))
-        .await
-        .unwrap_or_else(|e| {
-            eprintln!("build_universal_actions task failed: {e}");
-            Vec::new()
-        });
-    Ok(with_usage(&repo_path, actions))
+    let actions = tauri::async_runtime::spawn_blocking(move || {
+        let actions = evaluate_universal(&cfg, &repo);
+        with_usage(&repo.path, actions)
+    })
+    .await
+    .unwrap_or_else(|e| {
+        eprintln!("build_universal_actions task failed: {e}");
+        Vec::new()
+    });
+    Ok(actions)
 }
 
 /// The slow half: per-ecosystem detected actions (`rules:`), gated by
@@ -256,19 +258,19 @@ pub async fn build_detected_actions(
     path: String,
 ) -> AppResult<Vec<Action>> {
     let repo = repo_for_path(&state, &path);
-    let repo_path = repo.path.clone();
     let cached = state.contexts.lock().unwrap().get(&repo.path).cloned();
     let cfg = state.config.lock().unwrap().clone();
     let actions = tauri::async_runtime::spawn_blocking(move || {
         let ctx = cached.unwrap_or_else(|| inspect_cold(&repo.path, &cfg));
-        evaluate_detected(&cfg, &ctx, &repo)
+        let actions = evaluate_detected(&cfg, &ctx, &repo);
+        with_usage(&repo.path, actions)
     })
     .await
     .unwrap_or_else(|e| {
         eprintln!("build_detected_actions task failed: {e}");
         Vec::new()
     });
-    Ok(with_usage(&repo_path, actions))
+    Ok(actions)
 }
 
 /// Rule-by-rule explanation of what a single repo produces and why — feeds the
@@ -342,11 +344,10 @@ pub async fn run_action(
             .ok_or_else(|| AppError::msg(format!("unknown action: {action_id}")))?;
         launch::launch(&action, &repo)?;
         // Only the reorderable universal tier benefits from usage history — the
-        // fixed-hotkey trio (reveal in file manager / run command / copy path)
-        // never moves in the menu, so there's nothing to gain by tracking it.
-        const QUICK_ACTION_IDS: [&str; 4] =
-            ["filemanager", "run-command", "copy-path", "terminal"];
-        if action.group == "General" && !QUICK_ACTION_IDS.contains(&action.id.as_str()) {
+        // fixed-hotkey quick actions (their `hotkey` comes straight from
+        // `default_config.yaml`, see `RuleAction::hotkey`) never move in the
+        // menu, so there's nothing to gain by tracking them.
+        if action.group == "General" && action.hotkey.is_none() {
             crate::action_usage::bump(&repo.path, &action.id);
         }
         Ok(())
@@ -745,6 +746,7 @@ pub async fn run_command(
             cluster: String::new(),
             usage_score: 0.0,
             icon: None,
+            hotkey: None,
             program,
             args,
             cwd,
@@ -1030,15 +1032,20 @@ pub fn open_releases_page(window: tauri::WebviewWindow) -> AppResult<()> {
     )
 }
 
+/// Folder holding the running executable, shared by `open_install_dir` and
+/// `system_paths` so they can't report inconsistent install paths.
+fn install_dir() -> AppResult<std::path::PathBuf> {
+    let exe = std::env::current_exe()
+        .map_err(|e| AppError::msg(format!("could not locate the running executable: {e}")))?;
+    exe.parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| AppError::msg("executable has no parent directory"))
+}
+
 /// Open the folder holding the running executable.
 #[tauri::command]
 pub fn open_install_dir(window: tauri::WebviewWindow) -> AppResult<()> {
-    let exe = std::env::current_exe()
-        .map_err(|e| AppError::msg(format!("could not locate the running executable: {e}")))?;
-    let dir = exe
-        .parent()
-        .ok_or_else(|| AppError::msg("executable has no parent directory"))?;
-    open_with_os_handler(&window, dir.as_os_str())
+    open_with_os_handler(&window, install_dir()?.as_os_str())
 }
 
 /// Open the folder holding `config.yaml` / `rules.yaml` (and the usage-history
@@ -1067,13 +1074,7 @@ pub struct SystemPaths {
 /// Where things live on disk, for the Settings "File locations" panel.
 #[tauri::command]
 pub fn system_paths() -> AppResult<SystemPaths> {
-    let exe = std::env::current_exe()
-        .map_err(|e| AppError::msg(format!("could not locate the running executable: {e}")))?;
-    let install_dir = exe
-        .parent()
-        .ok_or_else(|| AppError::msg("executable has no parent directory"))?
-        .to_string_lossy()
-        .into_owned();
+    let install_dir = install_dir()?.to_string_lossy().into_owned();
     Ok(SystemPaths {
         install_dir,
         config_dir: config::config_dir()?.to_string_lossy().into_owned(),
