@@ -114,6 +114,29 @@
 
   const SUB_PREFIX = "Detected · ";
 
+  // These three universal actions get a dedicated hotkey row at the top of the
+  // action menu instead of taking up arrow-key slots in the list below.
+  const QUICK_ACTION_IDS: { id: string; key: string }[] = [
+    { id: "filemanager", key: "Ctrl+E" },
+    { id: "run-command", key: "Ctrl+R" },
+    { id: "copy-path", key: "Ctrl+C" },
+  ];
+  const quickActions = $derived(
+    QUICK_ACTION_IDS.map(({ id, key }) => ({
+      key,
+      action: actions.find((a) => a.id === id),
+    })).filter((q): q is { key: string; action: Action } => !!q.action),
+  );
+
+  function runQuickAction(action: Action) {
+    if (action.prompt) {
+      promptTemplate = action.hint ?? "";
+      mode = "run-command";
+    } else if (activeRepo) {
+      execute(action, activeRepo.repo.path);
+    }
+  }
+
   function fuzzyItems(list: Action[], q: string, blankGroup = false): MenuItem[] {
     const grp = (a: Action) => (blankGroup ? "" : a.group);
     if (!q) {
@@ -151,11 +174,14 @@
         true,
       );
     }
-    if (q) return fuzzyItems(actions, q);
+    const rest = actions.filter(
+      (a) => !QUICK_ACTION_IDS.some((q) => q.id === a.id),
+    );
+    if (q) return fuzzyItems(rest, q);
 
     const items: MenuItem[] = [];
     const seen = new Set<string>();
-    for (const a of actions) {
+    for (const a of rest) {
       if (a.group.startsWith(SUB_PREFIX)) {
         if (!seen.has(a.group)) {
           seen.add(a.group);
@@ -485,6 +511,16 @@
   }
 
   function onMenuKeydown(e: KeyboardEvent) {
+    if (e.ctrlKey && !e.altKey && !e.shiftKey) {
+      const hit = quickActions.find(
+        (q) => q.key.toLowerCase() === `ctrl+${e.key.toLowerCase()}`,
+      );
+      if (hit) {
+        e.preventDefault();
+        runQuickAction(hit.action);
+        return;
+      }
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       actionSel = Math.min(actionSel + 1, menuItems.length - 1);
@@ -675,10 +711,12 @@
       repoName={activeRepo.repo.name}
       crumb={subGroup ? subGroup.slice(SUB_PREFIX.length) : null}
       items={menuItems}
+      {quickActions}
       bind:filter={actionQuery}
       selected={actionSel}
       onselect={(i) => (actionSel = i)}
       onrun={(i) => activateMenuItem(i)}
+      onquickaction={runQuickAction}
       onback={menuBack}
     />
   {:else if mode === "run-command" && activeRepo}

@@ -12,10 +12,12 @@
     repoName,
     crumb,
     items,
+    quickActions,
     filter = $bindable(),
     selected,
     onselect,
     onrun,
+    onquickaction,
     onback,
   }: {
     repoName: string;
@@ -23,10 +25,13 @@
     crumb: string | null;
     /** Already filtered / grouped by the parent. */
     items: MenuItem[];
+    /** Universal actions with a dedicated hotkey, shown as a row above the list. */
+    quickActions: { key: string; action: Action }[];
     filter: string;
     selected: number;
     onselect: (i: number) => void;
     onrun: (i: number) => void;
+    onquickaction: (action: Action) => void;
     onback: () => void;
   } = $props();
 
@@ -88,6 +93,22 @@
     }}
   />
 </div>
+
+{#if quickActions.length}
+  <div class="grid grid-cols-3 gap-1 border-b border-hair px-2 py-2">
+    {#each quickActions as qa (qa.action.id)}
+      <button
+        type="button"
+        class="flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5
+               text-[13px] text-white/70 transition-colors hover:bg-white/[0.06] hover:text-white/90"
+        onclick={() => onquickaction(qa.action)}
+      >
+        <kbd>{qa.key}</kbd>
+        <span class="truncate">{qa.action.label}</span>
+      </button>
+    {/each}
+  </div>
+{/if}
 
 <div bind:this={container} class="scroll-thin flex-1 overflow-y-auto px-2 py-2">
   {#if items.length === 0}
@@ -184,3 +205,17 @@
     {/each}
   {/if}
 </div>
+
+<style>
+  /* Key hints: bright key-cap, dim descriptive label — matches the footer. */
+  kbd {
+    font-family: inherit;
+    font-size: 10px;
+    line-height: 1;
+    color: rgb(255 255 255 / 0.9);
+    background: rgb(255 255 255 / 0.09);
+    border: 1px solid rgb(255 255 255 / 0.12);
+    border-radius: 3px;
+    padding: 2px 4px;
+  }
+</style>
