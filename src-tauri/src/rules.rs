@@ -29,6 +29,13 @@ pub struct Action {
     pub hint: String,
     /// Section header; "" is just a divider.
     pub group: String,
+    /// Curated sort group within the universal tier (`ai-cli`, `ide`, …); ""
+    /// when unclustered. See `RuleAction::cluster`.
+    pub cluster: String,
+    /// Per-repo frecency from `action_usage`, patched in by `commands.rs`
+    /// after evaluation (rule evaluation itself is usage-agnostic). 0 means
+    /// "no history" — the frontend sorts those by `cluster` instead.
+    pub usage_score: f64,
     /// Icon key resolved against `src/lib/icons.ts` in the frontend.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
@@ -834,6 +841,8 @@ fn build_action(
             label: expand(&ra.name, t),
             hint: String::new(),
             group: group.to_string(),
+            cluster: ra.cluster.clone(),
+            usage_score: 0.0,
             icon: ra.icon.clone(),
             program: String::new(),
             args: Vec::new(),
@@ -855,6 +864,8 @@ fn build_action(
             label: expand(&ra.name, t),
             hint: ra.run.as_deref().map(|r| expand(r, t)).unwrap_or_default(),
             group: group.to_string(),
+            cluster: ra.cluster.clone(),
+            usage_score: 0.0,
             icon: ra.icon.clone(),
             program: String::new(),
             args: Vec::new(),
@@ -903,6 +914,8 @@ fn build_action(
         label: expand(&ra.name, t),
         hint,
         group: group.to_string(),
+        cluster: ra.cluster.clone(),
+        usage_score: 0.0,
         icon: ra.icon.clone(),
         program: final_prog,
         args: final_args,
@@ -938,6 +951,8 @@ fn provider_actions(
             label,
             hint,
             group: group.to_string(),
+            cluster: String::new(),
+            usage_score: 0.0,
             icon: None,
             program: p,
             args: a,
@@ -1311,7 +1326,13 @@ fn rule_project_actions(
         return Vec::new();
     }
 
-    let group = if proj.rel.is_empty() {
+    // `pin: true` renders this rule's actions in the universal tier (flat,
+    // sorted into `cluster`) instead of the collapsible Detected group — for
+    // repo-specific single-program launchers that are content-gated but
+    // otherwise behave like a universal "open in X" action.
+    let group = if rule.pin {
+        "General".to_string()
+    } else if proj.rel.is_empty() {
         "Detected".to_string()
     } else {
         format!("Detected · {}", proj.rel)

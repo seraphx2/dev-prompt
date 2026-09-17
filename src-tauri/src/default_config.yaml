@@ -237,37 +237,48 @@ programs:
 
 # --- rules ---------------------------------------------------------------
 rules:
+  # Repo-specific IDE launchers: gated on actual .sln/.csproj files like any
+  # other rule, but `pin: true` renders them in the universal tier (flat,
+  # sorted into `cluster: ide` alongside GoLand/IntelliJ/etc.) instead of the
+  # collapsible Detected group — see "Pinning a rule to the universal tier"
+  # in docs/rules-engine.md.
   - id: sln-editors
     match: "*.sln"
     when: windows
     per_file: true
+    pin: true
     actions:
       - name: "Open {{file.stem}} in Visual Studio"
         program: "{{vs}}"
         args: ["{{file}}"]
         needs: [vs]
         icon: vs
+        cluster: ide
       - name: "Open {{file.stem}} in Rider"
         program: "{{rider}}"
         args: ["{{file}}"]
         needs: [rider]
         icon: rider
+        cluster: ide
 
   - id: csproj-editors
     match: ["*.csproj", "*.fsproj"]
     when: windows
     per_file: true
+    pin: true
     actions:
       - name: "Open {{file.stem}} in Visual Studio"
         program: "{{vs}}"
         args: ["{{file}}"]
         needs: [vs]
         icon: vs
+        cluster: ide
       - name: "Open {{file.stem}} in Rider"
         program: "{{rider}}"
         args: ["{{file}}"]
         needs: [rider]
         icon: rider
+        cluster: ide
 
   # Terminal build/run per project in a solution (or a lone project file),
   # cross-platform. Sits alongside the editor rules above.
@@ -441,37 +452,40 @@ universal:
 
     # AI coding CLIs (terminal agents), alphabetical. `icon:` names the intended
     # brand key even where no glyph ships yet — it lights up if one is added.
-    - { id: aider, name: "Launch Aider", terminal: true, run: "aider", needs: [aider], icon: aider }
-    - { id: amazon-q, name: "Launch Amazon Q", terminal: true, run: "q chat", needs: [amazonq], icon: amazonq }
-    - { id: claude-code, name: "Launch Claude Code", terminal: true, run: "claude", needs: [claude], icon: claude }
-    - { id: codex, name: "Launch Codex", terminal: true, run: "codex", needs: [codex], icon: codex }
-    - { id: crush, name: "Launch Crush", terminal: true, run: "crush", needs: [crush], icon: crush }
-    - { id: cursor-agent, name: "Launch Cursor Agent", terminal: true, run: "cursor-agent", needs: [cursoragent], icon: cursor }
-    - { id: gemini, name: "Launch Gemini CLI", terminal: true, run: "gemini", needs: [gemini], icon: gemini }
-    - { id: github-copilot, name: "Launch GitHub Copilot CLI", terminal: true, run: "copilot", needs: [copilot], icon: copilot }
-    - { id: goose, name: "Launch Goose", terminal: true, run: "goose", needs: [goose], icon: goose }
-    - { id: opencode, name: "Launch opencode", terminal: true, run: "opencode", needs: [opencode], icon: opencode }
-    - { id: qwen, name: "Launch Qwen Code", terminal: true, run: "qwen", needs: [qwen], icon: qwen }
+    # `cluster:` is what keeps each one sorted into its group below even once
+    # usage-based reordering or a late-arriving `pin: true` rule action moves
+    # things around — see "cluster" in docs/rules-engine.md.
+    - { id: aider, name: "Launch Aider", terminal: true, run: "aider", needs: [aider], icon: aider, cluster: ai-cli }
+    - { id: amazon-q, name: "Launch Amazon Q", terminal: true, run: "q chat", needs: [amazonq], icon: amazonq, cluster: ai-cli }
+    - { id: claude-code, name: "Launch Claude Code", terminal: true, run: "claude", needs: [claude], icon: claude, cluster: ai-cli }
+    - { id: codex, name: "Launch Codex", terminal: true, run: "codex", needs: [codex], icon: codex, cluster: ai-cli }
+    - { id: crush, name: "Launch Crush", terminal: true, run: "crush", needs: [crush], icon: crush, cluster: ai-cli }
+    - { id: cursor-agent, name: "Launch Cursor Agent", terminal: true, run: "cursor-agent", needs: [cursoragent], icon: cursor, cluster: ai-cli }
+    - { id: gemini, name: "Launch Gemini CLI", terminal: true, run: "gemini", needs: [gemini], icon: gemini, cluster: ai-cli }
+    - { id: github-copilot, name: "Launch GitHub Copilot CLI", terminal: true, run: "copilot", needs: [copilot], icon: copilot, cluster: ai-cli }
+    - { id: goose, name: "Launch Goose", terminal: true, run: "goose", needs: [goose], icon: goose, cluster: ai-cli }
+    - { id: opencode, name: "Launch opencode", terminal: true, run: "opencode", needs: [opencode], icon: opencode, cluster: ai-cli }
+    - { id: qwen, name: "Launch Qwen Code", terminal: true, run: "qwen", needs: [qwen], icon: qwen, cluster: ai-cli }
 
     # AI editors (GUI), alphabetical.
-    - { id: cursor, name: "Open in Cursor", program: "{{cursor}}", args: ["{{path}}"], needs: [cursor], icon: cursor }
-    - { id: trae, name: "Open in Trae", program: "{{trae}}", args: ["{{path}}"], needs: [trae], icon: trae }
-    - { id: windsurf, name: "Open in Windsurf", program: "{{windsurf}}", args: ["{{path}}"], needs: [windsurf], icon: windsurf }
+    - { id: cursor, name: "Open in Cursor", program: "{{cursor}}", args: ["{{path}}"], needs: [cursor], icon: cursor, cluster: ai-editor }
+    - { id: trae, name: "Open in Trae", program: "{{trae}}", args: ["{{path}}"], needs: [trae], icon: trae, cluster: ai-editor }
+    - { id: windsurf, name: "Open in Windsurf", program: "{{windsurf}}", args: ["{{path}}"], needs: [windsurf], icon: windsurf, cluster: ai-editor }
 
     # Editors / IDEs, alphabetical.
-    - { id: goland, name: "Open in GoLand", program: "{{goland}}", args: ["{{path}}"], needs: [goland], icon: goland }
-    - { id: idea, name: "Open in IntelliJ IDEA", program: "{{idea}}", args: ["{{path}}"], needs: [idea], icon: intellij }
-    - { id: lapce, name: "Open in Lapce", program: "{{lapce}}", args: ["{{path}}"], needs: [lapce], icon: lapce }
-    - { id: pulsar, name: "Open in Pulsar", program: "{{pulsar}}", args: ["{{path}}"], needs: [pulsar], icon: code }
-    - { id: pycharm, name: "Open in PyCharm", program: "{{pycharm}}", args: ["{{path}}"], needs: [pycharm], icon: pycharm }
-    - { id: sublime, name: "Open in Sublime Text", program: "{{subl}}", args: ["{{path}}"], needs: [subl], icon: sublime }
-    - { id: vscode, name: "Open in VS Code", program: "{{code}}", args: ["{{path}}"], needs: [code], icon: vscode }
-    - { id: vscodium, name: "Open in VSCodium", program: "{{codium}}", args: ["{{path}}"], needs: [codium], icon: vscodium }
-    - { id: webstorm, name: "Open in WebStorm", program: "{{webstorm}}", args: ["{{path}}"], needs: [webstorm], icon: webstorm }
-    - { id: zed, name: "Open in Zed", program: "{{zed}}", args: ["{{path}}"], needs: [zed], icon: zed }
+    - { id: goland, name: "Open in GoLand", program: "{{goland}}", args: ["{{path}}"], needs: [goland], icon: goland, cluster: ide }
+    - { id: idea, name: "Open in IntelliJ IDEA", program: "{{idea}}", args: ["{{path}}"], needs: [idea], icon: intellij, cluster: ide }
+    - { id: lapce, name: "Open in Lapce", program: "{{lapce}}", args: ["{{path}}"], needs: [lapce], icon: lapce, cluster: ide }
+    - { id: pulsar, name: "Open in Pulsar", program: "{{pulsar}}", args: ["{{path}}"], needs: [pulsar], icon: code, cluster: ide }
+    - { id: pycharm, name: "Open in PyCharm", program: "{{pycharm}}", args: ["{{path}}"], needs: [pycharm], icon: pycharm, cluster: ide }
+    - { id: sublime, name: "Open in Sublime Text", program: "{{subl}}", args: ["{{path}}"], needs: [subl], icon: sublime, cluster: ide }
+    - { id: vscode, name: "Open in VS Code", program: "{{code}}", args: ["{{path}}"], needs: [code], icon: vscode, cluster: ide }
+    - { id: vscodium, name: "Open in VSCodium", program: "{{codium}}", args: ["{{path}}"], needs: [codium], icon: vscodium, cluster: ide }
+    - { id: webstorm, name: "Open in WebStorm", program: "{{webstorm}}", args: ["{{path}}"], needs: [webstorm], icon: webstorm, cluster: ide }
+    - { id: zed, name: "Open in Zed", program: "{{zed}}", args: ["{{path}}"], needs: [zed], icon: zed, cluster: ide }
 
     # Git GUIs / TUIs.
-    - { id: fork, name: "Open in Fork", program: "{{fork}}", args: ["{{path}}"], needs: [fork], icon: git }
-    - { id: gitkraken, name: "Open in GitKraken", program: "{{gitkraken}}", args: ["-p", "{{path}}"], needs: [gitkraken], icon: gitkraken }
-    - { id: sublime-merge, name: "Open in Sublime Merge", program: "{{smerge}}", args: ["{{path}}"], needs: [smerge], icon: git }
-    - { id: lazygit, name: "lazygit", run: "lazygit", terminal: true, needs: [lazygit], icon: git }
+    - { id: fork, name: "Open in Fork", program: "{{fork}}", args: ["{{path}}"], needs: [fork], icon: git, cluster: git }
+    - { id: gitkraken, name: "Open in GitKraken", program: "{{gitkraken}}", args: ["-p", "{{path}}"], needs: [gitkraken], icon: gitkraken, cluster: git }
+    - { id: sublime-merge, name: "Open in Sublime Merge", program: "{{smerge}}", args: ["{{path}}"], needs: [smerge], icon: git, cluster: git }
+    - { id: lazygit, name: "lazygit", run: "lazygit", terminal: true, needs: [lazygit], icon: git, cluster: git }

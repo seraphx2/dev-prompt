@@ -98,6 +98,9 @@ rules:
                               #   with {{file}} / {{file.stem}} bound
     requires: [mvn]           # rule hidden unless every binary is on PATH
     needs: [vs]               # rule hidden unless every program key resolves
+    pin: false                # true = render this rule's actions in the
+                              #   universal tier instead of "Detected" — see
+                              #   "Pinning a rule to the universal tier" below
     actions: [ ... ]          # see below
     # provider: npm-scripts   # instead of `actions`: a built-in generator
                               #   (npm-scripts | cargo | go | python | compose)
@@ -132,6 +135,13 @@ actions:
     prompt: true              #   {{input}} = what you type, the rest is fixed.
     terminal: true            #   A bare `prompt: true` (no `run:`) takes a
                               #   whole command line. Blank + a shell = open it.
+
+  - name: "Open in GoLand"
+    program: "{{goland}}"
+    args: ["{{path}}"]
+    needs: [goland]
+    cluster: ide               # sorts alphabetically among the other `ide`
+                              #   entries in the universal tier — see below
 ```
 
 **`{{vs}}` and `needs: [vs]` refer to the same thing** — `vs` is a key in the
@@ -158,19 +168,60 @@ or when the action has no program at all (a gated `terminal: true`).
 - `icon:` picks the row glyph. **Settings ▸ Icons** lists every bundled key
   (click one to copy `icon: <key>`); untagged actions fall back to a neutral
   glyph.
+- `cluster:` only matters for actions that render in the universal tier (every
+  `universal.actions` entry, plus any rule action under `pin: true` — see
+  below). It's the curated group the action sorts into: `ai-cli`, `ai-editor`,
+  `ide`, `git`, or a name of your own. Known clusters render in that fixed
+  order, alphabetically by label within each; a name that isn't one of the
+  built-ins sorts after all of them (also where a `pin: true` action with no
+  `cluster:` set ends up). Leave it unset on an action that isn't part of any
+  cluster (e.g. `terminal`) and it just renders in place, unsorted.
 
 ### `universal`
 
 Actions offered for every repo, regardless of contents. Each entry uses the same
 fields as [`actions`](#actions) above — `program` + `args` or `run`, `terminal`,
-`needs` (`programs` keys), `client` — plus an `id` used by `universal.disable`.
+`needs` (`programs` keys), `client`, `cluster` — plus an `id` used by
+`universal.disable`.
 
 ```yaml
 universal:
   actions:
     - { id: terminal, name: "Open in terminal", terminal: true }
-    - { id: vscode, name: "Open in VS Code", program: "{{code}}", args: ["{{path}}"], needs: [code] }
+    - { id: vscode, name: "Open in VS Code", program: "{{code}}", args: ["{{path}}"], needs: [code], cluster: ide }
 ```
+
+### Pinning a rule to the universal tier
+
+A rule's actions normally show up under the collapsible **Detected** group,
+which is right for anything content-driven with many possible entries (npm
+scripts, cargo subcommands, docker compose services). Some rules don't fit that
+shape, though — a single, content-gated "open this in its one bespoke program"
+action (say, opening a `.sln` in Visual Studio) behaves like a universal
+"open in X" launcher in every way except that it only exists when the matching
+file is actually there.
+
+`pin: true` on the *rule* renders its actions flat, in the universal tier,
+right alongside the built-in universal actions, instead of buried in Detected:
+
+```yaml
+rules:
+  - id: sln-editors
+    match: "*.sln"
+    per_file: true
+    pin: true
+    actions:
+      - name: "Open {{file.stem}} in Visual Studio"
+        program: "{{vs}}"
+        args: ["{{file}}"]
+        needs: [vs]
+        cluster: ide
+```
+
+Because Detected actions only resolve once the (slower) per-repo manifest scan
+finishes, a pinned action can appear in the menu a moment after the universal
+ones do — set `cluster:` so it lands in its correct sorted spot when it does,
+rather than just tacking onto the end of the list.
 
 ### Template variables
 

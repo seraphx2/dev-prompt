@@ -162,6 +162,21 @@ pub fn search_repos(
     index::search(&query, &repos, limit.unwrap_or(200))
 }
 
+/// Patch each universal-tier action's `usage_score` in from `action_usage`.
+/// Rule evaluation itself stays usage-agnostic — this is the one place the
+/// per-repo history joins in, same shape as `apps_with_usage` for the app
+/// launcher. Non-`General` actions (Detected, per the design in
+/// docs/rules-engine.md) are left at 0 and sorted by the frontend as before.
+fn with_usage(repo_path: &str, mut actions: Vec<Action>) -> Vec<Action> {
+    let scores = crate::action_usage::scores(repo_path);
+    for a in &mut actions {
+        if a.group == "General" {
+            a.usage_score = scores.get(&a.id).copied().unwrap_or(0.0);
+        }
+    }
+    actions
+}
+
 fn repo_for_path(state: &AppState, path: &str) -> Repo {
     let repos = state.repos.lock().unwrap();
     repos
@@ -190,9 +205,10 @@ pub async fn build_actions(
     path: String,
 ) -> AppResult<Vec<Action>> {
     let repo = repo_for_path(&state, &path);
+    let repo_path = repo.path.clone();
     let cached = state.contexts.lock().unwrap().get(&repo.path).cloned();
     let cfg = state.config.lock().unwrap().clone();
-    Ok(tauri::async_runtime::spawn_blocking(move || {
+    let actions = tauri::async_runtime::spawn_blocking(move || {
         let ctx = cached.unwrap_or_else(|| inspect_cold(&repo.path, &cfg));
         build_actions_impl(&repo, &ctx, &cfg)
     })
@@ -203,7 +219,8 @@ pub async fn build_actions(
         // but the panic shouldn't vanish silently.
         eprintln!("build_actions task failed: {e}");
         Vec::new()
-    }))
+    });
+    Ok(with_usage(&repo_path, actions))
 }
 
 /// The fast half of the action menu: universal actions only ("open in
@@ -217,15 +234,15 @@ pub async fn build_universal_actions(
     path: String,
 ) -> AppResult<Vec<Action>> {
     let repo = repo_for_path(&state, &path);
+    let repo_path = repo.path.clone();
     let cfg = state.config.lock().unwrap().clone();
-    Ok(
-        tauri::async_runtime::spawn_blocking(move || evaluate_universal(&cfg, &repo))
-            .await
-            .unwrap_or_else(|e| {
-                eprintln!("build_universal_actions task failed: {e}");
-                Vec::new()
-            }),
-    )
+    let actions = tauri::async_runtime::spawn_blocking(move || evaluate_universal(&cfg, &repo))
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("build_universal_actions task failed: {e}");
+            Vec::new()
+        });
+    Ok(with_usage(&repo_path, actions))
 }
 
 /// The slow half: per-ecosystem detected actions (`rules:`), gated by
@@ -239,9 +256,10 @@ pub async fn build_detected_actions(
     path: String,
 ) -> AppResult<Vec<Action>> {
     let repo = repo_for_path(&state, &path);
+    let repo_path = repo.path.clone();
     let cached = state.contexts.lock().unwrap().get(&repo.path).cloned();
     let cfg = state.config.lock().unwrap().clone();
-    Ok(tauri::async_runtime::spawn_blocking(move || {
+    let actions = tauri::async_runtime::spawn_blocking(move || {
         let ctx = cached.unwrap_or_else(|| inspect_cold(&repo.path, &cfg));
         evaluate_detected(&cfg, &ctx, &repo)
     })
@@ -249,7 +267,8 @@ pub async fn build_detected_actions(
     .unwrap_or_else(|e| {
         eprintln!("build_detected_actions task failed: {e}");
         Vec::new()
-    }))
+    });
+    Ok(with_usage(&repo_path, actions))
 }
 
 /// Rule-by-rule explanation of what a single repo produces and why — feeds the
@@ -321,7 +340,15 @@ pub async fn run_action(
         let ctx = cached.unwrap_or_else(|| inspect_cold(&repo.path, &cfg));
         let action = find_action(&repo, &ctx, &cfg, &action_id)
             .ok_or_else(|| AppError::msg(format!("unknown action: {action_id}")))?;
-        launch::launch(&action, &repo)
+        launch::launch(&action, &repo)?;
+        // Only the reorderable universal tier benefits from usage history — the
+        // fixed-hotkey trio (reveal in file manager / run command / copy path)
+        // never moves in the menu, so there's nothing to gain by tracking it.
+        const QUICK_ACTION_IDS: [&str; 3] = ["filemanager", "run-command", "copy-path"];
+        if action.group == "General" && !QUICK_ACTION_IDS.contains(&action.id.as_str()) {
+            crate::action_usage::bump(&repo.path, &action.id);
+        }
+        Ok(())
     })
     .await
     .map_err(|e| AppError::msg(format!("launch task failed: {e}")))?
@@ -714,6 +741,8 @@ pub async fn run_command(
             label: command.to_string(),
             hint: command.to_string(),
             group: String::new(),
+            cluster: String::new(),
+            usage_score: 0.0,
             icon: None,
             program,
             args,

@@ -24,6 +24,10 @@ export interface Action {
   hint: string;
   /** Section header to show above this action; "" means "just a divider". */
   group: string;
+  /** Curated sort group within the universal tier (`ai-cli`, `ide`, …); "" when unclustered. */
+  cluster: string;
+  /** Per-repo frecency (0 = no history yet); only meaningful when `group` is "General". */
+  usageScore: number;
   /** Icon key resolved against `lib/icons.ts`; absent -> fallback glyph. */
   icon?: string | null;
   /** True when this action is handled purely in the frontend (e.g. copy path). */

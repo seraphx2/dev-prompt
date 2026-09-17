@@ -7,6 +7,7 @@
 // side of the split.
 #![cfg_attr(not(windows), allow(dead_code, unused_imports, unused_mut))]
 
+mod action_usage;
 mod apps;
 #[cfg(target_os = "linux")]
 mod autostart;
