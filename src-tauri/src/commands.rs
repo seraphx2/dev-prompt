@@ -344,7 +344,8 @@ pub async fn run_action(
         // Only the reorderable universal tier benefits from usage history — the
         // fixed-hotkey trio (reveal in file manager / run command / copy path)
         // never moves in the menu, so there's nothing to gain by tracking it.
-        const QUICK_ACTION_IDS: [&str; 3] = ["filemanager", "run-command", "copy-path"];
+        const QUICK_ACTION_IDS: [&str; 4] =
+            ["filemanager", "run-command", "copy-path", "terminal"];
         if action.group == "General" && !QUICK_ACTION_IDS.contains(&action.id.as_str()) {
             crate::action_usage::bump(&repo.path, &action.id);
         }

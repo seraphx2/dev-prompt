@@ -114,12 +114,14 @@
 
   const SUB_PREFIX = "Detected · ";
 
-  // These three universal actions get a dedicated hotkey row at the top of the
+  // These universal actions get a dedicated hotkey row at the top of the
   // action menu instead of taking up arrow-key slots in the list below.
+  // Ordered alphabetically by key (C, E, R, T) to match the row's layout.
   const QUICK_ACTION_IDS: { id: string; key: string }[] = [
+    { id: "copy-path", key: "Ctrl+C" },
     { id: "filemanager", key: "Ctrl+E" },
     { id: "run-command", key: "Ctrl+R" },
-    { id: "copy-path", key: "Ctrl+C" },
+    { id: "terminal", key: "Ctrl+T" },
   ];
   const quickActions = $derived(
     QUICK_ACTION_IDS.map(({ id, key }) => ({
@@ -139,12 +141,14 @@
 
   // Curated cluster order for the universal tier — matches the hand-alphabetized
   // sections in default_config.yaml. An action's `cluster` sorts it into one of
-  // these alphabetically by label; "" (unclustered, e.g. terminal) stays up
-  // front in its original order; a cluster name outside this list (a custom
-  // rule's typo, or one left unset on a `pin: true` action) sorts after all of
-  // them, grouped by first appearance. This is what lets a `pin: true` rule
-  // action (e.g. "Open in Visual Studio") land in its correct alphabetical spot
-  // in the `ide` cluster even though it only arrives once the slower detected
+  // these alphabetically by label; "" (unclustered) stays up front in its
+  // original order — nothing built-in is unclustered today since `terminal`
+  // moved into the quick-action row, but a custom universal action can still
+  // leave `cluster:` unset. A cluster name outside this list (a custom rule's
+  // typo, or one left unset on a `pin: true` action) sorts after all of them,
+  // grouped by first appearance. This is what lets a `pin: true` rule action
+  // (e.g. "Open in Visual Studio") land in its correct alphabetical spot in
+  // the `ide` cluster even though it only arrives once the slower detected
   // pass resolves, well after the rest of the universal list is on screen.
   const KNOWN_CLUSTERS = ["ai-cli", "ai-editor", "ide", "git"];
 
@@ -732,7 +736,7 @@
 />
 
 <main
-  class="panel-surface relative mx-auto flex h-[480px] w-[720px] flex-col overflow-hidden
+  class="panel-surface relative mx-auto flex h-[480px] w-[760px] flex-col overflow-hidden
          rounded border border-hair bg-panel/[0.82] backdrop-blur-xl"
 >
   {#if mode === "repo-list"}

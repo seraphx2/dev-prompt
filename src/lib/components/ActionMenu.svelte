@@ -95,7 +95,7 @@
 </div>
 
 {#if quickActions.length}
-  <div class="grid grid-cols-3 gap-1 border-b border-hair px-2 py-2">
+  <div class="grid grid-cols-4 gap-1 border-b border-hair px-2 py-2">
     {#each quickActions as qa (qa.action.id)}
       <button
         type="button"

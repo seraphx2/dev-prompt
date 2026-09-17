@@ -248,13 +248,13 @@ rules:
     per_file: true
     pin: true
     actions:
-      - name: "Open {{file.stem}} in Visual Studio"
+      - name: "Open in Visual Studio"
         program: "{{vs}}"
         args: ["{{file}}"]
         needs: [vs]
         icon: vs
         cluster: ide
-      - name: "Open {{file.stem}} in Rider"
+      - name: "Open in Rider"
         program: "{{rider}}"
         args: ["{{file}}"]
         needs: [rider]
@@ -267,13 +267,13 @@ rules:
     per_file: true
     pin: true
     actions:
-      - name: "Open {{file.stem}} in Visual Studio"
+      - name: "Open in Visual Studio"
         program: "{{vs}}"
         args: ["{{file}}"]
         needs: [vs]
         icon: vs
         cluster: ide
-      - name: "Open {{file.stem}} in Rider"
+      - name: "Open in Rider"
         program: "{{rider}}"
         args: ["{{file}}"]
         needs: [rider]
@@ -446,7 +446,7 @@ rules:
 universal:
   actions:
     - { id: terminal, name: "Open in terminal", terminal: true, icon: terminal }
-    - { id: filemanager, name: "Reveal in file manager", program: "{{filemanager}}", args: ["{{path}}"], icon: folder }
+    - { id: filemanager, name: "Show in file manager", program: "{{filemanager}}", args: ["{{path}}"], icon: folder }
     - { id: copy-path, name: "Copy path", client: true, icon: copy }
     - { id: run-command, name: "Run command…", prompt: true, terminal: true, icon: run }
 

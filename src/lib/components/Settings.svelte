@@ -773,7 +773,7 @@
         <span class="text-orange-400">File manager</span>
         <select
           bind:value={filemanagerSel}
-          title="Which file manager 'Reveal in file manager' opens"
+          title="Which file manager 'Show in file manager' opens"
           class="w-full cursor-pointer rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
         >
           <option value="">Auto{filemanagers[0] ? ` (${filemanagers[0].label})` : ""}</option>

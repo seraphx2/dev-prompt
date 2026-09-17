@@ -211,7 +211,7 @@ rules:
     per_file: true
     pin: true
     actions:
-      - name: "Open {{file.stem}} in Visual Studio"
+      - name: "Open in Visual Studio"
         program: "{{vs}}"
         args: ["{{file}}"]
         needs: [vs]
@@ -222,6 +222,15 @@ Because Detected actions only resolve once the (slower) per-repo manifest scan
 finishes, a pinned action can appear in the menu a moment after the universal
 ones do — set `cluster:` so it lands in its correct sorted spot when it does,
 rather than just tacking onto the end of the list.
+
+Note the name drops `{{file.stem}}` even though `per_file: true` still binds
+it — sitting flat next to "Open in GoLand" / "Open in IntelliJ IDEA", a
+per-file name reads oddly (`{{file.stem}}` is more at home in the Detected
+group, where it disambiguates a list you're already drilled into). The
+trade-off: if a repo has more than one `.sln`, you get several identically
+labelled "Open in Visual Studio" rows — each still opens its own solution
+file, they just aren't distinguishable by label. Keep `{{file.stem}}` if that
+matters more to you than a clean label in the common single-solution case.
 
 ### Template variables
 
