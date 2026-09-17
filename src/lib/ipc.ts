@@ -12,6 +12,7 @@ import type {
   RepoListPayload,
   RepoTrace,
   ScoredRepo,
+  SystemPaths,
   TerminalOption,
 } from "./types";
 
@@ -179,6 +180,26 @@ export function openRulesFile(): Promise<void> {
 /** Open the GitHub releases page in the default browser. */
 export function openReleasesPage(): Promise<void> {
   return invoke<void>("open_releases_page");
+}
+
+/** Open the folder holding the running executable. */
+export function openInstallDir(): Promise<void> {
+  return invoke<void>("open_install_dir");
+}
+
+/** Open the folder holding config.yaml / rules.yaml. */
+export function openConfigDir(): Promise<void> {
+  return invoke<void>("open_config_dir");
+}
+
+/** Open the folder holding the regenerable caches (repos.json, apps.json, …). */
+export function openCacheDir(): Promise<void> {
+  return invoke<void>("open_cache_dir");
+}
+
+/** Where things live on disk, for the Settings "File locations" panel. */
+export function systemPaths(): Promise<SystemPaths> {
+  return invoke<SystemPaths>("system_paths");
 }
 
 /** How this build receives updates — see the `updater_mode` command.

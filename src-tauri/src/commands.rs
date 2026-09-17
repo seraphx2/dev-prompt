@@ -991,46 +991,92 @@ pub fn set_update_hint(app: AppHandle, version: Option<String>) {
     }
 }
 
+/// Open `target` (a file, folder, or URL) with the OS default handler, and
+/// drop the overlay's always-on-top so whatever it opens is actually visible
+/// in front of it.
+fn open_with_os_handler(window: &tauri::WebviewWindow, target: &std::ffi::OsStr) -> AppResult<()> {
+    #[cfg(windows)]
+    let program = "explorer";
+    #[cfg(unix)]
+    let program = "xdg-open";
+
+    std::process::Command::new(program)
+        .arg(target)
+        .spawn()
+        .map_err(|e| AppError::msg(format!("could not open {}: {e}", target.to_string_lossy())))?;
+
+    let _ = window.set_always_on_top(false);
+    Ok(())
+}
+
 /// Open `rules.yaml` with the OS default handler for `.yaml` (or the "Open
-/// with" picker when nothing is associated), and drop the overlay's
-/// always-on-top so the editor is actually visible in front of it.
+/// with" picker when nothing is associated).
 #[tauri::command]
 pub fn open_rules_file(window: tauri::WebviewWindow) -> AppResult<()> {
     let path = config::rules_path()?;
     if !path.exists() {
         let _ = config::load()?; // writes the scaffold
     }
-
-    #[cfg(windows)]
-    let program = "explorer";
-    #[cfg(unix)]
-    let program = "xdg-open";
-
-    std::process::Command::new(program)
-        .arg(&path)
-        .spawn()
-        .map_err(|e| AppError::msg(format!("could not open {}: {e}", path.display())))?;
-
-    let _ = window.set_always_on_top(false);
-    Ok(())
+    open_with_os_handler(&window, path.as_os_str())
 }
 
 /// Open the GitHub releases page in the user's browser. The update box links
 /// here rather than carrying in-app release notes.
 #[tauri::command]
 pub fn open_releases_page(window: tauri::WebviewWindow) -> AppResult<()> {
-    const URL: &str = "https://github.com/seraphx2/dev-prompt/releases";
+    open_with_os_handler(
+        &window,
+        std::ffi::OsStr::new("https://github.com/seraphx2/dev-prompt/releases"),
+    )
+}
 
-    #[cfg(windows)]
-    let program = "explorer";
-    #[cfg(unix)]
-    let program = "xdg-open";
+/// Open the folder holding the running executable.
+#[tauri::command]
+pub fn open_install_dir(window: tauri::WebviewWindow) -> AppResult<()> {
+    let exe = std::env::current_exe()
+        .map_err(|e| AppError::msg(format!("could not locate the running executable: {e}")))?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| AppError::msg("executable has no parent directory"))?;
+    open_with_os_handler(&window, dir.as_os_str())
+}
 
-    std::process::Command::new(program)
-        .arg(URL)
-        .spawn()
-        .map_err(|e| AppError::msg(format!("could not open {URL}: {e}")))?;
+/// Open the folder holding `config.yaml` / `rules.yaml` (and the usage-history
+/// JSON files, which live alongside them since they're accumulated user state,
+/// not a regenerable cache — see `usage.rs`).
+#[tauri::command]
+pub fn open_config_dir(window: tauri::WebviewWindow) -> AppResult<()> {
+    open_with_os_handler(&window, config::config_dir()?.as_os_str())
+}
 
-    let _ = window.set_always_on_top(false);
-    Ok(())
+/// Open the folder holding the regenerable caches (`repos.json`, `apps.json`,
+/// resolved-icon cache).
+#[tauri::command]
+pub fn open_cache_dir(window: tauri::WebviewWindow) -> AppResult<()> {
+    open_with_os_handler(&window, config::cache_dir()?.as_os_str())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemPaths {
+    pub install_dir: String,
+    pub config_dir: String,
+    pub cache_dir: String,
+}
+
+/// Where things live on disk, for the Settings "File locations" panel.
+#[tauri::command]
+pub fn system_paths() -> AppResult<SystemPaths> {
+    let exe = std::env::current_exe()
+        .map_err(|e| AppError::msg(format!("could not locate the running executable: {e}")))?;
+    let install_dir = exe
+        .parent()
+        .ok_or_else(|| AppError::msg("executable has no parent directory"))?
+        .to_string_lossy()
+        .into_owned();
+    Ok(SystemPaths {
+        install_dir,
+        config_dir: config::config_dir()?.to_string_lossy().into_owned(),
+        cache_dir: config::cache_dir()?.to_string_lossy().into_owned(),
+    })
 }

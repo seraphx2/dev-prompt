@@ -91,6 +91,13 @@ export interface FileManagerOption {
   label: string;
 }
 
+/** Where things live on disk — Settings ▸ "File locations". */
+export interface SystemPaths {
+  installDir: string;
+  configDir: string;
+  cacheDir: string;
+}
+
 export interface ConfigSummary {
   rulesPath: string;
   markerCount: number;
