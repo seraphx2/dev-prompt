@@ -33,7 +33,7 @@
       class="overflow-hidden whitespace-nowrap font-mono text-[11px] leading-tight text-white/35"
       title={entry.repo.path}
     >
-      {middleTruncate(entry.repo.path, 72)}
+      {middleTruncate(entry.repo.path, 100)}
     </div>
   </div>
   <div class="flex shrink-0 items-center gap-1">
@@ -43,7 +43,7 @@
         >{entry.repo.vcs}</span
       >
     {/if}
-    {#each entry.repo.sentinels.slice(0, 3) as s}
+    {#each entry.repo.sentinels.slice(0, 5) as s}
       <span
         class="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-white/40"
         >{s}</span

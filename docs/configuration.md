@@ -107,7 +107,7 @@ The **Run command…** action picks a shell per-run, defaulting to that setting.
 
 ### File manager
 
-Which program "Reveal in file manager" opens. Set from **Settings ▸ File
+Which program "Show in file manager" opens. Set from **Settings ▸ File
 manager**. Unlike Terminal, dev-prompt doesn't need a table of known
 invocations here — nearly every file manager opens a folder given as a bare
 path argument, the same contract `explorer.exe` has, so every installed

@@ -11,6 +11,9 @@
     listRepos,
     listShells,
     listTerminals,
+    openCacheDir,
+    openConfigDir,
+    openInstallDir,
     openReleasesPage,
     openRulesFile,
     pickDirectories,
@@ -19,11 +22,13 @@
     saveConfig,
     setAutostart,
     setAutostartPortal,
+    systemPaths,
   } from "../ipc";
   import type {
     ConfigSummary,
     FileManagerOption,
     RepoTrace,
+    SystemPaths,
     TerminalOption,
   } from "../types";
   import HotkeyRecorder from "./HotkeyRecorder.svelte";
@@ -106,6 +111,7 @@
 
   onDestroy(() => clearTimeout(msgTimer));
   let summary = $state<ConfigSummary | null>(null);
+  let paths = $state<SystemPaths | null>(null);
 
   // "Trace a repo" — pick a repo, see rule-by-rule why it does / doesn't resolve.
   let traceRepos = $state<{ name: string; path: string }[]>([]);
@@ -182,6 +188,11 @@
       defaultShellLabel = await defaultShell();
     } catch {
       defaultShellLabel = "";
+    }
+    try {
+      paths = await systemPaths();
+    } catch {
+      paths = null;
     }
     void pollUpdates();
   });
@@ -356,6 +367,14 @@
       note("Opened rules.yaml in your default editor.");
     } catch (e) {
       note(`${e}`, true);
+    }
+  }
+
+  async function openFolder(open: () => Promise<void>, label: string) {
+    try {
+      await open();
+    } catch (e) {
+      note(`Could not open ${label}: ${e}`, true);
     }
   }
 
@@ -773,7 +792,7 @@
         <span class="text-orange-400">File manager</span>
         <select
           bind:value={filemanagerSel}
-          title="Which file manager 'Reveal in file manager' opens"
+          title="Which file manager 'Show in file manager' opens"
           class="w-full cursor-pointer rounded border border-hair bg-white/[0.04] py-1.5 pl-2 pr-7 text-white/90 focus:border-white/25 focus:outline-none"
         >
           <option value="">Auto{filemanagers[0] ? ` (${filemanagers[0].label})` : ""}</option>
@@ -1136,6 +1155,69 @@
         {/each}
       </div>
     </details>
+  {/if}
+
+  {#if paths}
+    <div class="space-y-2 border-t border-hair pt-4">
+      <span class="text-orange-400">File locations</span>
+      <p class="text-[11px] text-white/30">
+        Where dev-prompt keeps things — settings, hand-authored overrides, and
+        the caches it rebuilds automatically.
+      </p>
+      <div class="space-y-1.5">
+        <div class="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onclick={() => openFolder(openInstallDir, "the install folder")}
+            class="w-40 shrink-0 rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90"
+          >
+            Open install folder
+          </button>
+          <div
+            class="min-w-0 flex-1 truncate font-mono text-[11px] text-white/25"
+            title={paths.installDir}
+          >
+            {paths.installDir}
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onclick={() => openFolder(openConfigDir, "the config folder")}
+            class="w-40 shrink-0 rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90"
+          >
+            Open config folder
+          </button>
+          <div
+            class="min-w-0 flex-1 truncate font-mono text-[11px] text-white/25"
+            title={paths.configDir}
+          >
+            {paths.configDir}
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onclick={() => openFolder(openCacheDir, "the cache folder")}
+            class="w-40 shrink-0 rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90"
+          >
+            Open cache folder
+          </button>
+          <div
+            class="min-w-0 flex-1 truncate font-mono text-[11px] text-white/25"
+            title={paths.cacheDir}
+          >
+            {paths.cacheDir}
+          </div>
+        </div>
+      </div>
+      <p class="text-[11px] text-white/25">
+        Config: <span class="font-mono">config.yaml</span>, <span class="font-mono"
+          >rules.yaml</span
+        >, and usage history. Cache: regenerable repo / app indexes — safe to
+        delete, dev-prompt rebuilds them.
+      </p>
+    </div>
   {/if}
 </div>
 

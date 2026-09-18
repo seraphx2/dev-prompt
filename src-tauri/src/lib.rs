@@ -7,6 +7,7 @@
 // side of the split.
 #![cfg_attr(not(windows), allow(dead_code, unused_imports, unused_mut))]
 
+mod action_usage;
 mod apps;
 #[cfg(target_os = "linux")]
 mod autostart;
@@ -410,6 +411,10 @@ pub fn run() {
             commands::run_app,
             commands::open_rules_file,
             commands::open_releases_page,
+            commands::open_install_dir,
+            commands::open_config_dir,
+            commands::open_cache_dir,
+            commands::system_paths,
             commands::set_dismiss_on_blur,
             commands::updater_mode,
             commands::is_flatpak,

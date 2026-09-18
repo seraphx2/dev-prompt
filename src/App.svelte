@@ -114,6 +114,81 @@
 
   const SUB_PREFIX = "Detected · ";
 
+  // Actions with a `hotkey` (set in default_config.yaml, see docs/rules-engine.md)
+  // get a dedicated row at the top of the action menu instead of taking up
+  // arrow-key slots in the list below. Sorted by key so the row reads C, E, R, T.
+  const quickActions = $derived(
+    actions
+      .filter((a): a is Action & { hotkey: string } => !!a.hotkey)
+      .map((action) => ({ key: action.hotkey, action }))
+      .sort((a, b) => a.key.localeCompare(b.key)),
+  );
+
+  function runQuickAction(action: Action) {
+    if (action.prompt) {
+      promptTemplate = action.hint ?? "";
+      mode = "run-command";
+    } else if (activeRepo) {
+      execute(action, activeRepo.repo.path);
+    }
+  }
+
+  // Curated cluster order for the universal tier — matches the hand-alphabetized
+  // sections in default_config.yaml. An action's `cluster` sorts it into one of
+  // these alphabetically by label; "" (unclustered) stays up front in its
+  // original order — nothing built-in is unclustered today since `terminal`
+  // moved into the quick-action row, but a custom universal action can still
+  // leave `cluster:` unset. A cluster name outside this list (a custom rule's
+  // typo, or one left unset on a `pin: true` action) sorts after all of them,
+  // grouped by first appearance. This is what lets a `pin: true` rule action
+  // (e.g. "Open in Visual Studio") land in its correct alphabetical spot in
+  // the `ide` cluster even though it only arrives once the slower detected
+  // pass resolves, well after the rest of the universal list is on screen.
+  const KNOWN_CLUSTERS = ["ai-cli", "ai-editor", "ide", "git"];
+
+  function clusterSort(items: Action[]): Action[] {
+    const passthrough: Action[] = [];
+    const known = new Map<string, Action[]>(KNOWN_CLUSTERS.map((c) => [c, []]));
+    const unknownOrder: string[] = [];
+    const unknown = new Map<string, Action[]>();
+
+    for (const a of items) {
+      if (!a.cluster) {
+        passthrough.push(a);
+      } else if (known.has(a.cluster)) {
+        known.get(a.cluster)!.push(a);
+      } else {
+        if (!unknown.has(a.cluster)) {
+          unknown.set(a.cluster, []);
+          unknownOrder.push(a.cluster);
+        }
+        unknown.get(a.cluster)!.push(a);
+      }
+    }
+
+    const byLabel = (a: Action, b: Action) =>
+      a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
+
+    return [
+      ...passthrough,
+      ...KNOWN_CLUSTERS.flatMap((c) => known.get(c)!.sort(byLabel)),
+      ...unknownOrder.flatMap((c) => unknown.get(c)!.sort(byLabel)),
+    ];
+  }
+
+  // Per-repo usage (see action_usage.rs) floats a picked-often action above the
+  // curated cluster order entirely — used actions sort by decayed score, above
+  // every unused one, which keeps falling back to clusterSort(). An old
+  // favorite with a stale score naturally decays back down over disuse instead
+  // of sitting on top forever by lifetime count alone.
+  function orderGeneral(items: Action[]): Action[] {
+    const used = items
+      .filter((a) => a.usageScore > 0)
+      .sort((a, b) => b.usageScore - a.usageScore);
+    const unused = items.filter((a) => a.usageScore <= 0);
+    return [...used, ...clusterSort(unused)];
+  }
+
   function fuzzyItems(list: Action[], q: string, blankGroup = false): MenuItem[] {
     const grp = (a: Action) => (blankGroup ? "" : a.group);
     if (!q) {
@@ -151,11 +226,29 @@
         true,
       );
     }
-    if (q) return fuzzyItems(actions, q);
+    const rest = actions.filter((a) => !a.hotkey);
+    if (q) return fuzzyItems(rest, q);
 
-    const items: MenuItem[] = [];
+    // Universal-tier ("General") actions are cluster-sorted as a block up
+    // front — this is also what re-slots a `pin: true` rule action into place
+    // once it streams in from the (slower) detected pass. Everything else
+    // (plain "Detected" root actions, sub-project drill-ins) keeps the
+    // original array order, unaffected.
+    const generalActions: Action[] = [];
+    const others: Action[] = [];
+    for (const a of rest) {
+      (a.group === "General" ? generalActions : others).push(a);
+    }
+
+    const items: MenuItem[] = orderGeneral(generalActions).map((action) => ({
+      kind: "action" as const,
+      group: action.group,
+      action,
+      positions: [],
+    }));
+
     const seen = new Set<string>();
-    for (const a of actions) {
+    for (const a of others) {
       if (a.group.startsWith(SUB_PREFIX)) {
         if (!seen.has(a.group)) {
           seen.add(a.group);
@@ -485,6 +578,16 @@
   }
 
   function onMenuKeydown(e: KeyboardEvent) {
+    if (e.ctrlKey && !e.altKey && !e.shiftKey) {
+      const hit = quickActions.find(
+        (q) => q.key.toLowerCase() === `ctrl+${e.key.toLowerCase()}`,
+      );
+      if (hit) {
+        e.preventDefault();
+        runQuickAction(hit.action);
+        return;
+      }
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       actionSel = Math.min(actionSel + 1, menuItems.length - 1);
@@ -625,7 +728,7 @@
 />
 
 <main
-  class="panel-surface relative mx-auto flex h-[480px] w-[720px] flex-col overflow-hidden
+  class="panel-surface relative mx-auto flex h-[480px] w-[760px] flex-col overflow-hidden
          rounded border border-hair bg-panel/[0.82] backdrop-blur-xl"
 >
   {#if mode === "repo-list"}
@@ -675,10 +778,12 @@
       repoName={activeRepo.repo.name}
       crumb={subGroup ? subGroup.slice(SUB_PREFIX.length) : null}
       items={menuItems}
+      {quickActions}
       bind:filter={actionQuery}
       selected={actionSel}
       onselect={(i) => (actionSel = i)}
       onrun={(i) => activateMenuItem(i)}
+      onquickaction={runQuickAction}
       onback={menuBack}
     />
   {:else if mode === "run-command" && activeRepo}

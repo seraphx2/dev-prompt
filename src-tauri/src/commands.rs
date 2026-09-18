@@ -162,6 +162,21 @@ pub fn search_repos(
     index::search(&query, &repos, limit.unwrap_or(200))
 }
 
+/// Patch each universal-tier action's `usage_score` in from `action_usage`.
+/// Rule evaluation itself stays usage-agnostic — this is the one place the
+/// per-repo history joins in, same shape as `apps_with_usage` for the app
+/// launcher. Non-`General` actions (Detected, per the design in
+/// docs/rules-engine.md) are left at 0 and sorted by the frontend as before.
+fn with_usage(repo_path: &str, mut actions: Vec<Action>) -> Vec<Action> {
+    let scores = crate::action_usage::scores(repo_path);
+    for a in &mut actions {
+        if a.group == "General" {
+            a.usage_score = scores.get(&a.id).copied().unwrap_or(0.0);
+        }
+    }
+    actions
+}
+
 fn repo_for_path(state: &AppState, path: &str) -> Repo {
     let repos = state.repos.lock().unwrap();
     repos
@@ -192,9 +207,10 @@ pub async fn build_actions(
     let repo = repo_for_path(&state, &path);
     let cached = state.contexts.lock().unwrap().get(&repo.path).cloned();
     let cfg = state.config.lock().unwrap().clone();
-    Ok(tauri::async_runtime::spawn_blocking(move || {
+    let actions = tauri::async_runtime::spawn_blocking(move || {
         let ctx = cached.unwrap_or_else(|| inspect_cold(&repo.path, &cfg));
-        build_actions_impl(&repo, &ctx, &cfg)
+        let actions = build_actions_impl(&repo, &ctx, &cfg);
+        with_usage(&repo.path, actions)
     })
     .await
     .unwrap_or_else(|e| {
@@ -203,7 +219,8 @@ pub async fn build_actions(
         // but the panic shouldn't vanish silently.
         eprintln!("build_actions task failed: {e}");
         Vec::new()
-    }))
+    });
+    Ok(actions)
 }
 
 /// The fast half of the action menu: universal actions only ("open in
@@ -218,14 +235,16 @@ pub async fn build_universal_actions(
 ) -> AppResult<Vec<Action>> {
     let repo = repo_for_path(&state, &path);
     let cfg = state.config.lock().unwrap().clone();
-    Ok(
-        tauri::async_runtime::spawn_blocking(move || evaluate_universal(&cfg, &repo))
-            .await
-            .unwrap_or_else(|e| {
-                eprintln!("build_universal_actions task failed: {e}");
-                Vec::new()
-            }),
-    )
+    let actions = tauri::async_runtime::spawn_blocking(move || {
+        let actions = evaluate_universal(&cfg, &repo);
+        with_usage(&repo.path, actions)
+    })
+    .await
+    .unwrap_or_else(|e| {
+        eprintln!("build_universal_actions task failed: {e}");
+        Vec::new()
+    });
+    Ok(actions)
 }
 
 /// The slow half: per-ecosystem detected actions (`rules:`), gated by
@@ -241,15 +260,17 @@ pub async fn build_detected_actions(
     let repo = repo_for_path(&state, &path);
     let cached = state.contexts.lock().unwrap().get(&repo.path).cloned();
     let cfg = state.config.lock().unwrap().clone();
-    Ok(tauri::async_runtime::spawn_blocking(move || {
+    let actions = tauri::async_runtime::spawn_blocking(move || {
         let ctx = cached.unwrap_or_else(|| inspect_cold(&repo.path, &cfg));
-        evaluate_detected(&cfg, &ctx, &repo)
+        let actions = evaluate_detected(&cfg, &ctx, &repo);
+        with_usage(&repo.path, actions)
     })
     .await
     .unwrap_or_else(|e| {
         eprintln!("build_detected_actions task failed: {e}");
         Vec::new()
-    }))
+    });
+    Ok(actions)
 }
 
 /// Rule-by-rule explanation of what a single repo produces and why — feeds the
@@ -321,7 +342,15 @@ pub async fn run_action(
         let ctx = cached.unwrap_or_else(|| inspect_cold(&repo.path, &cfg));
         let action = find_action(&repo, &ctx, &cfg, &action_id)
             .ok_or_else(|| AppError::msg(format!("unknown action: {action_id}")))?;
-        launch::launch(&action, &repo)
+        launch::launch(&action, &repo)?;
+        // Only the reorderable universal tier benefits from usage history — the
+        // fixed-hotkey quick actions (their `hotkey` comes straight from
+        // `default_config.yaml`, see `RuleAction::hotkey`) never move in the
+        // menu, so there's nothing to gain by tracking them.
+        if action.group == "General" && action.hotkey.is_none() {
+            crate::action_usage::bump(&repo.path, &action.id);
+        }
+        Ok(())
     })
     .await
     .map_err(|e| AppError::msg(format!("launch task failed: {e}")))?
@@ -714,7 +743,10 @@ pub async fn run_command(
             label: command.to_string(),
             hint: command.to_string(),
             group: String::new(),
+            cluster: String::new(),
+            usage_score: 0.0,
             icon: None,
+            hotkey: None,
             program,
             args,
             cwd,
@@ -961,46 +993,91 @@ pub fn set_update_hint(app: AppHandle, version: Option<String>) {
     }
 }
 
+/// Open `target` (a file, folder, or URL) with the OS default handler, and
+/// drop the overlay's always-on-top so whatever it opens is actually visible
+/// in front of it.
+fn open_with_os_handler(window: &tauri::WebviewWindow, target: &std::ffi::OsStr) -> AppResult<()> {
+    #[cfg(windows)]
+    let program = "explorer";
+    #[cfg(unix)]
+    let program = "xdg-open";
+
+    std::process::Command::new(program)
+        .arg(target)
+        .spawn()
+        .map_err(|e| AppError::msg(format!("could not open {}: {e}", target.to_string_lossy())))?;
+
+    let _ = window.set_always_on_top(false);
+    Ok(())
+}
+
 /// Open `rules.yaml` with the OS default handler for `.yaml` (or the "Open
-/// with" picker when nothing is associated), and drop the overlay's
-/// always-on-top so the editor is actually visible in front of it.
+/// with" picker when nothing is associated).
 #[tauri::command]
 pub fn open_rules_file(window: tauri::WebviewWindow) -> AppResult<()> {
     let path = config::rules_path()?;
     if !path.exists() {
         let _ = config::load()?; // writes the scaffold
     }
-
-    #[cfg(windows)]
-    let program = "explorer";
-    #[cfg(unix)]
-    let program = "xdg-open";
-
-    std::process::Command::new(program)
-        .arg(&path)
-        .spawn()
-        .map_err(|e| AppError::msg(format!("could not open {}: {e}", path.display())))?;
-
-    let _ = window.set_always_on_top(false);
-    Ok(())
+    open_with_os_handler(&window, path.as_os_str())
 }
 
 /// Open the GitHub releases page in the user's browser. The update box links
 /// here rather than carrying in-app release notes.
 #[tauri::command]
 pub fn open_releases_page(window: tauri::WebviewWindow) -> AppResult<()> {
-    const URL: &str = "https://github.com/seraphx2/dev-prompt/releases";
+    open_with_os_handler(
+        &window,
+        std::ffi::OsStr::new("https://github.com/seraphx2/dev-prompt/releases"),
+    )
+}
 
-    #[cfg(windows)]
-    let program = "explorer";
-    #[cfg(unix)]
-    let program = "xdg-open";
+/// Folder holding the running executable, shared by `open_install_dir` and
+/// `system_paths` so they can't report inconsistent install paths.
+fn install_dir() -> AppResult<std::path::PathBuf> {
+    let exe = std::env::current_exe()
+        .map_err(|e| AppError::msg(format!("could not locate the running executable: {e}")))?;
+    exe.parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| AppError::msg("executable has no parent directory"))
+}
 
-    std::process::Command::new(program)
-        .arg(URL)
-        .spawn()
-        .map_err(|e| AppError::msg(format!("could not open {URL}: {e}")))?;
+/// Open the folder holding the running executable.
+#[tauri::command]
+pub fn open_install_dir(window: tauri::WebviewWindow) -> AppResult<()> {
+    open_with_os_handler(&window, install_dir()?.as_os_str())
+}
 
-    let _ = window.set_always_on_top(false);
-    Ok(())
+/// Open the folder holding `config.yaml` / `rules.yaml` (and the usage-history
+/// JSON files, which live alongside them since they're accumulated user state,
+/// not a regenerable cache — see `usage.rs`).
+#[tauri::command]
+pub fn open_config_dir(window: tauri::WebviewWindow) -> AppResult<()> {
+    open_with_os_handler(&window, config::config_dir()?.as_os_str())
+}
+
+/// Open the folder holding the regenerable caches (`repos.json`, `apps.json`,
+/// resolved-icon cache).
+#[tauri::command]
+pub fn open_cache_dir(window: tauri::WebviewWindow) -> AppResult<()> {
+    open_with_os_handler(&window, config::cache_dir()?.as_os_str())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemPaths {
+    pub install_dir: String,
+    pub config_dir: String,
+    pub cache_dir: String,
+}
+
+/// Where things live on disk, for the Settings "File locations" panel.
+#[tauri::command]
+pub fn system_paths() -> AppResult<SystemPaths> {
+    let install_dir = install_dir()?.to_string_lossy().into_owned();
+    Ok(SystemPaths {
+        install_dir,
+        config_dir: config::config_dir()?.to_string_lossy().into_owned(),
+        cache_dir: config::cache_dir()?.to_string_lossy().into_owned(),
+    })
 }

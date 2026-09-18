@@ -329,6 +329,12 @@ pub struct Rule {
     /// A rule carrying only `disable: <id>` removes that built-in rule.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disable: Option<String>,
+    /// Render this rule's actions in the universal tier (flat, top of the menu,
+    /// sorted into `cluster` alongside the built-in universal actions) instead
+    /// of the collapsible "Detected" group. For repo-specific single-program
+    /// launchers (e.g. opening a `.sln` in Visual Studio) that behave like a
+    /// universal "open in X" action but are gated on repo content.
+    pub pin: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -353,7 +359,18 @@ pub struct RuleAction {
     /// Icon key for the menu row (see `src/lib/icons.ts` / Settings ▸ Icons).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Fixed keyboard shortcut (e.g. "Ctrl+C") shown as a quick-action button
+    /// above the action list, instead of taking up an up/down-arrow slot.
+    /// Only set on a handful of built-in universal actions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hotkey: Option<String>,
     pub needs: Vec<String>,
+    /// Which curated group this action sorts into within the universal tier
+    /// (`ai-cli`, `ai-editor`, `ide`, `git`, …) — ignored unless the action is
+    /// universal or its owning rule is `pin: true`. Empty stays unclustered
+    /// (rendered in place, not sorted); an unrecognized value sorts after every
+    /// known cluster.
+    pub cluster: String,
 }
 
 impl RuleAction {

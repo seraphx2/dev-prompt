@@ -15,7 +15,7 @@
       {
         "label": "overlay",
         "title": "dev-prompt",
-        "width": 720,
+        "width": 760,
         "height": 480,
         "resizable": false,
         "decorations": false,
