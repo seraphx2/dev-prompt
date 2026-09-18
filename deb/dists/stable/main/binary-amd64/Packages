@@ -126,3 +126,19 @@ SHA512: ce9a798fa91993c3585f88e865e7498583bcfaf4208ac37f2f4227c8b359d2bef84b04cb
 Description: Cross-platform command-palette overlay for launching dev repositories
  (none)
 
+Package: dev-prompt
+Architecture: amd64
+Version: 2026.918.1
+Priority: optional
+Maintainer: seraphx2
+Installed-Size: 9740
+Depends: libayatana-appindicator3-1, libwebkit2gtk-4.1-0, libgtk-3-0
+Filename: pool/main/d/dev-prompt/dev-prompt_2026.918.1_amd64.deb
+Size: 4347752
+MD5sum: ee7cc660fa150abe3c1c2861bedd18f8
+SHA1: 007312c7147763bac48189f502c7f9954214d88d
+SHA256: 5d0b354fdf90add493e28dfe3db56490ad5c6fb5f2bdf0fa50a36bfdf41a5af2
+SHA512: ea0651fefd94445952415aeb5ba24322270bffec1939d1a42ce1bf3bc15e791e765dbbaef25b79576c75b3dc1c76d6b2715eca76f46c18ae60978f2009747d77
+Description: Cross-platform command-palette overlay for launching dev repositories
+ (none)
+
