@@ -66,6 +66,14 @@ cargo clippy --all-targets -- -D warnings      # required clean before merge
 npm run build && cd src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
+Every GitHub Action in `.github` is pinned to a full commit SHA with its
+version in a comment (`@<sha> # v7.0.1`), because the release job holds the
+updater signing key; Dependabot bumps both, including under `.github/actions`.
+Pin any new action the same way. `dtolnay/rust-toolchain` tracks a branch, so
+its pin is bumped by hand. `sync-dev.yml` fast-forwards `dev` to `main` after
+every push to `main`, so the PR's merge commit never leaves `dev` "out of
+date"; it leaves `dev` alone if it has newer commits.
+
 The Rust code is **hand-formatted, not `rustfmt`-shaped** — match the
 surrounding style rather than running `cargo fmt`.
 
