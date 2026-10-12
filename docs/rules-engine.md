@@ -167,6 +167,10 @@ or when the action has no program at all (a gated `terminal: true`).
   on `PATH` rather than `programs` keys.
 - `client: true` is reserved for the built-in `copy-path`; custom client
   actions aren't wired up.
+- `provision: true` doesn't run anything — it opens the **Set up version
+  control** form for the folder (the built-in `set-up-vcs` action). It only
+  appears for a folder with no version control yet, and only when some
+  [`provision`](#provision) entry is installed. Universal actions only.
 - `hotkey:` (e.g. `"Ctrl+C"`) is reserved for the four built-in universal quick
   actions (`terminal`, `filemanager`, `copy-path`, `run-command`) — it renders
   the action as a quick-action button above the list instead of a normal row,
@@ -255,11 +259,16 @@ Usable in `name`, `program`, `args`, and `run`:
 
 ### `provision`
 
-The version-control setups offered by the **New repository** screen
-(`Ctrl+Shift+N` on the repo list). That screen creates a folder under one of
-your roots, then runs the chosen entry's `run` commands inside it, in order —
-so the folder ends up with a marker (`.git`, `.hg`, …) and shows up in the list
-like any other repo.
+The version-control setups offered in two places:
+
+- the **New repository** screen (`Ctrl+Shift+N` on the repo list), which
+  creates a folder under one of your roots and then runs the chosen entry's
+  `run` commands inside it, in order;
+- **Set up version control…** in the action menu of a folder that has none,
+  which runs them in that existing folder.
+
+Either way the folder ends up with a marker (`.git`, `.hg`, …) and shows up in
+the list as a repo.
 
 ```yaml
 provision:
@@ -281,15 +290,21 @@ config), Mercurial, Breezy (`brz init`) and Darcs. Each only appears when it's
 installed.
 
 - `run` commands get no terminal and no input — each must finish on its own.
-  Output is captured; if a command fails, its error is shown on the form, and
-  the folder is deleted again (along with anything earlier commands put in
-  it). A command still running after 60 seconds is stopped and counts as
-  failed.
+  Output is captured; if a command fails, its error is shown on the form and
+  the setup is rolled back. A command still running after 60 seconds is
+  stopped and counts as failed.
+- Rolling back a **new** folder deletes it, along with anything earlier
+  commands put in it. Rolling back an **existing** folder removes only what
+  appeared at its top level during setup (a half-made `.git`, say);
+  everything that was there before stays. It doesn't undo a command that
+  *changed* a file already in the folder — none of the built-ins do that, but
+  keep it in mind for your own entries.
 - Every command's program is checked on `PATH` too, so `requires:` is only
   needed for tools a command relies on without running directly.
 - Every field must be filled in before Create works.
-- If the commands succeed but the folder has no marker dev-prompt knows, the
-  folder is kept and you're told to add its marker to `markers:`.
+- If the commands succeed but leave no version-control marker dev-prompt
+  knows, the folder is kept and you're told to add the marker to `markers:`
+  (with `kind: vcs`).
 
 Placeholders usable in `run`:
 

@@ -188,6 +188,11 @@ scan:
                               #   false = list every one; auto = drop it unless
                               #   it looks independent (real .git dir, not in the
                               #   ancestor's .gitmodules, not under vendor/ …)
+  top_level_folders: true     # list every folder directly inside a root, even
+                              #   with no marker (notes, documents, a project not
+                              #   under version control yet) — except one that
+                              #   only holds other repos. Deeper folders still
+                              #   need a marker.
 cache_ttl_secs: 900           # how long the discovered repo list stays fresh
                               #   before the next open triggers a background rescan
 dismiss: always               # when the overlay closes itself — Settings ▸
@@ -199,6 +204,14 @@ dismiss: always               # when the overlay closes itself — Settings ▸
 ```
 
 The discovered list is cached at `<OS cache dir>/dev-prompt/repos.json`.
+
+While dev-prompt runs, it **watches your roots** and rescans about a second
+after something changes the list: a repo created, deleted, renamed or moved
+in, a marker file added or removed, or a folder added directly in a root. Work
+inside a repo (commits, builds, editing files) doesn't trigger anything.
+`cache_ttl_secs` is the backstop for changes a watcher can't see — network
+shares that don't report changes, or on Linux, roots with more folders than the
+system's inotify watch limit allows.
 
 With `dismiss: manual`, launching an action from the menu leaves the overlay open
 on that repo (filter cleared) so you can fire several in a row; `Esc` steps back
@@ -215,6 +228,7 @@ regardless.
 
 - Settings changes apply the moment you hit **Save** — the hotkey re-registers
   live; `roots` / `scan` / `cache_ttl_secs` take effect on the next rescan
-  (`Ctrl+R` forces one).
+  (`Ctrl+R` forces one), and the folder watcher follows the new roots
+  straight away.
 - To reload `rules.yaml`, use **Settings ▸ Rules ▸ Reload config** — see
   [rules-engine.md](rules-engine.md#applying-changes).

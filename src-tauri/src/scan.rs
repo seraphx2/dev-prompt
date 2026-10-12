@@ -31,7 +31,7 @@ fn now_secs() -> u64 {
 
 /// Directory names we never descend into — they never *contain* a project root
 /// worth surfacing and they dominate walk time.
-const HARD_SKIP: &[&str] = &[
+pub const HARD_SKIP: &[&str] = &[
     "node_modules",
     ".git",
     "target",
@@ -194,6 +194,19 @@ pub fn scan(roots: &[PathBuf], cfg: &Config) -> Vec<Repo> {
         }
     }
 
+    // A folder sitting directly in a root counts even without a marker, unless
+    // it only groups other repos (`clients/acme/.git`) — those stay as they were.
+    if cfg.scan.top_level_folders {
+        let marked: Vec<PathBuf> = found.keys().cloned().collect();
+        for root in roots {
+            for dir in top_level_dirs(root) {
+                if !marked.iter().any(|p| p.starts_with(&dir)) {
+                    found.insert(dir, Vec::new());
+                }
+            }
+        }
+    }
+
     // Handle repos nested inside another repo per `scan.collapse_nested`.
     let all: Vec<PathBuf> = found.keys().cloned().collect();
     let mut repos: Vec<Repo> = Vec::new();
@@ -220,6 +233,44 @@ pub fn scan(roots: &[PathBuf], cfg: &Config) -> Vec<Repo> {
 
     repos.sort_by_key(|r| r.name.to_lowercase());
     repos
+}
+
+/// Folders directly inside `root` that `scan.top_level_folders` may list:
+/// real directories (not links), not hidden, not a build/dependency folder.
+pub fn top_level_dirs(root: &Path) -> Vec<PathBuf> {
+    let Ok(rd) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    rd.flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| e.path())
+        .filter(|p| !skips_top_level(p))
+        .collect()
+}
+
+/// Whether a folder directly in a root is one nobody means as a project:
+/// dot-folders, `HARD_SKIP` names, and — on Windows — hidden or system
+/// folders (`$RECYCLE.BIN`, `System Volume Information` when a root is a
+/// whole drive).
+pub fn skips_top_level(dir: &Path) -> bool {
+    let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+        return true;
+    };
+    if name.starts_with('.') || HARD_SKIP.iter().any(|s| name.eq_ignore_ascii_case(s)) {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
+        if dir
+            .symlink_metadata()
+            .is_ok_and(|m| m.file_attributes() & HIDDEN_OR_SYSTEM != 0)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn make_repo(path: &Path, hits: Vec<String>, vcs: &HashMap<String, String>, now: u64) -> Repo {
@@ -318,6 +369,42 @@ mod tests {
         assert!(!alpha.sentinels.iter().any(|s| s == ".git"));
         assert!(alpha.sentinels.iter().any(|s| s == "Cargo.toml"));
         assert_eq!(repos[1].vcs, None); // beta has only package.json
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn top_level_folders_are_listed_without_markers() {
+        let tmp = std::env::temp_dir().join(format!("dp-scan-top-{}", now_secs()));
+        let _ = fs::remove_dir_all(&tmp);
+        touch(&tmp.join("alpha/.git/HEAD"));
+        touch(&tmp.join("notes/todo.md")); // no marker at all
+        fs::create_dir_all(tmp.join("empty")).unwrap();
+        touch(&tmp.join("clients/acme/.git/HEAD")); // `clients` only groups repos
+        touch(&tmp.join("notes/deeper/plain.txt")); // below the top: needs a marker
+        fs::create_dir_all(tmp.join(".hidden")).unwrap();
+        fs::create_dir_all(tmp.join("node_modules")).unwrap();
+        touch(&tmp.join("loose-file.txt"));
+
+        let mut cfg = config::bundled_defaults();
+        let names = |cfg: &Config| {
+            let mut n: Vec<String> = scan(std::slice::from_ref(&tmp), cfg)
+                .into_iter()
+                .map(|r| r.name)
+                .collect();
+            n.sort();
+            n
+        };
+        assert_eq!(names(&cfg), vec!["acme", "alpha", "empty", "notes"]);
+        let notes = scan(std::slice::from_ref(&tmp), &cfg)
+            .into_iter()
+            .find(|r| r.name == "notes")
+            .unwrap();
+        assert_eq!(notes.vcs, None);
+        assert!(notes.sentinels.is_empty());
+
+        cfg.scan.top_level_folders = false;
+        assert_eq!(names(&cfg), vec!["acme", "alpha"]);
 
         let _ = fs::remove_dir_all(&tmp);
     }

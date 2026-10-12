@@ -6,7 +6,8 @@
 //! closed) and its output is captured, so a failure can be shown on the form.
 //! When a command fails, the folder this call created is removed again.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -115,6 +116,12 @@ pub fn check_template(p: &Provisioner) -> Result<(), String> {
         expand(arg, &vars).map_err(|e| format!("`{}`: {e}", p.id))?;
     }
     Ok(())
+}
+
+/// Whether any `provision:` entry is installed — gates the "Set up version
+/// control…" action. `which` is memoized, so this is cheap after the first call.
+pub fn any_available(cfg: &Config) -> bool {
+    cfg.provision.iter().any(is_available)
 }
 
 /// Offered only when the entry is well-formed and everything it runs is
@@ -280,6 +287,58 @@ pub fn create(
     values: &HashMap<String, String>,
 ) -> AppResult<Repo> {
     let dir = check_target(cfg, root, name).map_err(AppError::msg)?;
+    let p = installed(cfg, tool)?;
+    let commands = bind(p, root, &dir, name, values).map_err(AppError::msg)?;
+
+    std::fs::create_dir(&dir).map_err(|e| {
+        AppError::msg(format!("Couldn't create {}: {e}", dir.display()))
+    })?;
+
+    run_all(&commands, &dir, || match std::fs::remove_dir_all(&dir) {
+        Ok(()) => String::new(),
+        Err(re) => format!("\n\nThe folder couldn't be removed ({re}): {}", dir.display()),
+    })?;
+    versioned(cfg, p, &dir)
+}
+
+/// Run provisioner `tool` in an existing folder ("Set up version control…" on
+/// a folder that has none). If a command fails, only what the setup added to
+/// the top of the folder is removed — everything that was there before stays,
+/// though a command that *changed* an existing file isn't undone.
+pub fn init_existing(
+    cfg: &Config,
+    path: &str,
+    tool: &str,
+    values: &HashMap<String, String>,
+) -> AppResult<Repo> {
+    let dir = PathBuf::from(path);
+    if !dir.is_dir() {
+        return Err(AppError::msg(format!("{path} isn't a folder any more.")));
+    }
+    // The deepest root it sits in — `{{root}}` for recipes that need one.
+    let root = config::resolved_roots(cfg)
+        .into_iter()
+        .filter(|r| dir.starts_with(r) && dir != *r)
+        .max_by_key(|r| r.as_os_str().len())
+        .ok_or_else(|| AppError::msg(format!("{path} isn't inside any of your root folders.")))?;
+    if scan::probe(&dir, cfg).is_some_and(|r| r.vcs.is_some()) {
+        return Err(AppError::msg(format!("{path} already has version control.")));
+    }
+    let name = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let p = installed(cfg, tool)?;
+    let commands =
+        bind(p, &root.to_string_lossy(), &dir, &name, values).map_err(AppError::msg)?;
+
+    let before = entries(&dir).map_err(|e| AppError::msg(format!("Couldn't read {path}: {e}")))?;
+    run_all(&commands, &dir, || remove_added(&dir, &before))?;
+    versioned(cfg, p, &dir)
+}
+
+/// The `provision:` entry `tool`, if it's installed.
+fn installed<'a>(cfg: &'a Config, tool: &str) -> AppResult<&'a Provisioner> {
     let p = cfg
         .provision
         .iter()
@@ -288,31 +347,66 @@ pub fn create(
     if !is_available(p) {
         return Err(AppError::msg(format!("{} isn't available on this machine.", p.label)));
     }
+    Ok(p)
+}
 
-    let commands = bind(p, root, &dir, name, values).map_err(AppError::msg)?;
-
-    std::fs::create_dir(&dir).map_err(|e| {
-        AppError::msg(format!("Couldn't create {}: {e}", dir.display()))
-    })?;
-
-    for argv in &commands {
-        if let Err(e) = run_step(argv, &dir) {
-            let cleanup = match std::fs::remove_dir_all(&dir) {
-                Ok(()) => String::new(),
-                Err(re) => format!("\n\nThe folder couldn't be removed ({re}): {}", dir.display()),
-            };
+/// Run every command in `dir`, stopping at the first failure. `undo` runs
+/// then and returns any extra text for the error (why cleanup fell short).
+fn run_all(commands: &[Vec<String>], dir: &Path, undo: impl FnOnce() -> String) -> AppResult<()> {
+    for argv in commands {
+        if let Err(e) = run_step(argv, dir) {
+            let cleanup = undo();
             return Err(AppError::msg(format!("{e}{cleanup}")));
         }
     }
+    Ok(())
+}
 
-    scan::probe(&dir, cfg).ok_or_else(|| {
-        AppError::msg(format!(
-            "{} finished, but left nothing dev-prompt recognizes as a repository. \
-             The folder was kept: {}. Add the marker it creates to `markers:` in rules.yaml.",
+/// The repo the finished setup left, or — when it created no version-control
+/// marker dev-prompt knows — an error saying so. The folder is kept either way:
+/// the commands themselves succeeded.
+fn versioned(cfg: &Config, p: &Provisioner, dir: &Path) -> AppResult<Repo> {
+    match scan::probe(dir, cfg) {
+        Some(repo) if repo.vcs.is_some() => Ok(repo),
+        _ => Err(AppError::msg(format!(
+            "{} finished, but left no version-control marker dev-prompt recognizes. \
+             The folder was kept: {}. Add the marker it creates to `markers:` in \
+             rules.yaml, with `kind: vcs`.",
             p.label,
             dir.display()
-        ))
-    })
+        ))),
+    }
+}
+
+/// Names directly inside `dir`.
+fn entries(dir: &Path) -> std::io::Result<HashSet<OsString>> {
+    Ok(std::fs::read_dir(dir)?.flatten().map(|e| e.file_name()).collect())
+}
+
+/// Remove whatever appeared at the top of `dir` since `before` was taken.
+/// Returns extra error text naming anything that couldn't be removed.
+fn remove_added(dir: &Path, before: &HashSet<OsString>) -> String {
+    let added: Vec<PathBuf> = match entries(dir) {
+        Ok(now) => now.difference(before).map(|n| dir.join(n)).collect(),
+        Err(e) => return format!("\n\nCouldn't check {} for leftovers: {e}", dir.display()),
+    };
+    let stuck: Vec<String> = added
+        .iter()
+        .filter_map(|p| {
+            let removed = match p.symlink_metadata() {
+                Ok(m) if m.is_dir() => std::fs::remove_dir_all(p),
+                // A link (to a file or a folder) is removed itself, never followed.
+                Ok(_) => std::fs::remove_file(p).or_else(|_| std::fs::remove_dir(p)),
+                Err(_) => Ok(()), // already gone
+            };
+            removed.err().map(|e| format!("{} ({e})", p.display()))
+        })
+        .collect();
+    if stuck.is_empty() {
+        String::new()
+    } else {
+        format!("\n\nThese couldn't be removed:\n{}", stuck.join("\n"))
+    }
 }
 
 /// `p.run` with every placeholder filled in. Every field needs a value.
@@ -617,6 +711,54 @@ provision:
         let r = root.to_string_lossy().into_owned();
         assert!(create(&cfg, &r, "half", "t", &HashMap::new()).is_err());
         assert!(!root.join("half").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn init_existing_versions_a_folder_and_keeps_its_contents() {
+        if which("git").is_none() {
+            return;
+        }
+        let (mut cfg, root) = sandbox("existing", "git", &[]);
+        cfg.provision = config::bundled_defaults().provision;
+        let dir = root.join("notes");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("todo.md"), "keep me").unwrap();
+        let values = HashMap::from([("branch".to_string(), "main".to_string())]);
+
+        let repo = init_existing(&cfg, &dir.to_string_lossy(), "git", &values).unwrap();
+        assert_eq!(repo.vcs.as_deref(), Some("Git"));
+        assert_eq!(std::fs::read_to_string(dir.join("todo.md")).unwrap(), "keep me");
+
+        // A second time: it already has version control.
+        let err = init_existing(&cfg, &dir.to_string_lossy(), "git", &values).unwrap_err();
+        assert!(err.to_string().contains("already has version control"), "{err}");
+
+        // Outside every root: refused.
+        let outside = std::env::temp_dir();
+        assert!(init_existing(&cfg, &outside.to_string_lossy(), "git", &values).is_err());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn init_existing_failure_removes_only_what_setup_added() {
+        if which("git").is_none() {
+            return;
+        }
+        // `git init` succeeds (adds `.git`), then the second command fails.
+        let (mut cfg, root) = sandbox("existing-fail", "git", &["init"]);
+        cfg.provision[0].run.push(vec!["git".into(), "no-such-subcommand".into()]);
+        let dir = root.join("photos");
+        std::fs::create_dir_all(dir.join("2024")).unwrap();
+        std::fs::write(dir.join("readme.txt"), "mine").unwrap();
+        std::fs::write(dir.join("2024/a.jpg"), "jpg").unwrap();
+
+        assert!(init_existing(&cfg, &dir.to_string_lossy(), "t", &HashMap::new()).is_err());
+        assert!(!dir.join(".git").exists(), "the half-made .git should be gone");
+        assert_eq!(std::fs::read_to_string(dir.join("readme.txt")).unwrap(), "mine");
+        assert_eq!(std::fs::read_to_string(dir.join("2024/a.jpg")).unwrap(), "jpg");
+
         let _ = std::fs::remove_dir_all(&root);
     }
 

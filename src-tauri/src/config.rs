@@ -136,6 +136,9 @@ pub struct ScanConfig {
     pub max_depth: usize,
     /// What to do when a discovered repo sits inside another discovered repo.
     pub collapse_nested: CollapseNested,
+    /// List every folder directly inside a root, marker or not — except one
+    /// that only groups other repos. Deeper folders still need a marker.
+    pub top_level_folders: bool,
 }
 
 impl Default for ScanConfig {
@@ -143,6 +146,7 @@ impl Default for ScanConfig {
         ScanConfig {
             max_depth: 4,
             collapse_nested: CollapseNested::default(),
+            top_level_folders: true,
         }
     }
 }
@@ -359,6 +363,10 @@ pub struct RuleAction {
     pub prompt: bool,
     /// Handled in the frontend (e.g. copy path). No process spawned.
     pub client: bool,
+    /// Opens the "Set up version control" form for this folder instead of
+    /// running anything. Universal only; offered when the folder has no
+    /// version control yet and some `provision:` entry is installed.
+    pub provision: bool,
     /// Icon key for the menu row (see `src/lib/icons.ts` / Settings ▸ Icons).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
@@ -902,9 +910,20 @@ mod tests {
         let y = serde_yaml_ng::to_string(&ScanConfig {
             max_depth: 4,
             collapse_nested: CollapseNested::Auto,
+            top_level_folders: true,
         })
         .unwrap();
         assert!(y.contains("collapse_nested: auto"), "{y}");
+    }
+
+    #[test]
+    fn top_level_folders_defaults_on_and_survives_an_older_config() {
+        assert!(bundled_defaults().scan.top_level_folders);
+        // A `scan:` block written before the key existed keeps the default.
+        let s: ScanConfig = serde_yaml_ng::from_str("max_depth: 3").unwrap();
+        assert!(s.top_level_folders);
+        let s: ScanConfig = serde_yaml_ng::from_str("top_level_folders: false").unwrap();
+        assert!(!s.top_level_folders);
     }
 
     #[test]

@@ -33,6 +33,7 @@
   } from "./lib/ipc";
   import type { Action, AppEntry, MenuItem, Repo, ScoredRepo } from "./lib/types";
   import { fuzzyScore } from "./lib/fuzzy";
+  import { icons } from "./lib/icons";
   import { upd, pollUpdates } from "./lib/updateStore.svelte";
 
   const DAY_MS = 24 * 60 * 60 * 1000;
@@ -52,7 +53,9 @@
   // App-launcher scope: a leading ">" in the query switches the repo list for a
   // search over installed apps. Repos stay the default on every overlay open.
   let apps = $state<AppEntry[]>([]);
+  /** A message about the app list (scanning, an error); "" shows the count. */
   let appStatus = $state("");
+  let appCount = $state<number | null>(null);
   let appsScanning = $state(false);
   // Whether the "> apps" scope is usable at all — loaded on mount and
   // refreshed after a settings save. Unchecking "Index installed apps" turns
@@ -112,6 +115,9 @@
   let subGroup = $state<string | null>(null);
   /** `run:` template of the prompt action that opened the "Run command…" mode. */
   let promptTemplate = $state("");
+  /** Set while the new-repo screen is setting up an existing folder (opened
+   *  from the action menu) rather than creating a new one. */
+  let setupTarget = $state<ScoredRepo | null>(null);
 
   const SUB_PREFIX = "Detected · ";
 
@@ -125,8 +131,17 @@
       .sort((a, b) => a.key.localeCompare(b.key)),
   );
 
+  // "Set up version control…": the new-repo form, pointed at this folder.
+  function openSetup() {
+    if (!activeRepo) return;
+    setupTarget = activeRepo;
+    mode = "new-repo";
+  }
+
   function runQuickAction(action: Action) {
-    if (action.prompt) {
+    if (action.provision) {
+      openSetup();
+    } else if (action.prompt) {
       promptTemplate = action.hint ?? "";
       mode = "run-command";
     } else if (activeRepo) {
@@ -287,6 +302,8 @@
       subGroup = it.target;
       actionQuery = "";
       actionSel = 0;
+    } else if (it.action.provision) {
+      openSetup();
     } else if (it.action.prompt) {
       promptTemplate = it.action.hint ?? "";
       mode = "run-command";
@@ -351,7 +368,7 @@
           : mode === "new-repo"
             ? [
                 ["Tab", "next field"],
-                ["Enter", "create"],
+                ["Enter", setupTarget ? "set up" : "create"],
                 ["Esc", "back"],
               ]
           : [
@@ -362,17 +379,31 @@
   );
 
   let scanning = $state(false);
+  /** A message for the footer (scanning, an error, …); "" shows the counts. */
   let status = $state("");
+  /** Repos (under version control) and the other listed folders, for the
+   *  footer. The two don't overlap — together they're the whole list. */
+  let counts = $state<{ repos: number; folders: number } | null>(null);
   let search: SearchInput | undefined = $state();
 
   // The footer status line, per screen: the app count in ">" scope, both counts
-  // on the settings screen, the repo cache line otherwise.
+  // on the settings screen, the repo counts (or a message) otherwise.
   const footerStatus = $derived(
     mode === "repo-list" && appScope
       ? appStatus
       : mode === "settings"
         ? [status, appStatus].filter(Boolean).join(" · ")
         : status,
+  );
+  const showCounts = $derived(
+    !!counts && !status && !(mode === "repo-list" && appScope),
+  );
+  // The app count shows in the ">" scope and on the settings screen.
+  const showAppCount = $derived(
+    appsEnabled &&
+      appCount !== null &&
+      !appStatus &&
+      ((mode === "repo-list" && appScope) || mode === "settings"),
   );
 
   // Nothing indexed and no scan running — the user hasn't pointed dev-prompt at
@@ -394,10 +425,15 @@
     // (the query $effect, loadInitial, rescan, onReposUpdated) is covered.
     if (appScope) return;
     const seq = ++searchSeq;
+    // The list can change underneath the user (a background rescan after the
+    // watcher saw a repo come or go) — keep the highlight on the same repo.
+    const keep = results[selected]?.repo.path;
     const scored = await searchRepos(query);
     if (seq !== searchSeq) return; // a newer query already answered
     results = scored;
-    if (selected >= results.length) selected = Math.max(0, results.length - 1);
+    const same = keep ? results.findIndex((r) => r.repo.path === keep) : -1;
+    if (same >= 0) selected = same;
+    else if (selected >= results.length) selected = Math.max(0, results.length - 1);
   }
 
   // Re-run the fuzzy search whenever the query changes (repo scope only; the
@@ -408,11 +444,18 @@
     refresh();
   });
 
+  // Repositories are the entries under version control; folders are the rest
+  // (plain top-level folders and marker-only projects).
+  function setCounts(repos: Repo[]) {
+    const versioned = repos.filter((r) => r.vcs).length;
+    counts = { repos: versioned, folders: repos.length - versioned };
+    status = "";
+  }
+
   async function loadInitial() {
     const payload = await listRepos();
-    status = payload.ageSecs < 0
-      ? "No cache — press Ctrl+R to scan"
-      : `${payload.repos.length} repos`;
+    if (payload.ageSecs < 0) status = "No cache — press Ctrl+R to scan";
+    else setCounts(payload.repos);
     await refresh();
     if (payload.stale || payload.ageSecs < 0) void rescan();
   }
@@ -423,7 +466,7 @@
     status = "Scanning repos…";
     try {
       const payload = await rescanRepos();
-      status = `${payload.repos.length} repos`;
+      setCounts(payload.repos);
       await refresh();
     } catch (e) {
       status = `Scan failed: ${e}`;
@@ -436,7 +479,8 @@
     try {
       const p = await listApps();
       apps = p.apps;
-      appStatus = `${p.apps.length} apps`;
+      appCount = p.apps.length;
+      appStatus = "";
       if (p.stale || p.ageSecs < 0) void rescanAppsNow();
     } catch (e) {
       appStatus = `${e}`;
@@ -450,7 +494,8 @@
     try {
       const p = await rescanApps();
       apps = p.apps;
-      appStatus = `${p.apps.length} apps`;
+      appCount = p.apps.length;
+      appStatus = "";
     } catch (e) {
       appStatus = `App scan failed: ${e}`;
     } finally {
@@ -485,12 +530,25 @@
   function openCreated(repo: Repo) {
     // The user may have left the form (mouse back, hidden overlay) while it ran.
     if (mode !== "new-repo") return;
-    query = "";
+    if (!setupTarget) query = "";
+    setupTarget = null;
     void openActions({ repo, score: 0, matchIndices: [] });
+  }
+
+  // Back from the new-repo screen: to the action menu it was opened from, or
+  // to the list.
+  function newRepoBack() {
+    if (setupTarget) {
+      setupTarget = null;
+      mode = "action-menu";
+    } else {
+      backToList();
+    }
   }
 
   function backToList() {
     mode = "repo-list";
+    setupTarget = null;
     activeRepo = null;
     actions = [];
     actionQuery = "";
@@ -672,7 +730,7 @@
         else backToList();
       }
     } else if (mode === "new-repo") {
-      if (back) backToList();
+      if (back) newRepoBack();
     } else if (mode === "action-menu") {
       if (back) menuBack();
       else if (menuItems[actionSel]?.kind === "submenu")
@@ -713,9 +771,24 @@
         backToList();
       }),
     );
-    unlisteners.push(onReposUpdated(() => void refresh()));
     unlisteners.push(
-      onAppsUpdated(() => void listApps().then((p) => (apps = p.apps))),
+      onReposUpdated(() => {
+        void refresh();
+        // Background rescans (the folder watcher) don't go through `rescan()`,
+        // so keep the count in the footer honest here.
+        if (!scanning) {
+          void listRepos().then((p) => setCounts(p.repos));
+        }
+      }),
+    );
+    unlisteners.push(
+      onAppsUpdated(
+        () =>
+          void listApps().then((p) => {
+            apps = p.apps;
+            appCount = p.apps.length;
+          }),
+      ),
     );
     unlisteners.push(
       onRepoContextUpdated((path) => {
@@ -748,6 +821,18 @@
     };
   });
 </script>
+
+{#snippet glyph(key: string)}
+  <svg
+    class="h-3 w-3 shrink-0 text-white/50"
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    fill-rule="evenodd"
+    aria-hidden="true"
+  >
+    {#if icons[key].raw}{@html icons[key].raw}{:else}<path d={icons[key].d} />{/if}
+  </svg>
+{/snippet}
 
 <svelte:window
   onkeydown={onWindowKeydown}
@@ -826,7 +911,13 @@
       onback={() => (mode = "action-menu")}
     />
   {:else if mode === "new-repo"}
-    <NewRepo oncreated={openCreated} onback={backToList} />
+    <NewRepo
+      existing={setupTarget
+        ? { path: setupTarget.repo.path, name: setupTarget.repo.name }
+        : null}
+      oncreated={openCreated}
+      onback={newRepoBack}
+    />
   {:else if mode === "settings"}
     <Settings
       bind:this={settingsPanel}
@@ -878,6 +969,30 @@
       {/if}
       {#if mode === "settings" && upd.current}
         <span class="shrink-0 tabular-nums text-sky-400">v{upd.current}</span>
+      {/if}
+      {#if showCounts && counts}
+        <span class="inline-flex shrink-0 items-center gap-2.5 tabular-nums">
+          <span
+            class="inline-flex items-center gap-1"
+            title="Repositories — folders under version control"
+          >
+            {@render glyph("branch")}{counts.repos}
+          </span>
+          <span
+            class="inline-flex items-center gap-1"
+            title="Folders without version control"
+          >
+            {@render glyph("folder")}{counts.folders}
+          </span>
+        </span>
+      {/if}
+      {#if showAppCount}
+        <span
+          class="inline-flex shrink-0 items-center gap-1 tabular-nums"
+          title="Installed apps"
+        >
+          {@render glyph("app")}{appCount}
+        </span>
       {/if}
       <span class="truncate">{footerStatus}</span>
       {#if mode === "repo-list"}

@@ -34,6 +34,9 @@ nucleo-matcher = "0.3"
 dirs = "6"
 anyhow = "1"
 thiserror = "2"
+# Watches the roots so repos created or removed outside dev-prompt show up
+# without a rescan (watch.rs).
+notify = "8"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"

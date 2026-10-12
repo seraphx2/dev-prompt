@@ -146,7 +146,11 @@ installed-app list (`>` scope) is cached alongside it at
 
 1. **Discovery** — a directory is a "repo" if it contains any `markers` entry
    _or_ matches any rule's `match` glob (`.git`, `*.sln`, `package.json`,
-   `Cargo.toml`, `pom.xml`, `Gemfile`, …).
+   `Cargo.toml`, `pom.xml`, `Gemfile`, …). Every folder directly inside a root
+   is listed too, marker or not (Settings ▸ "List every folder directly inside
+   a root"), unless it only holds other repos. While the app runs, the roots
+   are watched, so repos created, deleted or moved in show up within a second
+   or so.
 2. **Inspection** — on selection, the repo tree is read for project manifests and
    their details (scripts, package manager, Python runner, compose files).
 3. **Rules** — `default_config.yaml` maps manifests to actions. `requires: [bin]`
@@ -224,6 +228,11 @@ whichever are installed — then opens its action menu. Pick a name, a root (if
 you have more than one) and a tool; `Tab` moves between fields, `Enter`
 creates, `Esc` goes back. If setup fails, the error is shown and the folder is
 removed again. No remotes are set up; do that from your terminal or editor.
+
+A folder that isn't under version control yet (notes, documents, a project you
+haven't set up) shows up without a badge, and its action menu offers **Set up
+version control…** — the same form, for that folder. If setup fails, only what
+it added is removed; nothing already in the folder is touched.
 Subversion isn't offered — see
 [docs/rules-engine.md](docs/rules-engine.md#subversion-in-new-repository) for
 why, and how to add it anyway.

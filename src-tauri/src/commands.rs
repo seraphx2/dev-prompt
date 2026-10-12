@@ -41,6 +41,12 @@ pub struct AppState {
     /// closes it (Esc, launching something, the hotkey, Alt+F4). Cleared on that
     /// first dismiss, after which `dismiss_on_blur` governs as usual.
     pub sticky_open: Mutex<bool>,
+    /// Watches the roots for repos appearing or going (see `watch.rs`); `None`
+    /// when no watcher could be started. Replaced on every config change.
+    pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
+    /// Held for the length of a rescan, so the watcher's and the user's never
+    /// overlap.
+    pub scan_gate: Mutex<()>,
 }
 
 impl AppState {
@@ -66,6 +72,8 @@ impl AppState {
             dismiss_on_blur: Mutex::new(dismiss_on_blur),
             first_run,
             sticky_open: Mutex::new(first_run),
+            watcher: Mutex::new(None),
+            scan_gate: Mutex::new(()),
         }
     }
 }
@@ -115,30 +123,44 @@ pub fn list_repos(state: State<'_, AppState>) -> RepoListPayload {
 }
 
 #[tauri::command]
-pub async fn rescan_repos(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> AppResult<RepoListPayload> {
-    // Re-read config.yaml so edits to `roots` / rules take effect without an app
-    // restart. A YAML syntax error surfaces here instead of being silently
-    // ignored, and stale program lookups are forgotten.
-    crate::rules::clear_program_cache();
-    let cfg = config::load()?;
-    *state.config.lock().unwrap() = cfg.clone();
-    let previous = state.repos.lock().unwrap().clone();
-
-    // Filesystem walk + per-repo inspection off the main thread. Doing the
-    // inspection here (while the walk's dir entries are still cache-warm) is far
-    // cheaper than a cold walk later when the action menu is opened.
-    let (fresh, contexts) = tauri::async_runtime::spawn_blocking(move || {
-        let roots = resolved_roots(&cfg);
-        let repos = scan::scan(&roots, &cfg);
-        let discovery = config::compile_globset(&config::discovery_globs(&cfg));
-        let contexts = inspect::inspect_all(repos.iter().map(|r| r.path.as_str()), &discovery);
-        (repos, contexts)
+pub async fn rescan_repos(app: AppHandle) -> AppResult<RepoListPayload> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = rescan_blocking(&app, true)?;
+        // `roots` / `scan` may have changed on disk.
+        crate::watch::sync(&app);
+        Ok(out)
     })
     .await
-    .map_err(|e| AppError::msg(format!("scan task failed: {e}")))?;
+    .map_err(|e| AppError::msg(format!("scan task failed: {e}")))?
+}
+
+/// Walk the roots and replace the repo list (and cache), then emit
+/// `repos:updated`. Blocking — run it off the UI thread. `reload` re-reads
+/// `config.yaml` / `rules.yaml` first, so edits to `roots` or rules apply
+/// without a restart and a YAML error surfaces instead of being ignored; the
+/// watcher's rescans skip that and use the config already loaded.
+pub fn rescan_blocking(app: &AppHandle, reload: bool) -> AppResult<RepoListPayload> {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let _gate = state.scan_gate.lock().unwrap();
+
+    let cfg = if reload {
+        crate::rules::clear_program_cache();
+        let cfg = config::load()?;
+        *state.config.lock().unwrap() = cfg.clone();
+        cfg
+    } else {
+        state.config.lock().unwrap().clone()
+    };
+    let previous = state.repos.lock().unwrap().clone();
+
+    // Doing the inspection here (while the walk's dir entries are still
+    // cache-warm) is far cheaper than a cold walk later when the action menu
+    // is opened.
+    let roots = resolved_roots(&cfg);
+    let fresh = scan::scan(&roots, &cfg);
+    let discovery = config::compile_globset(&config::discovery_globs(&cfg));
+    let contexts = inspect::inspect_all(fresh.iter().map(|r| r.path.as_str()), &discovery);
 
     let merged = cache::merge(&previous, fresh);
     cache::save(&merged, &contexts)?;
@@ -205,6 +227,37 @@ pub async fn create_repo(
     .await
     .map_err(|e| AppError::msg(format!("new repository task failed: {e}")))??;
 
+    put_repo(&app, &state, &repo, ctx);
+    Ok(repo)
+}
+
+/// Run a version-control setup in an existing folder that has none ("Set up
+/// version control…"). The repo's list entry is replaced with the versioned
+/// one. Emits `repos:updated`.
+#[tauri::command]
+pub async fn init_repo(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    tool: String,
+    values: HashMap<String, String>,
+) -> AppResult<Repo> {
+    let cfg = state.config.lock().unwrap().clone();
+    let (repo, ctx) = tauri::async_runtime::spawn_blocking(move || {
+        let repo = crate::provision::init_existing(&cfg, &path, &tool, &values)?;
+        let ctx = inspect_cold(&repo.path, &cfg);
+        Ok::<_, AppError>((repo, ctx))
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("version-control setup task failed: {e}")))??;
+
+    put_repo(&app, &state, &repo, ctx);
+    Ok(repo)
+}
+
+/// Add `repo` to the list (replacing an entry at the same path), store its
+/// inspection, save the cache and tell the frontend.
+fn put_repo(app: &AppHandle, state: &AppState, repo: &Repo, ctx: RepoContext) {
     {
         let mut repos = state.repos.lock().unwrap();
         repos.retain(|r| r.path != repo.path);
@@ -216,7 +269,6 @@ pub async fn create_repo(
     let contexts = state.contexts.lock().unwrap().clone();
     let _ = cache::save(&repos, &contexts);
     let _ = app.emit("repos:updated", ());
-    Ok(repo)
 }
 
 /// Patch each universal-tier action's `usage_score` in from `action_usage`.
@@ -463,10 +515,11 @@ pub async fn config_summary(
 /// Re-read `config.yaml` + `rules.yaml` from disk, forget memoized program
 /// lookups, and return the fresh merged config (does not re-scan repos).
 #[tauri::command]
-pub fn reload_config(state: State<'_, AppState>) -> AppResult<Config> {
+pub fn reload_config(app: AppHandle, state: State<'_, AppState>) -> AppResult<Config> {
     crate::rules::clear_program_cache();
     let cfg = config::load()?;
     *state.config.lock().unwrap() = cfg.clone();
+    crate::watch::sync_in_background(&app);
     Ok(cfg)
 }
 
@@ -481,6 +534,7 @@ pub struct ConfigPatch {
     pub dismiss: Option<config::DismissMode>,
     pub scan_max_depth: Option<usize>,
     pub collapse_nested: Option<config::CollapseNested>,
+    pub top_level_folders: Option<bool>,
     /// `Some("")` clears the pin / template / shell back to auto.
     pub terminal: Option<String>,
     pub terminal_template: Option<String>,
@@ -528,13 +582,19 @@ pub fn save_config(
     if let Some(d) = patch.dismiss {
         user.dismiss = Some(d);
     }
-    if patch.scan_max_depth.is_some() || patch.collapse_nested.is_some() {
+    if patch.scan_max_depth.is_some()
+        || patch.collapse_nested.is_some()
+        || patch.top_level_folders.is_some()
+    {
         let mut scan = user.scan.clone().unwrap_or_default();
         if let Some(depth) = patch.scan_max_depth {
             scan.max_depth = depth.max(1);
         }
         if let Some(cn) = patch.collapse_nested {
             scan.collapse_nested = cn;
+        }
+        if let Some(t) = patch.top_level_folders {
+            scan.top_level_folders = t;
         }
         user.scan = Some(scan);
     }
@@ -679,6 +739,7 @@ pub fn save_config(
     let merged = config::load()?;
     *state.config.lock().unwrap() = merged.clone();
     sync_taskbar_visibility(&app, &merged);
+    crate::watch::sync_in_background(&app);
     Ok(merged)
 }
 
@@ -809,6 +870,7 @@ pub async fn run_command(
             cwd,
             client_side: false,
             prompt: false,
+            provision: false,
         };
         launch::launch(&action, &repo)
     })

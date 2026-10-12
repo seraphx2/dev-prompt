@@ -37,6 +37,8 @@ export interface Action {
   clientSide: boolean;
   /** Opens the "Run command…" input instead of running; `hint` is the template. */
   prompt?: boolean;
+  /** Opens the "Set up version control" form for this folder instead of running. */
+  provision?: boolean;
 }
 
 /** A row in the action menu — a runnable action, or a drill-in to a
@@ -63,8 +65,13 @@ export interface AppConfig {
   /** Optional second hotkey that opens straight into the `>` app scope. */
   apps_hotkey?: string | null;
   roots: string[];
-  /** `collapse_nested`: `true` collapse, `false` list all, `"auto"` keep independent. */
-  scan: { max_depth: number; collapse_nested: boolean | "auto" };
+  /** `collapse_nested`: `true` collapse, `false` list all, `"auto"` keep independent.
+   *  `top_level_folders`: list every folder directly in a root, marker or not. */
+  scan: {
+    max_depth: number;
+    collapse_nested: boolean | "auto";
+    top_level_folders?: boolean;
+  };
   cache_ttl_secs: number;
   /** When the overlay closes itself. */
   dismiss?: "always" | "keep_on_blur" | "manual";

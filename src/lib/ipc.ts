@@ -103,6 +103,7 @@ export function saveConfig(patch: {
   dismiss?: "always" | "keep_on_blur" | "manual";
   scan_max_depth?: number;
   collapse_nested?: boolean | "auto";
+  top_level_folders?: boolean;
   /** "" clears the pin / template / shell back to auto. */
   terminal?: string;
   terminal_template?: string;
@@ -170,6 +171,18 @@ export function createRepo(
   values: Record<string, string>,
 ): Promise<Repo> {
   return invoke<Repo>("create_repo", { root, name, tool, values });
+}
+
+/**
+ * Set up version control in an existing folder that has none. Resolves to the
+ * versioned repo (already updated in the list); rejects with the tool's error.
+ */
+export function initRepo(
+  path: string,
+  tool: string,
+  values: Record<string, string>,
+): Promise<Repo> {
+  return invoke<Repo>("init_repo", { path, tool, values });
 }
 
 /** Cache-first list of installed apps for the `>` scope. */

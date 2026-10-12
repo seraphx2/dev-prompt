@@ -69,6 +69,7 @@
   let scanDepth = $state(4);
   // Bound to the <select>; serialises to `true` / `false` / `"auto"` on save.
   let collapseNested = $state<"true" | "false" | "auto">("true");
+  let topLevelFolders = $state(true);
   let dismiss = $state<"always" | "keep_on_blur" | "manual">("always");
   // "" = auto, "__custom__" = raw template, else a terminal id.
   let terminalSel = $state("");
@@ -270,7 +271,11 @@
     hotkey: string;
     apps_hotkey?: string | null;
     roots: string[];
-    scan: { max_depth: number; collapse_nested?: boolean | "auto" };
+    scan: {
+      max_depth: number;
+      collapse_nested?: boolean | "auto";
+      top_level_folders?: boolean;
+    };
     cache_ttl_secs: number;
     dismiss?: "always" | "keep_on_blur" | "manual";
     terminal?: string | null;
@@ -290,6 +295,7 @@
       c.scan?.collapse_nested === undefined
         ? "true"
         : (String(c.scan.collapse_nested) as "true" | "false" | "auto");
+    topLevelFolders = c.scan?.top_level_folders ?? true;
     dismiss = c.dismiss ?? "always";
     terminalTemplate = c.terminal_template ?? "";
     terminalSel = terminalTemplate ? "__custom__" : (c.terminal ?? "");
@@ -312,6 +318,7 @@
       ttlMin,
       scanDepth,
       collapseNested,
+      topLevelFolders,
       dismiss,
       terminalSel,
       terminalTemplate,
@@ -390,6 +397,7 @@
         cache_ttl_secs: Math.max(60, Math.round(ttlMin * 60)),
         scan_max_depth: Math.max(1, Math.round(scanDepth)),
         collapse_nested: collapseNested === "auto" ? "auto" : collapseNested === "true",
+        top_level_folders: topLevelFolders,
         dismiss,
         terminal: terminalSel === "__custom__" ? "" : terminalSel,
         terminal_template:
@@ -737,6 +745,22 @@
         <option value="auto">Auto — keep independent checkouts only</option>
       </select>
     </label>
+
+    <div class="space-y-1">
+      <label class="flex w-fit cursor-pointer items-center gap-2">
+        <input
+          type="checkbox"
+          bind:checked={topLevelFolders}
+          class="h-3.5 w-3.5 cursor-pointer accent-sky-500"
+        />
+        <span class="text-orange-400">List every folder directly inside a root</span>
+      </label>
+      <p class="pl-6 text-[11px] text-white/25">
+        Even with no project files or version control — notes, documents, a
+        project you haven't set up yet. Folders that only hold other repos are
+        left out, and deeper folders still need project files.
+      </p>
+    </div>
 
     <div class="flex flex-wrap gap-6">
       <label class="flex-1 min-w-[18rem] space-y-1.5">

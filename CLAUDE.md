@@ -84,8 +84,14 @@ surrounding style rather than running `cargo fmt`.
 1. **`scan.rs`** walks the configured root directories → `Vec<Repo>`.
    Discovery is driven by `markers` (`.git`, `*.sln`, `package.json`, …) and
    every rule's own `match` glob; nested repos collapse per `scan.collapse_nested`.
+   With `scan.top_level_folders`, every folder directly in a root is listed
+   too, marker or not, unless it only groups other repos.
 2. **`cache.rs`** persists that list to `repos.json` for instant startup; a
    stale cache triggers a background rescan rather than blocking the overlay.
+   **`watch.rs`** watches the roots while the app runs and rescans
+   (debounced) when a marker or a repo folder comes or goes — it drops
+   everything below `.git` / `node_modules` / … so git churn costs nothing.
+   On Linux it holds one inotify watch per folder down to the scan depth.
 3. On selecting a repo, **`inspect.rs`** walks its tree once into a
    `RepoContext` — root plus side-by-side / `packages/*`-style sub-projects,
    each with its manifest details (npm scripts + package manager, Cargo.toml,

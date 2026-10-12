@@ -26,6 +26,7 @@ mod provision;
 mod rules;
 mod scan;
 mod usage;
+mod watch;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -241,6 +242,9 @@ pub fn run() {
                 commands::sync_taskbar_visibility(app.handle(), &cfg);
             }
 
+            // Keep the repo list current while the app runs (watch.rs).
+            watch::sync_in_background(app.handle());
+
             // Register the configured global hotkey(s).
             let (hotkey, apps_hotkey, apps_enabled) = {
                 let state = app.state::<AppState>();
@@ -410,6 +414,7 @@ pub fn run() {
             commands::new_repo_options,
             commands::check_new_repo,
             commands::create_repo,
+            commands::init_repo,
             commands::list_apps,
             commands::rescan_apps,
             commands::run_app,

@@ -57,6 +57,10 @@ pub struct Action {
     /// template (may contain `{{input}}`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub prompt: bool,
+    /// Opens the "Set up version control" form for this folder rather than
+    /// spawning. See `RuleAction::provision`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub provision: bool,
 }
 
 // --- program resolution (process-global memo) -----------------------------
@@ -856,11 +860,33 @@ fn build_action(
             cwd: None,
             client_side: true,
             prompt: false,
+            provision: false,
         });
     }
 
     if ra.needs.iter().any(|k| resolver.resolve(k).is_none()) {
         return None;
+    }
+
+    if ra.provision {
+        // No process here — the frontend opens the "Set up version control"
+        // form. `universal_actions` has already checked it applies.
+        return Some(Action {
+            id,
+            label: expand(&ra.name, t),
+            hint: String::new(),
+            group: group.to_string(),
+            cluster: ra.cluster.clone(),
+            usage_score: 0.0,
+            icon: ra.icon.clone(),
+            hotkey: ra.hotkey.clone(),
+            program: String::new(),
+            args: Vec::new(),
+            cwd: None,
+            client_side: false,
+            prompt: false,
+            provision: true,
+        });
     }
 
     if ra.prompt {
@@ -880,6 +906,7 @@ fn build_action(
             cwd: Some(cwd.to_string()),
             client_side: false,
             prompt: true,
+            provision: false,
         });
     }
 
@@ -931,6 +958,7 @@ fn build_action(
         cwd: final_cwd,
         client_side: false,
         prompt: false,
+        provision: false,
     })
 }
 
@@ -969,6 +997,7 @@ fn provider_actions(
             cwd: c,
             client_side: false,
             prompt: false,
+            provision: false,
         }
     };
     let term = |id: String, label: String, argv: Vec<String>| term_in(id, label, argv, cwd);
@@ -1409,6 +1438,13 @@ fn universal_actions(config: &Config, repo: &Repo, resolver: &Resolver) -> Vec<A
         .actions
         .iter()
         .filter_map(|ra| {
+            // Only for a folder without version control, and only when there's
+            // a tool to set it up with. `which` is memoized, like `needs:`.
+            if ra.provision
+                && (repo.vcs.is_some() || !crate::provision::any_available(config))
+            {
+                return None;
+            }
             let id = ra.action_id();
             let mut ra = ra.clone();
             // A file manager that needs more than a bare path (Directory Opus,
@@ -1689,7 +1725,11 @@ pub fn summarize(config: &Config, rules_path: String) -> ConfigSummary {
         let id = a.action_id();
         UniversalStatus {
             available: !disabled
-                && (a.client || a.needs.iter().all(|k| resolver.resolve(k).is_some())),
+                && if a.provision {
+                    crate::provision::any_available(config)
+                } else {
+                    a.client || a.needs.iter().all(|k| resolver.resolve(k).is_some())
+                },
             label: a.name.clone(),
             icon: a.icon.clone(),
             id,
@@ -1799,6 +1839,7 @@ mod tests {
             name: "npm run…".into(),
             run: Some("npm run {{input}}".into()),
             prompt: true,
+            provision: false,
             terminal: true,
             ..Default::default()
         };

@@ -1,13 +1,16 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { checkNewRepo, createRepo, newRepoOptions } from "../ipc";
+  import { checkNewRepo, createRepo, initRepo, newRepoOptions } from "../ipc";
   import type { NewRepoOptions, ProvisionTool, Repo } from "../types";
   import { middleTruncate } from "../text";
 
   let {
+    /** Set up version control in this existing folder instead of creating one. */
+    existing = null,
     oncreated,
     onback,
   }: {
+    existing?: { path: string; name: string } | null;
     oncreated: (repo: Repo) => void;
     onback: () => void;
   } = $props();
@@ -53,16 +56,19 @@
   );
   const canCreate = $derived(
     !busy &&
-      !!root &&
       !!tool &&
-      name.length > 0 &&
-      nameProblem === null &&
-      !missingField,
+      !missingField &&
+      (existing !== null ||
+        (!!root && name.length > 0 && nameProblem === null)),
   );
 
   const sep = $derived(root.includes("\\") ? "\\" : "/");
   const target = $derived(
-    root && name ? `${root.replace(/[\\/]+$/, "")}${sep}${name}` : "",
+    existing
+      ? existing.path
+      : root && name
+        ? `${root.replace(/[\\/]+$/, "")}${sep}${name}`
+        : "",
   );
 
   function quote(arg: string): string {
@@ -105,7 +111,16 @@
       const o = await newRepoOptions();
       const wantRoot = recall(LAST_ROOT);
       const wantTool = recall(LAST_TOOL);
-      root = o.roots.find((r) => r === wantRoot) ?? o.roots[0] ?? "";
+      if (existing) {
+        // Fixed: the folder's own name, and the deepest root it sits in.
+        name = existing.name;
+        root =
+          o.roots
+            .filter((r) => isInside(existing!.path, r))
+            .sort((a, b) => b.length - a.length)[0] ?? "";
+      } else {
+        root = o.roots.find((r) => r === wantRoot) ?? o.roots[0] ?? "";
+      }
       toolId = o.tools.find((t) => t.id === wantTool)?.id ?? o.tools[0]?.id ?? "";
       values = Object.fromEntries(
         o.tools.map((t) => [
@@ -118,8 +133,22 @@
       loadError = `${e}`;
     }
     await tick();
-    nameInput?.focus();
+    if (existing) focusFirst();
+    else nameInput?.focus();
   });
+
+  function isInside(path: string, root: string): boolean {
+    const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    return norm(path).startsWith(norm(root) + "/");
+  }
+
+  let form: HTMLDivElement | undefined = $state();
+  // With nothing to type, start on the tool choice (or Create).
+  function focusFirst() {
+    form
+      ?.querySelector<HTMLElement>('[aria-checked="true"], input, button:not(:disabled)')
+      ?.focus();
+  }
 
   // As-you-type check of the name against the chosen location. Sequenced so a
   // slow answer for an older name can't overwrite a newer one.
@@ -128,7 +157,7 @@
     const r = root;
     const n = name;
     const seq = ++checkSeq;
-    if (!r || !n) {
+    if (existing || !r || !n) {
       nameProblem = null;
       return;
     }
@@ -151,15 +180,18 @@
     busy = true;
     createError = "";
     try {
-      const repo = await createRepo(root, name, tool.id, { ...toolValues });
-      remember(LAST_ROOT, root);
+      const repo = existing
+        ? await initRepo(existing.path, tool.id, { ...toolValues })
+        : await createRepo(root, name, tool.id, { ...toolValues });
+      if (!existing) remember(LAST_ROOT, root);
       remember(LAST_TOOL, tool.id);
       oncreated(repo);
     } catch (e) {
       createError = `${e}`;
       busy = false;
       await tick();
-      nameInput?.focus();
+      if (existing) focusFirst();
+      else nameInput?.focus();
     }
   }
 
@@ -212,66 +244,89 @@
   >
     ←
   </button>
-  <span class="text-[13px] font-medium text-white/80">New repository</span>
+  {#if existing}
+    <span class="shrink-0 truncate text-[13px] font-medium text-white/80"
+      >{existing.name}</span
+    >
+    <span class="shrink-0 text-white/15">/</span>
+    <span class="text-[13px] text-white/60">Set up version control</span>
+  {:else}
+    <span class="text-[13px] font-medium text-white/80">New repository</span>
+  {/if}
 </div>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4 text-[13px]" onkeydown={onKey}>
+<div
+  bind:this={form}
+  class="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4 text-[13px]"
+  onkeydown={onKey}
+>
   {#if loadError}
     <p class="text-red-300">Couldn't load the options: {loadError}</p>
   {:else if !options}
     <p class="text-white/40">Checking which version-control tools are installed…</p>
   {:else}
     <div class="space-y-4">
-      <label class="block space-y-1.5">
-        <span class="text-orange-400">Name</span>
-        <input
-          bind:this={nameInput}
-          bind:value={name}
-          disabled={busy}
-          spellcheck="false"
-          autocomplete="off"
-          placeholder="my-new-thing"
-          class="w-full {field}"
-        />
-        {#if nameProblem && (name || attempted)}
-          <span class="block text-[12px] text-red-300">{nameProblem}</span>
-        {:else if attempted && !name}
-          <span class="block text-[12px] text-red-300">Enter a folder name.</span>
-        {/if}
-      </label>
-
-      <div class="space-y-1.5">
-        <span class="block text-orange-400">Location</span>
-        {#if options.roots.length === 0}
-          <p class="text-white/45">
-            No root folders are set up yet. Add one in
-            <span class="text-orange-400">Settings</span> first.
+      {#if existing}
+        <div class="space-y-1.5">
+          <span class="block text-orange-400">Folder</span>
+          <p class="font-mono text-[12px] text-white/70">{existing.path}</p>
+          <p class="text-[12px] text-white/40">
+            Nothing already in it is changed. If setup fails, only what it
+            added is removed.
           </p>
-        {:else if options.roots.length === 1}
-          <p class="font-mono text-[12px] text-white/70">{options.roots[0]}</p>
-        {:else}
-          <div
-            role="radiogroup"
-            aria-label="Location"
-            tabindex="-1"
-            class="flex flex-wrap gap-1.5"
-            onkeydown={(e) => onGroupKey(e, options!.roots, root, (v) => (root = v))}
-          >
-            {#each options.roots as r (r)}
-              <button
-                type="button"
-                role="radio"
-                aria-checked={r === root}
-                tabindex={r === root ? 0 : -1}
-                disabled={busy}
-                onclick={() => (root = r)}
-                class="{chip} font-mono {r === root ? chipOn : chipOff}">{r}</button
-              >
-            {/each}
-          </div>
-        {/if}
-      </div>
+        </div>
+      {:else}
+        <label class="block space-y-1.5">
+          <span class="text-orange-400">Name</span>
+          <input
+            bind:this={nameInput}
+            bind:value={name}
+            disabled={busy}
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="my-new-thing"
+            class="w-full {field}"
+          />
+          {#if nameProblem && (name || attempted)}
+            <span class="block text-[12px] text-red-300">{nameProblem}</span>
+          {:else if attempted && !name}
+            <span class="block text-[12px] text-red-300">Enter a folder name.</span>
+          {/if}
+        </label>
+
+        <div class="space-y-1.5">
+          <span class="block text-orange-400">Location</span>
+          {#if options.roots.length === 0}
+            <p class="text-white/45">
+              No root folders are set up yet. Add one in
+              <span class="text-orange-400">Settings</span> first.
+            </p>
+          {:else if options.roots.length === 1}
+            <p class="font-mono text-[12px] text-white/70">{options.roots[0]}</p>
+          {:else}
+            <div
+              role="radiogroup"
+              aria-label="Location"
+              tabindex="-1"
+              class="flex flex-wrap gap-1.5"
+              onkeydown={(e) => onGroupKey(e, options!.roots, root, (v) => (root = v))}
+            >
+              {#each options.roots as r (r)}
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={r === root}
+                  tabindex={r === root ? 0 : -1}
+                  disabled={busy}
+                  onclick={() => (root = r)}
+                  class="{chip} font-mono {r === root ? chipOn : chipOff}">{r}</button
+                >
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {/if}
 
       <div class="space-y-1.5">
         <span class="block text-orange-400">Version control</span>
@@ -330,7 +385,7 @@
         </div>
       {/if}
 
-      {#if tool && root}
+      {#if tool && (root || existing)}
         <div class="space-y-0.5 font-mono text-[11px] text-white/35">
           <div class="truncate" title={target}>
             → {target ? middleTruncate(target, 96) : "pick a name"}
@@ -354,7 +409,9 @@
         onclick={() => void submit()}
         class="rounded bg-sky-500/80 px-3.5 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-40"
       >
-        {busy ? "Creating…" : "Create"}
+        {#if existing}{busy ? "Setting up…" : "Set up"}{:else}{busy
+            ? "Creating…"
+            : "Create"}{/if}
       </button>
     </div>
   {/if}
