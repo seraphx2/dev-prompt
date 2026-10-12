@@ -102,28 +102,59 @@ const MANUAL = {
 };
 
 // Neutral filled glyphs (24x24) for things without — or not allowed — a logo.
+// Every one carries a touch of the app's sky accent (#7dd3fc, the "selected"
+// colour) — always on a part that sits on the background rather than on top
+// of the main fill, so it reads at row size. Brand logos never get it.
+const SKY = "#7dd3fc";
 const GENERIC = {
-  // Three muted squares + one tilted, sky-tinted square (the app's "selected"
-  // accent) so the fallback reads as "an app" and catches the eye.
+  // Three muted squares + one tilted, sky-tinted square so the fallback reads
+  // as "an app" and catches the eye.
   app: {
     raw:
       '<rect x="3" y="3" width="8" height="8" rx="1"/>' +
       '<rect x="3" y="13" width="8" height="8" rx="1"/>' +
       '<rect x="13" y="13" width="8" height="8" rx="1"/>' +
-      '<path fill="#7dd3fc" d="M14.43 1.96 22.04 4.43 19.57 12.04 11.96 9.57Z"/>',
+      `<path fill="${SKY}" d="M14.43 1.96 22.04 4.43 19.57 12.04 11.96 9.57Z"/>`,
   },
-  run: { d: "M8 5v14l11-7z" },
+  // A play arrow with two sky speed lines trailing it.
+  run: {
+    raw:
+      '<path d="M10 5v14l11-7z"/>' +
+      `<path d="M3 9h4M3 15h4" fill="none" stroke="${SKY}" stroke-width="2" stroke-linecap="round"/>`,
+  },
+  // A console window with a prompt chevron; the cursor is sky, set in a slot
+  // cut out of the window so it doesn't sit on the light fill.
   terminal: {
-    d: "M3 4h18a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm3.7 4.3L10 11.6l-3.3 3.3 1.4 1.4L12.8 12 8.1 7.3 6.7 8.3zM13 15h5v2h-5z",
+    raw:
+      '<path d="M3 4h18a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm3.7 4.3L10 11.6l-3.3 3.3 1.4 1.4L12.8 12 8.1 7.3 6.7 8.3zM12 14h7v4h-7z"/>' +
+      `<path fill="${SKY}" d="M13 15h5v2h-5z"/>`,
   },
+  // A folder whose back panel and tab are sky, the front light.
   folder: {
-    d: "M4 4h6l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z",
+    raw:
+      `<path fill="${SKY}" d="M4 4h6l2 2h8a2 2 0 0 1 2 2v.5H2V6a2 2 0 0 1 2-2z"/>` +
+      '<path d="M2 10h20v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/>',
   },
+  // Two sheets: the copy behind is sky, the original in front light.
   copy: {
-    d: "M9 3h9a2 2 0 0 1 2 2v9h-2V5H9V3zM5 7h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z",
+    raw:
+      `<path fill="${SKY}" d="M9 3h9a2 2 0 0 1 2 2v9h-2V5H9V3z"/>` +
+      '<path d="M5 7h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/>',
   },
+  // Angle brackets around a sky slash: </>.
   code: {
-    d: "M9.4 16.6 4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0L19.2 12l-4.6-4.6L16 6l6 6-6 6-1.4-1.4z",
+    raw:
+      '<path d="M9.4 16.6 4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0L19.2 12l-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/>' +
+      `<path d="M13.4 6.5 10.6 17.5" fill="none" stroke="${SKY}" stroke-width="2" stroke-linecap="round"/>`,
+  },
+  // Version control in general, not any one tool: a trunk with a branch
+  // forking off it. Stroked lines between solid dots; the branch is sky.
+  branch: {
+    raw:
+      '<path d="M7 7v10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>' +
+      '<circle cx="7" cy="5" r="2.6"/><circle cx="7" cy="19" r="2.6"/>' +
+      `<path d="M7 15c0-4 3-6.5 7.6-7.2" fill="none" stroke="${SKY}" stroke-width="2" stroke-linecap="round"/>` +
+      `<circle cx="17" cy="7.5" r="2.6" fill="${SKY}"/>`,
   },
 };
 
