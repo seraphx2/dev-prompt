@@ -22,6 +22,7 @@ mod index;
 mod inspect;
 mod launch;
 mod maven;
+mod provision;
 mod rules;
 mod scan;
 mod usage;
@@ -406,6 +407,9 @@ pub fn run() {
             commands::list_shells,
             commands::default_shell,
             commands::run_command,
+            commands::new_repo_options,
+            commands::check_new_repo,
+            commands::create_repo,
             commands::list_apps,
             commands::rescan_apps,
             commands::run_app,

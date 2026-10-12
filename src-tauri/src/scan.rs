@@ -215,33 +215,50 @@ pub fn scan(roots: &[PathBuf], cfg: &Config) -> Vec<Repo> {
                 continue;
             }
         }
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.to_string_lossy().into_owned());
-
-        // Split the hits: the first VCS marker becomes the badge, the rest are
-        // plain sentinel chips.
-        let mut repo_vcs = None;
-        let mut sentinels = Vec::new();
-        for hit in found.get(path).cloned().unwrap_or_default() {
-            match vcs.get(&hit) {
-                Some(label) if repo_vcs.is_none() => repo_vcs = Some(label.clone()),
-                _ => sentinels.push(hit),
-            }
-        }
-
-        repos.push(Repo {
-            name,
-            path: path.to_string_lossy().into_owned(),
-            vcs: repo_vcs,
-            sentinels,
-            last_seen: now,
-        });
+        repos.push(make_repo(path, found.get(path).cloned().unwrap_or_default(), &vcs, now));
     }
 
     repos.sort_by_key(|r| r.name.to_lowercase());
     repos
+}
+
+fn make_repo(path: &Path, hits: Vec<String>, vcs: &HashMap<String, String>, now: u64) -> Repo {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned());
+
+    // Split the hits: the first VCS marker becomes the badge, the rest are
+    // plain sentinel chips.
+    let mut repo_vcs = None;
+    let mut sentinels = Vec::new();
+    for hit in hits {
+        match vcs.get(&hit) {
+            Some(label) if repo_vcs.is_none() => repo_vcs = Some(label.clone()),
+            _ => sentinels.push(hit),
+        }
+    }
+
+    Repo {
+        name,
+        path: path.to_string_lossy().into_owned(),
+        vcs: repo_vcs,
+        sentinels,
+        last_seen: now,
+    }
+}
+
+/// Classify one directory the way [`scan`] would, without walking anything
+/// else — `None` when no marker or rule glob matches it. Lets a repo made by
+/// the "New repository" screen join the list without a full rescan.
+pub fn probe(dir: &Path, cfg: &Config) -> Option<Repo> {
+    let (set, globs) = build_globset(&config::discovery_globs(cfg));
+    let hits = dir_hits(dir, &set, &globs);
+    if hits.is_empty() {
+        return None;
+    }
+    let vcs: HashMap<String, String> = config::vcs_markers(cfg).into_iter().collect();
+    Some(make_repo(dir, hits, &vcs, now_secs()))
 }
 
 #[cfg(test)]
@@ -301,6 +318,23 @@ mod tests {
         assert!(!alpha.sentinels.iter().any(|s| s == ".git"));
         assert!(alpha.sentinels.iter().any(|s| s == "Cargo.toml"));
         assert_eq!(repos[1].vcs, None); // beta has only package.json
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn probe_classifies_a_single_directory() {
+        let tmp = std::env::temp_dir().join(format!("dp-probe-{}", now_secs()));
+        let _ = fs::remove_dir_all(&tmp);
+        touch(&tmp.join("fresh/.hg/requires"));
+        fs::create_dir_all(tmp.join("bare")).unwrap();
+
+        let cfg = config::bundled_defaults();
+        let repo = probe(&tmp.join("fresh"), &cfg).expect("a .hg folder is a repo");
+        assert_eq!(repo.name, "fresh");
+        assert_eq!(repo.vcs.as_deref(), Some("Mercurial"));
+        assert!(repo.sentinels.is_empty());
+        assert!(probe(&tmp.join("bare"), &cfg).is_none());
 
         let _ = fs::remove_dir_all(&tmp);
     }

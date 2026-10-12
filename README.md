@@ -213,9 +213,20 @@ via your desktop's session settings.)
 | `Up` / `Down`        | move selection                                        |
 | `Enter`              | open the action menu for the selected repo            |
 | `Ctrl+R`             | force a rescan                                        |
+| `Ctrl+Shift+N`       | create a new repository (see below)                   |
 | `Delete`             | clear the query                                       |
 | `Ctrl+,`             | open Settings                                         |
 | `Esc` / click away   | hide the overlay                                      |
+
+**New repository** (`Ctrl+Shift+N`) creates a folder in one of your roots and
+sets up version control in it — Git, Jujutsu, Mercurial, Breezy or Darcs,
+whichever are installed — then opens its action menu. Pick a name, a root (if
+you have more than one) and a tool; `Tab` moves between fields, `Enter`
+creates, `Esc` goes back. If setup fails, the error is shown and the folder is
+removed again. No remotes are set up; do that from your terminal or editor.
+Subversion isn't offered — see
+[docs/rules-engine.md](docs/rules-engine.md#subversion-in-new-repository) for
+why, and how to add it anyway.
 
 **Action menu**
 

@@ -489,3 +489,29 @@ universal:
     - { id: gitkraken, name: "Open in GitKraken", program: "{{gitkraken}}", args: ["-p", "{{path}}"], needs: [gitkraken], icon: gitkraken, cluster: git }
     - { id: sublime-merge, name: "Open in Sublime Merge", program: "{{smerge}}", args: ["{{path}}"], needs: [smerge], icon: git, cluster: git }
     - { id: lazygit, name: "lazygit", run: "lazygit", terminal: true, needs: [lazygit], icon: git, cluster: git }
+
+# --- new repository (Ctrl+Shift+N on the repo list) ---------------------------
+# Version-control setups the "New repository" screen offers. It creates the
+# folder under the chosen root, then runs `run` inside it, in order. Each entry
+# is offered only when every `requires:` binary and every command's program is
+# on PATH. A field is a form input; its value is {{<id>}} in `run`, alongside
+# {{dir}} (the new folder), {{name}} (its name), {{root}} (the chosen root) and
+# {{root_url}} (that root as a file:// URL).
+# Only tools that create a repository inside the folder itself belong here —
+# Subversion and Fossil keep it elsewhere; see docs/rules-engine.md.
+provision:
+  - id: git
+    label: Git
+    requires: [git]
+    fields:
+      - id: branch
+        label: Initial branch
+        default: main
+        default_from: [git, config, --get, init.defaultBranch]
+    run:
+      - [git, init, "--initial-branch={{branch}}"]
+  # Colocated with Git or not per the user's own `git.colocate` jj setting.
+  - { id: jj, label: Jujutsu, requires: [jj], run: [[jj, git, init]] }
+  - { id: hg, label: Mercurial, requires: [hg], run: [[hg, init]] }
+  - { id: brz, label: Breezy (Bazaar), requires: [brz], run: [[brz, init]] }
+  - { id: darcs, label: Darcs, requires: [darcs], run: [[darcs, init]] }

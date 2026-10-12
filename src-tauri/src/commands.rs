@@ -162,6 +162,63 @@ pub fn search_repos(
     index::search(&query, &repos, limit.unwrap_or(200))
 }
 
+// --- new repository (Ctrl+Shift+N) -----------------------------------------
+
+/// Roots and installed version-control setups for the "New repository" form.
+/// `async` + `spawn_blocking`: the PATH checks and each field's `default_from`
+/// command (e.g. `git config --get init.defaultBranch`) spawn processes.
+#[tauri::command]
+pub async fn new_repo_options(
+    state: State<'_, AppState>,
+) -> AppResult<crate::provision::NewRepoOptions> {
+    let cfg = state.config.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || crate::provision::options(&cfg))
+        .await
+        .map_err(|e| AppError::msg(format!("new repository task failed: {e}")))
+}
+
+/// Why `name` can't be created under `root` (`None` = it can). Called as the
+/// user types, so it only reads the disk.
+#[tauri::command]
+pub fn check_new_repo(state: State<'_, AppState>, root: String, name: String) -> Option<String> {
+    let cfg = state.config.lock().unwrap();
+    crate::provision::check_target(&cfg, &root, &name).err()
+}
+
+/// Create `<root>/<name>`, run the chosen setup in it, and add the result to
+/// the repo list (and cache) without a rescan. Emits `repos:updated`.
+#[tauri::command]
+pub async fn create_repo(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    root: String,
+    name: String,
+    tool: String,
+    values: HashMap<String, String>,
+) -> AppResult<Repo> {
+    let cfg = state.config.lock().unwrap().clone();
+    let (repo, ctx) = tauri::async_runtime::spawn_blocking(move || {
+        let repo = crate::provision::create(&cfg, &root, &name, &tool, &values)?;
+        let ctx = inspect_cold(&repo.path, &cfg);
+        Ok::<_, AppError>((repo, ctx))
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("new repository task failed: {e}")))??;
+
+    {
+        let mut repos = state.repos.lock().unwrap();
+        repos.retain(|r| r.path != repo.path);
+        repos.push(repo.clone());
+        repos.sort_by_key(|r| r.name.to_lowercase());
+    }
+    state.contexts.lock().unwrap().insert(repo.path.clone(), ctx);
+    let repos = state.repos.lock().unwrap().clone();
+    let contexts = state.contexts.lock().unwrap().clone();
+    let _ = cache::save(&repos, &contexts);
+    let _ = app.emit("repos:updated", ());
+    Ok(repo)
+}
+
 /// Patch each universal-tier action's `usage_score` in from `action_usage`.
 /// Rule evaluation itself stays usage-agnostic — this is the one place the
 /// per-repo history joins in, same shape as `apps_with_usage` for the app

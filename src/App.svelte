@@ -5,6 +5,7 @@
   import AppList from "./lib/components/AppList.svelte";
   import ActionMenu from "./lib/components/ActionMenu.svelte";
   import RunCommand from "./lib/components/RunCommand.svelte";
+  import NewRepo from "./lib/components/NewRepo.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import {
     buildActions,
@@ -30,13 +31,13 @@
     searchRepos,
     setDismissOnBlur,
   } from "./lib/ipc";
-  import type { Action, AppEntry, MenuItem, ScoredRepo } from "./lib/types";
+  import type { Action, AppEntry, MenuItem, Repo, ScoredRepo } from "./lib/types";
   import { fuzzyScore } from "./lib/fuzzy";
   import { upd, pollUpdates } from "./lib/updateStore.svelte";
 
   const DAY_MS = 24 * 60 * 60 * 1000;
 
-  type Mode = "repo-list" | "action-menu" | "settings" | "run-command";
+  type Mode = "repo-list" | "action-menu" | "settings" | "run-command" | "new-repo";
 
   let settingsPanel: Settings | undefined = $state();
   // Whether Settings has unsaved edits — Esc and the mouse back-button call
@@ -309,13 +310,15 @@
   let dismissMode = $state<"always" | "keep_on_blur" | "manual">("always");
   getConfig().then((c) => (dismissMode = c.dismiss ?? "always"));
 
-  // Blur only dismisses in "always" mode. Settings + the run-command input are
-  // forms, so a click-away mustn't nuke them regardless.
+  // Blur only dismisses in "always" mode. Settings, the run-command input and
+  // the new-repository form are forms, so a click-away mustn't nuke them
+  // regardless.
   $effect(() => {
     void setDismissOnBlur(
       dismissMode === "always" &&
         mode !== "settings" &&
-        mode !== "run-command",
+        mode !== "run-command" &&
+        mode !== "new-repo",
     );
   });
 
@@ -345,6 +348,12 @@
               ["Enter", "run"],
               ["Esc", "back"],
             ]
+          : mode === "new-repo"
+            ? [
+                ["Tab", "next field"],
+                ["Enter", "create"],
+                ["Esc", "back"],
+              ]
           : [
               ["Up/Down", "move"],
               ["Enter", "run"],
@@ -471,6 +480,15 @@
     void refreshRepoContext(entry.repo.path);
   }
 
+  // A repo the "New repository" screen just made — already in the list and
+  // cache backend-side, so go straight to its action menu.
+  function openCreated(repo: Repo) {
+    // The user may have left the form (mouse back, hidden overlay) while it ran.
+    if (mode !== "new-repo") return;
+    query = "";
+    void openActions({ repo, score: 0, matchIndices: [] });
+  }
+
   function backToList() {
     mode = "repo-list";
     activeRepo = null;
@@ -569,6 +587,16 @@
       if (appScope) rescanAppsNow();
       else rescan();
     } else if (
+      !appScope &&
+      e.key.toLowerCase() === "n" &&
+      e.ctrlKey &&
+      e.shiftKey &&
+      !e.altKey
+    ) {
+      // Same keys as Explorer's "New folder". In-app only — never a global hotkey.
+      e.preventDefault();
+      mode = "new-repo";
+    } else if (
       (e.key === "," || e.code === "Comma") &&
       (e.ctrlKey || e.metaKey)
     ) {
@@ -619,8 +647,8 @@
   function onWindowKeydown(e: KeyboardEvent) {
     if (mode === "action-menu") {
       onMenuKeydown(e);
-    } else if (mode === "run-command") {
-      // The RunCommand component owns its keys (Enter / Esc).
+    } else if (mode === "run-command" || mode === "new-repo") {
+      // These components own their keys (Enter / Esc).
     } else if (mode === "settings") {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -643,6 +671,8 @@
         if (settingsDirty) settingsPanel?.nudge();
         else backToList();
       }
+    } else if (mode === "new-repo") {
+      if (back) backToList();
     } else if (mode === "action-menu") {
       if (back) menuBack();
       else if (menuItems[actionSel]?.kind === "submenu")
@@ -795,6 +825,8 @@
         activeRepo && runCommandAndHide(activeRepo.repo.path, cmd, sh)}
       onback={() => (mode = "action-menu")}
     />
+  {:else if mode === "new-repo"}
+    <NewRepo oncreated={openCreated} onback={backToList} />
   {:else if mode === "settings"}
     <Settings
       bind:this={settingsPanel}
@@ -852,6 +884,11 @@
         <span class="inline-flex shrink-0 items-center gap-1"
           ><kbd>Ctrl+R</kbd>rescan</span
         >
+        {#if !appScope}
+          <span class="inline-flex shrink-0 items-center gap-1"
+            ><kbd>Ctrl+Shift+N</kbd>new repo</span
+          >
+        {/if}
       {/if}
     </span>
     <span class="flex shrink-0 items-center gap-3.5">

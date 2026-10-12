@@ -9,6 +9,8 @@ import type {
   AppListPayload,
   ConfigSummary,
   FileManagerOption,
+  NewRepoOptions,
+  Repo,
   RepoListPayload,
   RepoTrace,
   ScoredRepo,
@@ -145,6 +147,29 @@ export function runCommand(
   shell?: string,
 ): Promise<void> {
   return invoke<void>("run_command", { path, command, shell: shell || null });
+}
+
+/** Roots + installed version-control setups for the "New repository" screen. */
+export function newRepoOptions(): Promise<NewRepoOptions> {
+  return invoke<NewRepoOptions>("new_repo_options");
+}
+
+/** Why `name` can't be created under `root`; `null` when it can. */
+export function checkNewRepo(root: string, name: string): Promise<string | null> {
+  return invoke<string | null>("check_new_repo", { root, name });
+}
+
+/**
+ * Create `<root>/<name>` and run version-control setup `tool` in it. Resolves to
+ * the new repo (already added to the list); rejects with the tool's error.
+ */
+export function createRepo(
+  root: string,
+  name: string,
+  tool: string,
+  values: Record<string, string>,
+): Promise<Repo> {
+  return invoke<Repo>("create_repo", { root, name, tool, values });
 }
 
 /** Cache-first list of installed apps for the `>` scope. */

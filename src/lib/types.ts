@@ -180,3 +180,19 @@ export interface AppListPayload {
   ageSecs: number;
   stale: boolean;
 }
+
+/** What the "New repository" screen (Ctrl+Shift+N) can offer. */
+export interface NewRepoOptions {
+  /** Configured roots that exist right now, expanded. */
+  roots: string[];
+  /** Version-control setups whose programs are all installed. */
+  tools: ProvisionTool[];
+}
+
+export interface ProvisionTool {
+  id: string;
+  label: string;
+  fields: { id: string; label: string; default: string }[];
+  /** Raw argv templates (`{{dir}}`, `{{name}}`, `{{root}}`, field ids). */
+  run: string[][];
+}
