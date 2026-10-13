@@ -112,7 +112,7 @@
       onblur={depthBlur}
       aria-invalid={!!depthErr}
       title="How many directory levels deep the scan looks for repos"
-      class="w-24 {ui.input} {depthErr ? '!border-red-400/60' : ''}"
+      class="w-24 {ui.input} {depthErr ? 'border-red-400/60!' : ''}"
     />
     {#if depthErr}<span class="block text-[11px] text-red-300">{depthErr}</span>{/if}
   </label>
@@ -126,7 +126,7 @@
       onblur={ttlBlur}
       aria-invalid={!!ttlErr}
       title="How old the cached repo list can get before dev-prompt rescans it"
-      class="w-24 {ui.input} {ttlErr ? '!border-red-400/60' : ''}"
+      class="w-24 {ui.input} {ttlErr ? 'border-red-400/60!' : ''}"
     />
     {#if ttlErr}<span class="block text-[11px] text-red-300">{ttlErr}</span>{/if}
   </label>

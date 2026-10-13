@@ -29,7 +29,7 @@
       type="button"
       onclick={() => copy(k)}
       title={`Copy "icon: ${k}"`}
-      class="flex flex-col items-center gap-1.5 rounded px-1 py-2.5 hover:bg-white/[0.06]"
+      class="flex flex-col items-center gap-1.5 rounded-sm px-1 py-2.5 hover:bg-white/6"
     >
       <svg
         class="h-5 w-5 {tinted ? '' : 'text-white/45'}"

@@ -21,7 +21,7 @@
 <button
   type="button"
   class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors
-         {active ? 'bg-white/10' : 'hover:bg-white/[0.04]'}"
+         {active ? 'bg-white/10' : 'hover:bg-white/4'}"
   onclick={onactivate}
   onpointerenter={onhover}
 >
@@ -39,13 +39,13 @@
   <div class="flex shrink-0 items-center gap-1">
     {#if entry.repo.vcs}
       <span
-        class="rounded border border-emerald-400/25 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-200/90"
+        class="rounded-sm border border-emerald-400/25 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-200/90"
         >{entry.repo.vcs}</span
       >
     {/if}
     {#each entry.repo.sentinels.slice(0, 5) as s}
       <span
-        class="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-white/40"
+        class="rounded-sm bg-white/6 px-1.5 py-0.5 font-mono text-[10px] text-white/40"
         >{s}</span
       >
     {/each}

@@ -1186,7 +1186,7 @@
 
 <main
   class="panel-surface relative mx-auto flex h-[480px] w-[760px] flex-col overflow-hidden
-         rounded border border-hair bg-panel/[0.82] backdrop-blur-xl"
+         rounded-sm border border-hair bg-panel/82 backdrop-blur-xl"
 >
   {#if mode === "repo-list"}
     <SearchInput
@@ -1294,7 +1294,7 @@
 
   {#if undoToast && mode === "repo-list"}
     <div
-      class="flex items-center gap-3 border-t border-hair bg-white/[0.04] px-4 py-2 text-[12px] text-white/70"
+      class="flex items-center gap-3 border-t border-hair bg-white/4 px-4 py-2 text-[12px] text-white/70"
     >
       <span class="min-w-0 flex-1 truncate">
         Moved <span class="text-white/90">{undoToast.name}</span> to the {bin}.
@@ -1302,7 +1302,7 @@
       <button
         type="button"
         onclick={() => void undoRemove()}
-        class="inline-flex shrink-0 items-center gap-1.5 rounded border border-sky-400/50 bg-sky-400/10
+        class="inline-flex shrink-0 items-center gap-1.5 rounded-sm border border-sky-400/50 bg-sky-400/10
                px-2 py-0.5 text-[12px] text-sky-200 hover:bg-sky-400/20"
       >
         Undo <kbd>Ctrl+Z</kbd>
@@ -1325,7 +1325,7 @@
           class="shrink-0 rounded-[3px] border p-1 text-white/80 transition-colors
                  {noRepos
             ? 'border-sky-400/60 bg-sky-400/10 text-white'
-            : 'border-white/15 bg-white/[0.09] hover:bg-white/20 hover:text-white'}"
+            : 'border-white/15 bg-white/9 hover:bg-white/20 hover:text-white'}"
         >
           <svg
             class="h-3 w-3"

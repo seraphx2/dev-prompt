@@ -215,7 +215,7 @@
            {indent ? 'pl-6' : 'pl-3'}
            {active
       ? 'border-sky-400 bg-white/[0.07] text-white'
-      : 'border-transparent text-white/55 hover:bg-white/[0.04] hover:text-white/85'}"
+      : 'border-transparent text-white/55 hover:bg-white/4 hover:text-white/85'}"
   >
     <svg
       class="h-3.5 w-3.5 shrink-0 {active ? 'text-white/85' : 'text-white/45'}"
@@ -237,7 +237,7 @@
 <div class="flex items-center gap-2 border-b border-hair px-3 py-2.5">
   <button
     type="button"
-    class="shrink-0 rounded px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
+    class="shrink-0 rounded-sm px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
     onclick={onback}
     aria-label="Back"
   >
@@ -271,7 +271,7 @@
       onclick={() => (rulesOpen = !rulesOpen)}
       aria-expanded={rulesOpen}
       class="mt-2 flex w-full items-center gap-2 border-l-2 border-transparent py-1.5 pl-3 pr-2 text-left
-             text-[12.5px] font-medium text-white/55 hover:bg-white/[0.04] hover:text-white/85"
+             text-[12.5px] font-medium text-white/55 hover:bg-white/4 hover:text-white/85"
     >
       <svg
         class="h-3.5 w-3.5 shrink-0 text-white/45"

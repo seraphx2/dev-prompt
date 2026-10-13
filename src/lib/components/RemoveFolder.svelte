@@ -72,7 +72,7 @@
 <div class="flex items-center gap-2 border-b border-hair px-3 py-2.5">
   <button
     type="button"
-    class="shrink-0 rounded px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
+    class="shrink-0 rounded-sm px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
     onclick={() => !busy && onback()}
     aria-label="Back"
   >
@@ -93,7 +93,7 @@
     <p class="mt-4 text-white/40">Checking what's in it…</p>
   {:else}
     {#if assessment.needsTyped}
-      <div class="mt-4 space-y-2 rounded border border-amber-400/40 bg-amber-500/10 px-3 py-2.5">
+      <div class="mt-4 space-y-2 rounded-sm border border-amber-400/40 bg-amber-500/10 px-3 py-2.5">
         <p class="font-medium text-amber-200">This has work that exists only here:</p>
         <ul class="list-disc space-y-1 pl-5 text-amber-100/90">
           {#each assessment.risks as r (r)}
@@ -114,8 +114,8 @@
           disabled={busy}
           spellcheck="false"
           autocomplete="off"
-          class="w-72 rounded border border-hair bg-white/[0.04] px-2 py-1.5 font-mono text-[12px]
-                 text-white/90 focus:border-white/25 focus:outline-none"
+          class="w-72 rounded-sm border border-hair bg-white/4 px-2 py-1.5 font-mono text-[12px]
+                 text-white/90 focus:border-white/25 focus:outline-hidden"
         />
       </label>
     {:else}
@@ -131,7 +131,7 @@
 
   {#if error}
     <pre
-      class="mt-3 max-h-32 overflow-auto whitespace-pre-wrap rounded border border-red-400/40 bg-red-500/10 px-3 py-2 font-mono text-[11px] text-red-200">{error}</pre>
+      class="mt-3 max-h-32 overflow-auto whitespace-pre-wrap rounded-sm border border-red-400/40 bg-red-500/10 px-3 py-2 font-mono text-[11px] text-red-200">{error}</pre>
   {/if}
 
   <div class="mt-auto flex justify-end gap-2 pt-4">
@@ -140,7 +140,7 @@
       data-cancel
       disabled={busy}
       onclick={onback}
-      class="rounded border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90"
+      class="rounded-sm border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90"
     >
       Cancel
     </button>
@@ -149,7 +149,7 @@
       type="button"
       disabled={!confirmed || busy}
       onclick={() => void confirm()}
-      class="rounded bg-red-500/80 px-3.5 py-1.5 text-[12px] font-medium text-white hover:bg-red-500
+      class="rounded-sm bg-red-500/80 px-3.5 py-1.5 text-[12px] font-medium text-white hover:bg-red-500
              disabled:opacity-40"
     >
       {busy ? "Moving…" : `Move to ${bin}`}

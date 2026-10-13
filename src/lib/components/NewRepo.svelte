@@ -228,17 +228,17 @@
   }
 
   const chip =
-    "rounded border px-2.5 py-1 text-[12px] focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400/70";
+    "rounded-sm border px-2.5 py-1 text-[12px] focus:outline-hidden focus-visible:ring-1 focus-visible:ring-sky-400/70";
   const chipOn = "border-sky-400/50 bg-sky-500/15 text-white";
   const chipOff = "border-hair text-white/55 hover:bg-white/10 hover:text-white/85";
   const field =
-    "rounded border border-hair bg-white/[0.04] px-2 py-1.5 font-mono text-[12px] text-white/90 placeholder:text-white/25 focus:border-white/25 focus:outline-none disabled:opacity-60";
+    "rounded-sm border border-hair bg-white/4 px-2 py-1.5 font-mono text-[12px] text-white/90 placeholder:text-white/25 focus:border-white/25 focus:outline-hidden disabled:opacity-60";
 </script>
 
 <div class="flex items-center gap-2 border-b border-hair px-3 py-2.5">
   <button
     type="button"
-    class="shrink-0 rounded px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
+    class="shrink-0 rounded-sm px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
     onclick={() => !busy && onback()}
     aria-label="Back"
   >
@@ -398,7 +398,7 @@
 
       {#if createError}
         <pre
-          class="max-h-32 overflow-auto whitespace-pre-wrap rounded border border-red-400/40 bg-red-500/10 px-3 py-2 font-mono text-[11px] text-red-200">{createError}</pre>
+          class="max-h-32 overflow-auto whitespace-pre-wrap rounded-sm border border-red-400/40 bg-red-500/10 px-3 py-2 font-mono text-[11px] text-red-200">{createError}</pre>
       {/if}
     </div>
 
@@ -407,7 +407,7 @@
         type="button"
         disabled={!canCreate}
         onclick={() => void submit()}
-        class="rounded bg-sky-500/80 px-3.5 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-40"
+        class="rounded-sm bg-sky-500/80 px-3.5 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-40"
       >
         {#if existing}{busy ? "Setting up…" : "Set up"}{:else}{busy
             ? "Creating…"

@@ -68,12 +68,12 @@
   </p>
 
   {#if upd.info}
-    <div class="flex items-center gap-3 rounded border border-sky-400/40 bg-sky-500/[0.08] px-3 py-2">
+    <div class="flex items-center gap-3 rounded-sm border border-sky-400/40 bg-sky-500/8 px-3 py-2">
       <button
         type="button"
         onclick={install}
         disabled={installing}
-        class="shrink-0 rounded bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+        class="shrink-0 rounded-sm bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
       >
         {installing ? "Installing…" : "Install"}
       </button>

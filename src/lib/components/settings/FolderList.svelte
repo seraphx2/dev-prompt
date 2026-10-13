@@ -115,20 +115,20 @@
         spellcheck="false"
         {placeholder}
         aria-invalid={!!problems[i]}
-        class="min-w-0 flex-1 {ui.mono} {problems[i] ? '!border-red-400/60' : ''}"
+        class="min-w-0 flex-1 {ui.mono} {problems[i] ? 'border-red-400/60!' : ''}"
       />
       {#if confirmIdx === i}
         <button
           type="button"
           onclick={() => remove(i)}
-          class="shrink-0 rounded border border-red-400/40 bg-red-500/15 px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/25"
+          class="shrink-0 rounded-sm border border-red-400/40 bg-red-500/15 px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/25"
         >
           Remove
         </button>
         <button
           type="button"
           onclick={() => (confirmIdx = null)}
-          class="shrink-0 rounded border border-hair px-2 py-1 text-[11px] text-white/50 hover:bg-white/10"
+          class="shrink-0 rounded-sm border border-hair px-2 py-1 text-[11px] text-white/50 hover:bg-white/10"
         >
           Cancel
         </button>
@@ -138,7 +138,7 @@
           onclick={() => (confirmRemove && rows[i].trim() ? (confirmIdx = i) : remove(i))}
           aria-label="Remove {what}"
           title="Remove {what}"
-          class="shrink-0 rounded border border-hair px-2 py-1 text-[11px] text-white/40 hover:bg-white/10 hover:text-white/70"
+          class="shrink-0 rounded-sm border border-hair px-2 py-1 text-[11px] text-white/40 hover:bg-white/10 hover:text-white/70"
         >
           ×
         </button>

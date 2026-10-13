@@ -93,7 +93,7 @@
   bind:this={menu}
   role="menu"
   tabindex="-1"
-  class="fixed z-50 min-w-[13rem] max-w-[22rem] rounded-lg border border-white/10
+  class="fixed z-50 min-w-52 max-w-88 rounded-lg border border-white/10
          bg-[#1c1f26]/95 p-1 shadow-xl shadow-black/50 backdrop-blur-xl"
   style="left:{left}px; top:{top}px"
 >

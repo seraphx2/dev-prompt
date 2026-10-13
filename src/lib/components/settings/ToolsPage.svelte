@@ -98,7 +98,7 @@
       aria-invalid={!!problem.terminal}
       spellcheck="false"
       placeholder="wezterm start --cwd {'{{dir}}'} -- {'{{cmd}}'}"
-      class="w-full {ui.mono} {problem.terminal ? '!border-red-400/60' : ''}"
+      class="w-full {ui.mono} {problem.terminal ? 'border-red-400/60!' : ''}"
     />
     {#if problem.terminal}
       <span class="block text-[11px] text-red-300">{problem.terminal} It isn't saved.</span>
@@ -152,7 +152,7 @@
       aria-invalid={!!problem.filemanager}
       spellcheck="false"
       placeholder="dopus /cmd Go {'{{path}}'}"
-      class="w-full {ui.mono} {problem.filemanager ? '!border-red-400/60' : ''}"
+      class="w-full {ui.mono} {problem.filemanager ? 'border-red-400/60!' : ''}"
     />
     {#if problem.filemanager}
       <span class="block text-[11px] text-red-300">{problem.filemanager} It isn't saved.</span>

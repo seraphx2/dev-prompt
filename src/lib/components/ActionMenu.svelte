@@ -68,7 +68,7 @@
 <div class="flex items-center gap-2 border-b border-hair px-3 py-2.5">
   <button
     type="button"
-    class="shrink-0 rounded px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
+    class="shrink-0 rounded-sm px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
     onclick={onback}
     aria-label="Back"
   >
@@ -86,7 +86,7 @@
     placeholder="Filter actions…"
     spellcheck="false"
     autocomplete="off"
-    class="min-w-0 flex-1 bg-transparent text-[13px] text-white/90 placeholder:text-white/25 focus:outline-none"
+    class="min-w-0 flex-1 bg-transparent text-[13px] text-white/90 placeholder:text-white/25 focus:outline-hidden"
   />
   <ClearButton
     show={!!filter}
@@ -103,7 +103,7 @@
       <button
         type="button"
         class="flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5
-               text-[13px] text-white/70 transition-colors hover:bg-white/[0.06] hover:text-white/90"
+               text-[13px] text-white/70 transition-colors hover:bg-white/6 hover:text-white/90"
         onclick={() => onquickaction(qa.action)}
       >
         <kbd>{qa.key}</kbd>
@@ -131,7 +131,7 @@
           ? 'cursor-default'
           : i === selected
             ? 'bg-white/10'
-            : 'hover:bg-white/[0.04]'}"
+            : 'hover:bg-white/4'}"
         onclick={() => onrun(i)}
         oncontextmenu={(e) => oncontext?.(i, e)}
         onpointerenter={() => {
