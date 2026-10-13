@@ -8,6 +8,7 @@
 #![cfg_attr(not(windows), allow(dead_code, unused_imports, unused_mut))]
 
 mod action_usage;
+mod app_watch;
 mod apps;
 #[cfg(target_os = "linux")]
 mod autostart;
@@ -244,6 +245,8 @@ pub fn run() {
 
             // Keep the repo list current while the app runs (watch.rs).
             watch::sync_in_background(app.handle());
+            // …and the app list, as apps are installed or removed (app_watch.rs).
+            app_watch::sync_in_background(app.handle());
 
             // Register the configured global hotkey(s).
             let (hotkey, apps_hotkey, apps_enabled) = {

@@ -174,6 +174,18 @@ under `\Windows\` are filtered out automatically; `exclude` is for the rest.
 
 The discovered app list is cached at `<OS cache dir>/dev-prompt/apps.json`.
 
+**Keeping it current.** While dev-prompt runs, it watches the places
+installers leave their traces: on Windows the Start Menu folders,
+`%LOCALAPPDATA%\Programs`, your `extra_dirs`, the Uninstall registry keys and
+the Store package registry key; on Linux the application folders above. A few
+seconds after an install or uninstall settles, only what changed is gathered
+again — one shortcut, one app folder, the Uninstall entries whose timestamps
+moved, or the Store list — and merged into the cached list, so a new app shows
+up without a full rescan. The cache keeps every gathered row with where it came
+from so this works; a cache written by an older version gets one full rescan
+the first time something changes. A full rescan still runs once a day, and
+`Ctrl+R` in `>` forces one.
+
 ---
 
 ## Roots, scan depth, cache

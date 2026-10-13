@@ -31,6 +31,13 @@ pub struct AppState {
     pub apps: Mutex<Vec<AppEntry>>,
     /// Age (secs) of `apps`; -1 when never cached.
     pub apps_age_secs: Mutex<i64>,
+    /// Every gathered row `apps` was combined from (see `apps::Index`), so the
+    /// app watcher can apply one change without gathering everything.
+    pub apps_index: Mutex<apps::Index>,
+    /// Held for the length of an app scan or update, so they never overlap.
+    pub apps_gate: Mutex<()>,
+    /// Watches where apps get installed (see `app_watch.rs`); `None` when off.
+    pub app_watcher: Mutex<Option<crate::app_watch::Watching>>,
     /// Whether losing focus dismisses the overlay. Off while the settings
     /// screen is open so clicking away to copy a path doesn't nuke edits.
     pub dismiss_on_blur: Mutex<bool>,
@@ -58,7 +65,11 @@ impl AppState {
             contexts: HashMap::new(),
             age_secs: -1,
         });
-        let (apps, apps_age) = cache::load_apps().unwrap_or((Vec::new(), -1));
+        let loaded_apps = cache::load_apps().unwrap_or(cache::LoadedApps {
+            apps: Vec::new(),
+            index: apps::Index::default(),
+            age_secs: -1,
+        });
         // Seed blur-dismiss from the saved preference; the frontend re-asserts it
         // per screen (off for Settings / run-command) once it mounts.
         let dismiss_on_blur = config.dismiss == config::DismissMode::Always;
@@ -67,8 +78,11 @@ impl AppState {
             repos: Mutex::new(loaded.repos),
             contexts: Mutex::new(loaded.contexts),
             age_secs: Mutex::new(loaded.age_secs),
-            apps: Mutex::new(apps),
-            apps_age_secs: Mutex::new(apps_age),
+            apps: Mutex::new(loaded_apps.apps),
+            apps_age_secs: Mutex::new(loaded_apps.age_secs),
+            apps_index: Mutex::new(loaded_apps.index),
+            apps_gate: Mutex::new(()),
+            app_watcher: Mutex::new(None),
             dismiss_on_blur: Mutex::new(dismiss_on_blur),
             first_run,
             sticky_open: Mutex::new(first_run),
@@ -520,6 +534,7 @@ pub fn reload_config(app: AppHandle, state: State<'_, AppState>) -> AppResult<Co
     let cfg = config::load()?;
     *state.config.lock().unwrap() = cfg.clone();
     crate::watch::sync_in_background(&app);
+    crate::app_watch::sync_in_background(&app);
     Ok(cfg)
 }
 
@@ -740,6 +755,7 @@ pub fn save_config(
     *state.config.lock().unwrap() = merged.clone();
     sync_taskbar_visibility(&app, &merged);
     crate::watch::sync_in_background(&app);
+    crate::app_watch::sync_in_background(&app);
     Ok(merged)
 }
 
@@ -927,27 +943,71 @@ pub fn list_apps(state: State<'_, AppState>) -> AppsPayload {
 
 /// Re-enumerate installed apps off the UI thread. Emits `apps:updated`.
 #[tauri::command]
-pub async fn rescan_apps(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppsPayload> {
+pub async fn rescan_apps(app: AppHandle) -> AppResult<AppsPayload> {
+    tauri::async_runtime::spawn_blocking(move || rescan_apps_blocking(&app))
+        .await
+        .map_err(|e| AppError::msg(format!("app scan task failed: {e}")))?
+}
+
+/// Gather every app source in full and replace the list (and cache), then emit
+/// `apps:updated`. Blocking — run it off the UI thread.
+pub fn rescan_apps_blocking(app: &AppHandle) -> AppResult<AppsPayload> {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let _gate = state.apps_gate.lock().unwrap();
     let cfg = state.config.lock().unwrap().clone();
+    let index = apps::gather_all(&cfg, &apps::Sources::from_config(&cfg))?;
+    Ok(store_apps(app, &state, index))
+}
 
-    let fresh = if cfg.apps.enabled {
-        tauri::async_runtime::spawn_blocking(move || apps::discover(&cfg))
-            .await
-            .map_err(|e| AppError::msg(format!("app scan task failed: {e}")))?
-    } else {
-        Vec::new()
+/// Apply what the app watcher saw: re-gather only the items it touched. Falls
+/// back to a full rescan when there's no index to update (a cache written
+/// before incremental updates existed) or the update itself fails.
+pub fn update_apps_blocking(app: &AppHandle, changes: &[apps::Change]) -> AppResult<()> {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let updated = {
+        let _gate = state.apps_gate.lock().unwrap();
+        let cfg = state.config.lock().unwrap().clone();
+        let index = state.apps_index.lock().unwrap().clone();
+        let have_index = !index.gathered.is_empty() || state.apps.lock().unwrap().is_empty();
+        if have_index {
+            match apps::update(&cfg, &apps::Sources::from_config(&cfg), &index, changes) {
+                Ok(next) => {
+                    store_apps(app, &state, next);
+                    true
+                }
+                Err(e) => {
+                    eprintln!("app update failed, rescanning: {e}");
+                    false
+                }
+            }
+        } else {
+            false
+        }
     };
+    if !updated {
+        rescan_apps_blocking(app)?;
+    }
+    Ok(())
+}
 
-    cache::save_apps(&fresh)?;
-    *state.apps.lock().unwrap() = fresh.clone();
+/// Combine `index` into the list, save both, update state, emit `apps:updated`.
+fn store_apps(app: &AppHandle, state: &AppState, index: apps::Index) -> AppsPayload {
+    let list = apps::combine(&index);
+    if let Err(e) = cache::save_apps(&list, &index) {
+        eprintln!("saving apps.json failed: {e}");
+    }
+    *state.apps.lock().unwrap() = list.clone();
+    *state.apps_index.lock().unwrap() = index;
     *state.apps_age_secs.lock().unwrap() = 0;
 
     let _ = app.emit("apps:updated", ());
-    Ok(AppsPayload {
-        apps: apps_with_usage(fresh),
+    AppsPayload {
+        apps: apps_with_usage(list),
         age_secs: 0,
         stale: false,
-    })
+    }
 }
 
 /// Launch an installed app, bumping its frecency count only if the launch

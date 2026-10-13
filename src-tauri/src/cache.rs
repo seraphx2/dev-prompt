@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::apps::AppEntry;
+use crate::apps::{AppEntry, Index};
 use crate::config::cache_dir;
 use crate::error::AppResult;
 use crate::inspect::RepoContext;
@@ -85,25 +85,36 @@ pub fn is_stale(age_secs: i64, ttl_secs: u64) -> bool {
 struct AppsCacheFile {
     written_at: u64,
     apps: Vec<AppEntry>,
+    /// Every gathered row the list was combined from — what lets the app
+    /// watcher apply one change without gathering everything again. Empty in
+    /// caches from older builds; the first change then does a full rescan.
+    index: Index,
 }
 
-/// `(apps, age_secs)` — `age_secs` is -1 when no cache file exists yet.
-pub fn load_apps() -> AppResult<(Vec<AppEntry>, i64)> {
+pub struct LoadedApps {
+    pub apps: Vec<AppEntry>,
+    pub index: Index,
+    /// Age in seconds, or -1 when there was no cache file.
+    pub age_secs: i64,
+}
+
+pub fn load_apps() -> AppResult<LoadedApps> {
     let path = cache_dir()?.join(APPS_CACHE_FILE);
     if !path.exists() {
-        return Ok((Vec::new(), -1));
+        return Ok(LoadedApps { apps: Vec::new(), index: Index::default(), age_secs: -1 });
     }
     let parsed: AppsCacheFile =
         serde_json::from_str(&std::fs::read_to_string(&path)?).unwrap_or_default();
     let age = now_secs().saturating_sub(parsed.written_at) as i64;
-    Ok((parsed.apps, age))
+    Ok(LoadedApps { apps: parsed.apps, index: parsed.index, age_secs: age })
 }
 
-pub fn save_apps(apps: &[AppEntry]) -> AppResult<()> {
+pub fn save_apps(apps: &[AppEntry], index: &Index) -> AppResult<()> {
     let path = cache_dir()?.join(APPS_CACHE_FILE);
     let file = AppsCacheFile {
         written_at: now_secs(),
         apps: apps.to_vec(),
+        index: index.clone(),
     };
     std::fs::write(&path, serde_json::to_string_pretty(&file)?)?;
     Ok(())
@@ -190,6 +201,7 @@ mod tests {
         let file = AppsCacheFile {
             written_at: 100,
             apps: vec![app.clone()],
+            index: Index::default(),
         };
         let json = serde_json::to_string(&file).unwrap();
         let back: AppsCacheFile = serde_json::from_str(&json).unwrap();
@@ -202,5 +214,12 @@ mod tests {
         let parsed: AppsCacheFile = serde_json::from_str(json).unwrap();
         assert!(parsed.apps.is_empty());
         assert_eq!(parsed.written_at, 0);
+    }
+
+    #[test]
+    fn apps_cache_from_before_the_index_still_parses() {
+        let json = r#"{ "written_at": 5, "apps": [] }"#;
+        let parsed: AppsCacheFile = serde_json::from_str(json).unwrap();
+        assert!(parsed.index.gathered.is_empty());
     }
 }

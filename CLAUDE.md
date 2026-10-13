@@ -92,6 +92,13 @@ surrounding style rather than running `cargo fmt`.
    (debounced) when a marker or a repo folder comes or goes — it drops
    everything below `.git` / `node_modules` / … so git churn costs nothing.
    On Linux it holds one inotify watch per folder down to the scan depth.
+   **`app_watch.rs`** does the same for the `>` app list: Start Menu /
+   `%LOCALAPPDATA%\Programs` / `extra_dirs` folders plus the Uninstall and
+   Store registry keys (`RegNotifyChangeKeyValue`), or the XDG application
+   folders on Linux. `apps::update` re-gathers only the origins a change
+   touched (every row in `apps::Index` carries one) and must stay equal to a
+   full gather — the end-to-end tests in `app_watch.rs` check exactly that,
+   against real OS events in throwaway folders and registry keys.
 3. On selecting a repo, **`inspect.rs`** walks its tree once into a
    `RepoContext` — root plus side-by-side / `packages/*`-style sub-projects,
    each with its manifest details (npm scripts + package manager, Cargo.toml,
