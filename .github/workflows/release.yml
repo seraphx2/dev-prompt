@@ -34,7 +34,37 @@ permissions:
   actions: write # dispatch repo.yml after publishing
 
 jobs:
+  # GitHub can deliver one merge's push twice (Release #18 and #19 both ran
+  # for 38a5289), and the second run would publish the same commit again
+  # under the next build number. So a push whose commit already carries a
+  # release tag is skipped. Checked once, before the legs: a step in each leg
+  # could see the tag its sibling just created and skip half a release.
+  # "Re-run failed jobs" doesn't re-run this, so a release where one leg
+  # failed after the other published can still be finished that way.
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.tag.outputs.released }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # tags
+
+      - name: Already released?
+        id: tag
+        shell: bash
+        run: |
+          tags=$(git tag --points-at HEAD 'v*' | tr '\n' ' ')
+          if [ -n "$tags" ]; then
+            echo "::notice::$(git rev-parse --short HEAD) is already released ($tags) — skipping."
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
   release:
+    needs: guard
     # One leg per OS. tauri-action creates the tag + release on whichever leg
     # lands first; the other uploads into it and merges its platform keys into
     # latest.json. fail-fast off so a flaky leg can't strand a half-built one.
@@ -45,10 +75,12 @@ jobs:
           - { os: windows-latest, portable: true }
           - { os: ubuntu-22.04, portable: false } # 22.04 for glibc back-compat
     runs-on: ${{ matrix.os }}
-    # push: skip when the merge commit opts out. dispatch: always run.
+    # push: skip when the merge commit opts out, or is already released.
+    # dispatch: always run — it's a deliberate choice.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      !contains(github.event.head_commit.message, '[skip release]')
+      (!contains(github.event.head_commit.message, '[skip release]') &&
+       needs.guard.outputs.released != 'true')
 
     steps:
       - name: Guard — live dispatch only from main
