@@ -1,7 +1,8 @@
 name: CI — frontend
 description: >
-  npm ci, svelte-check + vite build, and the vitest unit suite. Runs on Linux,
-  in parallel with the Rust job. Assumes the repo is already checked out.
+  Tauri npm/crate version match, npm ci, svelte-check + vite build, and the
+  vitest unit suite. Runs on Linux, in parallel with the Rust job. Assumes the
+  repo is already checked out.
 
 runs:
   using: composite
@@ -11,6 +12,12 @@ runs:
       with:
         node-version-file: .nvmrc
         cache: npm
+
+    # `tauri build` refuses mismatched npm/crate pairs, and only the release
+    # runs it — so check here, on the PR. Reads the lockfiles; no install.
+    - name: Tauri npm and crate versions match
+      shell: bash
+      run: node scripts/check-tauri-versions.mjs
 
     - name: Install dependencies
       shell: bash

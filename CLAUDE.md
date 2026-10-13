@@ -53,6 +53,7 @@ npm run tauri dev                 # Vite on :1420 + the overlay (hidden until th
 npm run check                     # svelte-check (types only)
 npm run build                     # svelte-check + vite build (what CI runs)
 npm run test                      # vitest run, whole suite
+npm run check:tauri               # Tauri npm packages ↔ Rust crates on the same major.minor
 npx vitest run src/lib/fuzzy.test.ts   # a single test file
 npx vitest run -t "name substring"     # tests matching a name
 
@@ -63,14 +64,17 @@ cargo test settings_file_carries_filemanager   # a single test (substring match)
 cargo clippy --all-targets -- -D warnings      # required clean before merge
 
 # Full pre-merge check, mirrors .github/workflows/ci.yml
-npm run build && cd src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
+npm run check:tauri && npm run build && cd src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
 Every GitHub Action in `.github` is pinned to a full commit SHA with its
 version in a comment (`@<sha> # v7.0.1`), because the release job holds the
 updater signing key; Dependabot bumps both, including under `.github/actions`.
 Pin any new action the same way. `dtolnay/rust-toolchain` tracks a branch, so
-its pin is bumped by hand. `sync-dev.yml` fast-forwards `dev` to `main` after
+its pin is bumped by hand. Dependabot updates npm and Cargo in separate
+groups, so a `@tauri-apps/*` package and its Rust crate can drift a minor
+apart — which `tauri build` (release only) refuses; `check:tauri` catches it
+in PR CI. Fix with `cargo update -p <crate>` or the matching npm bump. `sync-dev.yml` fast-forwards `dev` to `main` after
 every push to `main`, so the PR's merge commit never leaves `dev` "out of
 date"; it leaves `dev` alone if it has newer commits.
 
