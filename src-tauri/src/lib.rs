@@ -8,6 +8,7 @@
 #![cfg_attr(not(windows), allow(dead_code, unused_imports, unused_mut))]
 
 mod action_usage;
+mod app_watch;
 mod apps;
 #[cfg(target_os = "linux")]
 mod autostart;
@@ -22,9 +23,12 @@ mod index;
 mod inspect;
 mod launch;
 mod maven;
+mod provision;
+mod removal;
 mod rules;
 mod scan;
 mod usage;
+mod watch;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -240,6 +244,11 @@ pub fn run() {
                 commands::sync_taskbar_visibility(app.handle(), &cfg);
             }
 
+            // Keep the repo list current while the app runs (watch.rs).
+            watch::sync_in_background(app.handle());
+            // …and the app list, as apps are installed or removed (app_watch.rs).
+            app_watch::sync_in_background(app.handle());
+
             // Register the configured global hotkey(s).
             let (hotkey, apps_hotkey, apps_enabled) = {
                 let state = app.state::<AppState>();
@@ -406,9 +415,18 @@ pub fn run() {
             commands::list_shells,
             commands::default_shell,
             commands::run_command,
+            commands::new_repo_options,
+            commands::check_new_repo,
+            commands::folders_exist,
+            commands::create_repo,
+            commands::init_repo,
+            commands::assess_removal,
+            commands::remove_folder,
+            commands::undo_removal,
             commands::list_apps,
             commands::rescan_apps,
             commands::run_app,
+            commands::show_folder,
             commands::open_rules_file,
             commands::open_releases_page,
             commands::open_install_dir,

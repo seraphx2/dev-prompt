@@ -37,6 +37,10 @@ export interface Action {
   clientSide: boolean;
   /** Opens the "Run command…" input instead of running; `hint` is the template. */
   prompt?: boolean;
+  /** Opens the "Set up version control" form for this folder instead of running. */
+  provision?: boolean;
+  /** Opens the "Move to Recycle Bin / Trash" confirmation instead of running. */
+  remove?: boolean;
 }
 
 /** A row in the action menu — a runnable action, or a drill-in to a
@@ -63,8 +67,13 @@ export interface AppConfig {
   /** Optional second hotkey that opens straight into the `>` app scope. */
   apps_hotkey?: string | null;
   roots: string[];
-  /** `collapse_nested`: `true` collapse, `false` list all, `"auto"` keep independent. */
-  scan: { max_depth: number; collapse_nested: boolean | "auto" };
+  /** `collapse_nested`: `true` collapse, `false` list all, `"auto"` keep independent.
+   *  `top_level_folders`: list every folder directly in a root, marker or not. */
+  scan: {
+    max_depth: number;
+    collapse_nested: boolean | "auto";
+    top_level_folders?: boolean;
+  };
   cache_ttl_secs: number;
   /** When the overlay closes itself. */
   dismiss?: "always" | "keep_on_blur" | "manual";
@@ -79,6 +88,27 @@ export interface AppConfig {
   /** Raw `{{path}}` invocation for a file manager that wants more than a bare path. */
   filemanager_template?: string | null;
   /** Installed-app launcher (`>` scope) settings. */
+  apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
+}
+
+/** A partial settings save — only the fields present are written. */
+export interface ConfigPatch {
+  hotkey?: string;
+  /** "" turns the second (app-launcher) hotkey off. */
+  apps_hotkey?: string;
+  roots?: string[];
+  cache_ttl_secs?: number;
+  dismiss?: "always" | "keep_on_blur" | "manual";
+  scan_max_depth?: number;
+  collapse_nested?: boolean | "auto";
+  top_level_folders?: boolean;
+  /** "" clears the pin / template / shell back to auto. */
+  terminal?: string;
+  terminal_template?: string;
+  shell?: string;
+  /** "" clears the pin / template back to auto. */
+  filemanager?: string;
+  filemanager_template?: string;
   apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
 }
 
@@ -179,4 +209,52 @@ export interface AppListPayload {
   apps: AppEntry[];
   ageSecs: number;
   stale: boolean;
+}
+
+/** What the "New repository" screen (Ctrl+Shift+N) can offer. */
+export interface NewRepoOptions {
+  /** Configured roots that exist right now, expanded. */
+  roots: string[];
+  /** Version-control setups whose programs are all installed. */
+  tools: ProvisionTool[];
+}
+
+export interface ProvisionTool {
+  id: string;
+  label: string;
+  fields: { id: string; label: string; default: string }[];
+  /** Raw argv templates (`{{dir}}`, `{{name}}`, `{{root}}`, field ids). */
+  run: string[][];
+}
+
+/** A line in the right-click menu (`ContextMenu.svelte`). */
+export type CtxItem =
+  | {
+      kind: "item";
+      label: string;
+      /** Icon key from `lib/icons.ts`. */
+      icon?: string | null;
+      disabled?: boolean;
+      /** Destructive: drawn in red. */
+      danger?: boolean;
+      run: () => void;
+    }
+  | { kind: "separator" }
+  /** A dim, non-interactive title line (the repo / app name). */
+  | { kind: "header"; label: string }
+  /** Shown while the rest of the menu is still being fetched. */
+  | { kind: "loading"; label: string };
+
+/** What moving a folder to the Recycle Bin / Trash would lose. */
+export interface RemovalAssessment {
+  name: string;
+  path: string;
+  /** The version-control system found ("Git", "Mercurial", …), if any. */
+  vcs?: string | null;
+  /** What would be lost, worded for the dialog. */
+  risks: string[];
+  /** What couldn't be checked, and why — treated like a risk. */
+  unknown: string[];
+  /** Typing the folder's name is required to confirm. */
+  needsTyped: boolean;
 }

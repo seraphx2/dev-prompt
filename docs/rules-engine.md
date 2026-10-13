@@ -2,7 +2,8 @@
 
 The rules engine is what turns a directory into a list of actions: discovery
 markers, program resolution, manifest→action rules, and the always-offered
-"universal" actions.
+"universal" actions. It also holds the version-control setups the **New
+repository** screen offers (`provision`).
 
 Its defaults are bundled in the binary
 ([`src-tauri/src/default_config.yaml`](../src-tauri/src/default_config.yaml) —
@@ -12,8 +13,8 @@ the canonical, inline-documented schema). You extend or override them in
 - Windows — `%APPDATA%\dev-prompt\rules.yaml`
 - Linux — `~/.config/dev-prompt/rules.yaml`
 
-Open it from **Settings ▸ Rules ▸ Open rules file**; it ships as a commented
-scaffold. After editing, hit **Settings ▸ Rules ▸ Reload config** (or restart) —
+Open it from **Settings ▸ Active rules ▸ Open rules file**; it ships as a commented
+scaffold. After editing, hit **Reload rules** on the same page (or restart) —
 see [Applying changes](#applying-changes).
 
 Your *settings* — `hotkey`, `apps_hotkey`, `roots`, `scan`, `cache_ttl_secs`,
@@ -33,9 +34,10 @@ has no effect. See [configuration.md](configuration.md).
 | `programs` | **Merged by key.** Your `code:` replaces the built-in `code:`; a new key is added. |
 | `rules` | Your rules are **prepended** — they run first and show first. `rules_disable: [id]` sets a built-in aside. |
 | `universal` | `universal.disable: [id]` removes built-ins, `universal.add: [...]` appends yours. |
+| `provision` | **Merged by `id`.** Your `git:` entry replaces the built-in one; a new id is added. `provision_disable: [id]` removes a built-in. |
 
-A disabled built-in isn't deleted — it still appears in the Settings
-"Active configuration" viewer marked *disabled*, it's just never evaluated. This
+A disabled built-in isn't deleted — it still appears under
+Settings ▸ Active rules marked *disabled*, it's just never evaluated. This
 is so you can see what you turned off.
 
 `rules.yaml` ships as a commented scaffold; uncomment the sections you need.
@@ -128,7 +130,7 @@ actions:
   - name: "make"
     run: "make"
     terminal: true
-    icon: run                 # glyph for the menu row — see Settings > Icons
+    icon: run                 # glyph for the menu row — see Settings ▸ Icons
 
   - name: "npm run…"
     run: "npm run {{input}}"  # prompt: opens the "Run command…" input;
@@ -165,6 +167,13 @@ or when the action has no program at all (a gated `terminal: true`).
   on `PATH` rather than `programs` keys.
 - `client: true` is reserved for the built-in `copy-path`; custom client
   actions aren't wired up.
+- `remove: true` doesn't run anything — it opens the **Move to Recycle Bin**
+  confirmation for the folder (the built-in `remove-folder` action; the label
+  names this OS's bin). Never offered for a root folder. Universal only.
+- `provision: true` doesn't run anything — it opens the **Set up version
+  control** form for the folder (the built-in `set-up-vcs` action). It only
+  appears for a folder with no version control yet, and only when some
+  [`provision`](#provision) entry is installed. Universal actions only.
 - `hotkey:` (e.g. `"Ctrl+C"`) is reserved for the four built-in universal quick
   actions (`terminal`, `filemanager`, `copy-path`, `run-command`) — it renders
   the action as a quick-action button above the list instead of a normal row,
@@ -251,6 +260,70 @@ Usable in `name`, `program`, `args`, and `run`:
 | `{{env:VAR}}` | an environment variable |
 | `{{<program-key>}}` | a resolved program path |
 
+### `provision`
+
+The version-control setups offered in two places:
+
+- the **New repository** screen (`Ctrl+Shift+N` on the repo list), which
+  creates a folder under one of your roots and then runs the chosen entry's
+  `run` commands inside it, in order;
+- **Set up version control…** in the action menu of a folder that has none,
+  which runs them in that existing folder.
+
+Either way the folder ends up with a marker (`.git`, `.hg`, …) and shows up in
+the list as a repo.
+
+```yaml
+provision:
+  - id: git
+    label: Git
+    requires: [git]           # offered only if every binary is on PATH
+    fields:                   # extra inputs on the form
+      - id: branch
+        label: Initial branch
+        default: main         # prefilled value…
+        default_from: [git, config, --get, init.defaultBranch]
+                              # …unless this command prints something
+    run:                      # argv lists, run in the new folder
+      - [git, init, "--initial-branch={{branch}}"]
+```
+
+Built in: Git, Jujutsu (`jj git init`, colocated or not per your own jj
+config), Mercurial, Breezy (`brz init`) and Darcs. Each only appears when it's
+installed.
+
+- `run` commands get no terminal and no input — each must finish on its own.
+  Output is captured; if a command fails, its error is shown on the form and
+  the setup is rolled back. A command still running after 60 seconds is
+  stopped and counts as failed.
+- Rolling back a **new** folder deletes it, along with anything earlier
+  commands put in it. Rolling back an **existing** folder removes only what
+  appeared at its top level during setup (a half-made `.git`, say);
+  everything that was there before stays. It doesn't undo a command that
+  *changed* a file already in the folder — none of the built-ins do that, but
+  keep it in mind for your own entries.
+- Every command's program is checked on `PATH` too, so `requires:` is only
+  needed for tools a command relies on without running directly.
+- Every field must be filled in before Create works.
+- If the commands succeed but leave no version-control marker dev-prompt
+  knows, the folder is kept and you're told to add the marker to `markers:`
+  (with `kind: vcs`).
+
+Placeholders usable in `run`:
+
+| | |
+|---|---|
+| `{{dir}}` | the new folder |
+| `{{name}}` | its name |
+| `{{root}}` | the root it was created in |
+| `{{root_url}}` | that root as a `file://` URL (`file:///D:/git`) |
+| `{{<field id>}}` | what was entered in that field |
+
+Only add tools whose repository lives **inside** the new folder. Subversion
+and Fossil don't work that way, which is why they aren't built in — see
+[the Subversion recipe](#subversion-in-new-repository) for what that means if
+you want one anyway.
+
 ---
 
 ## Recipes
@@ -294,6 +367,48 @@ universal:
 rules_disable: [docker-image]
 ```
 
+**Hide a built-in version-control setup**
+
+```yaml
+provision_disable: [darcs]
+```
+
+<a id="subversion-in-new-repository"></a>
+**Subversion in New repository**
+
+Subversion isn't built in, because a Subversion working copy needs a
+repository somewhere else to check out from. Normally that's a server, and
+new projects start with `svn checkout <server URL>` — which needs nothing from
+dev-prompt; run it in a terminal and the checkout shows up on the next scan.
+
+Making the repository locally works, but it has costs:
+
+- **A second folder.** `svnadmin create` makes the repository database — this
+  recipe puts it in a `.svn-repos` folder inside the root, next to your
+  projects. That folder holds the project's whole history, so deleting it
+  loses everything; deleting the working folder loses nothing.
+- **It isn't cleaned up.** If the checkout step fails, the new working folder
+  is removed, but the repository already created under `.svn-repos` stays —
+  delete it yourself before trying the same name again.
+- **Nobody else can reach it.** A `file://` repository is only usable from this
+  machine, and backing it up is up to you.
+
+If that's fine for you, add this to `rules.yaml`:
+
+```yaml
+provision:
+  - id: svn
+    label: Subversion
+    requires: [svnadmin, svn]
+    run:
+      - [svnadmin, create, "{{root}}/.svn-repos/{{name}}"]
+      - [svn, checkout, "{{root_url}}/.svn-repos/{{name}}", "{{dir}}"]
+```
+
+To keep the repositories out of your roots entirely, point both commands at a
+fixed folder instead — e.g. `D:/svn-repos/{{name}}` and
+`file:///D:/svn-repos/{{name}}`.
+
 **Start markers from scratch** (only git repos show up)
 
 ```yaml
@@ -306,9 +421,9 @@ markers:
 
 ## Applying changes
 
-- **Settings ▸ Rules ▸ Reload config** re-reads `config.yaml` + `rules.yaml`,
+- **Settings ▸ Active rules ▸ Reload rules** re-reads `config.yaml` + `rules.yaml`,
   clears the program-lookup cache, and rescans.
-- The Settings "Active configuration" panel shows the merged result — which
+- **Settings ▸ Active rules** shows the merged result — which
   programs resolved, which rules are live vs. unmet vs. disabled.
 - A malformed `rules.yaml` surfaces as an error on Reload (and blocks the merge)
   rather than being silently ignored.

@@ -5,12 +5,17 @@
   import AppList from "./lib/components/AppList.svelte";
   import ActionMenu from "./lib/components/ActionMenu.svelte";
   import RunCommand from "./lib/components/RunCommand.svelte";
-  import Settings from "./lib/components/Settings.svelte";
+  import NewRepo from "./lib/components/NewRepo.svelte";
+  import ContextMenu from "./lib/components/ContextMenu.svelte";
+  import RemoveFolder from "./lib/components/RemoveFolder.svelte";
+  import Settings from "./lib/components/settings/Settings.svelte";
+  import type { Page as SettingsPage } from "./lib/components/settings/model";
   import {
     buildActions,
     buildDetectedActions,
     buildUniversalActions,
     copyPath,
+    copyText,
     getConfig,
     hideOverlay,
     listApps,
@@ -21,6 +26,7 @@
     onOverlayShown,
     onReposUpdated,
     onRepoContextUpdated,
+    readClipboard,
     refreshRepoContext,
     rescanApps,
     rescanRepos,
@@ -29,20 +35,51 @@
     runCommand,
     searchRepos,
     setDismissOnBlur,
+    showFolder,
+    undoRemoval,
   } from "./lib/ipc";
-  import type { Action, AppEntry, MenuItem, ScoredRepo } from "./lib/types";
+  import type {
+    Action,
+    AppEntry,
+    CtxItem,
+    MenuItem,
+    Repo,
+    ScoredRepo,
+  } from "./lib/types";
   import { fuzzyScore } from "./lib/fuzzy";
+  import { icons } from "./lib/icons";
   import { upd, pollUpdates } from "./lib/updateStore.svelte";
 
   const DAY_MS = 24 * 60 * 60 * 1000;
 
-  type Mode = "repo-list" | "action-menu" | "settings" | "run-command";
+  type Mode =
+    | "repo-list"
+    | "action-menu"
+    | "settings"
+    | "run-command"
+    | "new-repo"
+    | "remove";
 
-  let settingsPanel: Settings | undefined = $state();
-  // Whether Settings has unsaved edits — Esc and the mouse back-button call
-  // `backToList()` directly, bypassing Settings' own `onback`, so they need
-  // this to gate leaving too.
-  let settingsDirty = $state(false);
+  /** The page Settings opens on; null for the one it showed last. */
+  let settingsPage = $state<SettingsPage | null>(null);
+
+  /** What Settings couldn't save as it closed (an invalid value, a failed
+   *  write) — shown in the footer for a while, ahead of the status line. */
+  let notice = $state("");
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  const NOTICE_MS = 10_000;
+
+  function settingsUnsaved(msg: string) {
+    notice = notice ? `${notice} · ${msg}` : msg;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => (notice = ""), NOTICE_MS);
+  }
+
+  function openSettings(page: SettingsPage | null = null) {
+    notice = "";
+    settingsPage = page;
+    mode = "settings";
+  }
 
   let query = $state("");
   let results = $state<ScoredRepo[]>([]);
@@ -51,7 +88,9 @@
   // App-launcher scope: a leading ">" in the query switches the repo list for a
   // search over installed apps. Repos stay the default on every overlay open.
   let apps = $state<AppEntry[]>([]);
+  /** A message about the app list (scanning, an error); "" shows the count. */
   let appStatus = $state("");
+  let appCount = $state<number | null>(null);
   let appsScanning = $state(false);
   // Whether the "> apps" scope is usable at all — loaded on mount and
   // refreshed after a settings save. Unchecking "Index installed apps" turns
@@ -111,6 +150,50 @@
   let subGroup = $state<string | null>(null);
   /** `run:` template of the prompt action that opened the "Run command…" mode. */
   let promptTemplate = $state("");
+  /** Set while the new-repo screen is setting up an existing folder (opened
+   *  from the action menu) rather than creating a new one. */
+  let setupTarget = $state<ScoredRepo | null>(null);
+  /** The run-command / setup screen was opened from a repo row's right-click
+   *  menu, so Back returns to the list rather than to an action menu. */
+  let openedFromList = $state(false);
+  /** The folder the "Move to Recycle Bin / Trash" screen is for. */
+  let removeTarget = $state<ScoredRepo | null>(null);
+  /** The folder just moved to the bin, while Undo is offered. */
+  let undoToast = $state<{ name: string } | null>(null);
+  let undoTimer: ReturnType<typeof setTimeout> | undefined;
+  const UNDO_MS = 20_000;
+  const bin =
+    document.documentElement.dataset.os === "windows" ? "Recycle Bin" : "Trash";
+
+  function openRemove(entry: ScoredRepo, fromList: boolean) {
+    removeTarget = entry;
+    openedFromList = fromList;
+    mode = "remove";
+  }
+
+  function removed(name: string, undoable: boolean) {
+    backToList();
+    clearTimeout(undoTimer);
+    if (undoable) {
+      undoToast = { name };
+      undoTimer = setTimeout(() => (undoToast = null), UNDO_MS);
+    } else {
+      status = `Moved ${name} to the ${bin}. Restore it from there if you need it.`;
+    }
+  }
+
+  async function undoRemove() {
+    if (!undoToast) return;
+    const { name } = undoToast;
+    undoToast = null;
+    clearTimeout(undoTimer);
+    try {
+      await undoRemoval();
+      status = `Restored ${name}.`;
+    } catch (e) {
+      status = `Couldn't restore ${name}: ${e}`;
+    }
+  }
 
   const SUB_PREFIX = "Detected · ";
 
@@ -124,8 +207,17 @@
       .sort((a, b) => a.key.localeCompare(b.key)),
   );
 
+  // "Set up version control…": the new-repo form, pointed at this folder.
+  function openSetup() {
+    if (!activeRepo) return;
+    setupTarget = activeRepo;
+    mode = "new-repo";
+  }
+
   function runQuickAction(action: Action) {
-    if (action.prompt) {
+    if (action.provision) {
+      openSetup();
+    } else if (action.prompt) {
       promptTemplate = action.hint ?? "";
       mode = "run-command";
     } else if (activeRepo) {
@@ -286,6 +378,10 @@
       subGroup = it.target;
       actionQuery = "";
       actionSel = 0;
+    } else if (it.action.remove) {
+      if (activeRepo) openRemove(activeRepo, false);
+    } else if (it.action.provision) {
+      openSetup();
     } else if (it.action.prompt) {
       promptTemplate = it.action.hint ?? "";
       mode = "run-command";
@@ -309,13 +405,16 @@
   let dismissMode = $state<"always" | "keep_on_blur" | "manual">("always");
   getConfig().then((c) => (dismissMode = c.dismiss ?? "always"));
 
-  // Blur only dismisses in "always" mode. Settings + the run-command input are
-  // forms, so a click-away mustn't nuke them regardless.
+  // Blur only dismisses in "always" mode. Settings, the run-command input and
+  // the new-repository form are forms, so a click-away mustn't nuke them
+  // regardless.
   $effect(() => {
     void setDismissOnBlur(
       dismissMode === "always" &&
         mode !== "settings" &&
-        mode !== "run-command",
+        mode !== "run-command" &&
+        mode !== "new-repo" &&
+        mode !== "remove",
     );
   });
 
@@ -345,6 +444,17 @@
               ["Enter", "run"],
               ["Esc", "back"],
             ]
+          : mode === "new-repo"
+            ? [
+                ["Tab", "next field"],
+                ["Enter", setupTarget ? "set up" : "create"],
+                ["Esc", "back"],
+              ]
+          : mode === "remove"
+            ? [
+                ["Enter", "move"],
+                ["Esc", "back"],
+              ]
           : [
               ["Up/Down", "move"],
               ["Enter", "run"],
@@ -353,17 +463,31 @@
   );
 
   let scanning = $state(false);
+  /** A message for the footer (scanning, an error, …); "" shows the counts. */
   let status = $state("");
+  /** Repos (under version control) and the other listed folders, for the
+   *  footer. The two don't overlap — together they're the whole list. */
+  let counts = $state<{ repos: number; folders: number } | null>(null);
   let search: SearchInput | undefined = $state();
 
   // The footer status line, per screen: the app count in ">" scope, both counts
-  // on the settings screen, the repo cache line otherwise.
+  // on the settings screen, the repo counts (or a message) otherwise.
   const footerStatus = $derived(
     mode === "repo-list" && appScope
       ? appStatus
       : mode === "settings"
         ? [status, appStatus].filter(Boolean).join(" · ")
         : status,
+  );
+  const showCounts = $derived(
+    !!counts && !status && !(mode === "repo-list" && appScope),
+  );
+  // The app count shows in the ">" scope and on the settings screen.
+  const showAppCount = $derived(
+    appsEnabled &&
+      appCount !== null &&
+      !appStatus &&
+      ((mode === "repo-list" && appScope) || mode === "settings"),
   );
 
   // Nothing indexed and no scan running — the user hasn't pointed dev-prompt at
@@ -385,10 +509,15 @@
     // (the query $effect, loadInitial, rescan, onReposUpdated) is covered.
     if (appScope) return;
     const seq = ++searchSeq;
+    // The list can change underneath the user (a background rescan after the
+    // watcher saw a repo come or go) — keep the highlight on the same repo.
+    const keep = results[selected]?.repo.path;
     const scored = await searchRepos(query);
     if (seq !== searchSeq) return; // a newer query already answered
     results = scored;
-    if (selected >= results.length) selected = Math.max(0, results.length - 1);
+    const same = keep ? results.findIndex((r) => r.repo.path === keep) : -1;
+    if (same >= 0) selected = same;
+    else if (selected >= results.length) selected = Math.max(0, results.length - 1);
   }
 
   // Re-run the fuzzy search whenever the query changes (repo scope only; the
@@ -399,27 +528,44 @@
     refresh();
   });
 
+  // Repositories are the entries under version control; folders are the rest
+  // (plain top-level folders and marker-only projects).
+  function setCounts(repos: Repo[]) {
+    const versioned = repos.filter((r) => r.vcs).length;
+    counts = { repos: versioned, folders: repos.length - versioned };
+    status = "";
+  }
+
   async function loadInitial() {
     const payload = await listRepos();
-    status = payload.ageSecs < 0
-      ? "No cache — press Ctrl+R to scan"
-      : `${payload.repos.length} repos`;
+    if (payload.ageSecs < 0) status = "No cache — press Ctrl+R to scan";
+    else setCounts(payload.repos);
     await refresh();
     if (payload.stale || payload.ageSecs < 0) void rescan();
   }
 
+  // A rescan asked for mid-scan runs once more afterwards: the settings it
+  // should see may have been saved after the running one started.
+  let rescanAgain = false;
   async function rescan() {
-    if (scanning) return;
+    if (scanning) {
+      rescanAgain = true;
+      return;
+    }
     scanning = true;
     status = "Scanning repos…";
     try {
       const payload = await rescanRepos();
-      status = `${payload.repos.length} repos`;
+      setCounts(payload.repos);
       await refresh();
     } catch (e) {
       status = `Scan failed: ${e}`;
     } finally {
       scanning = false;
+      if (rescanAgain) {
+        rescanAgain = false;
+        void rescan();
+      }
     }
   }
 
@@ -427,30 +573,41 @@
     try {
       const p = await listApps();
       apps = p.apps;
-      appStatus = `${p.apps.length} apps`;
+      appCount = p.apps.length;
+      appStatus = "";
       if (p.stale || p.ageSecs < 0) void rescanAppsNow();
     } catch (e) {
       appStatus = `${e}`;
     }
   }
 
+  let appsRescanAgain = false;
   async function rescanAppsNow() {
-    if (appsScanning) return;
+    if (appsScanning) {
+      appsRescanAgain = true;
+      return;
+    }
     appsScanning = true;
     appStatus = "Scanning apps…";
     try {
       const p = await rescanApps();
       apps = p.apps;
-      appStatus = `${p.apps.length} apps`;
+      appCount = p.apps.length;
+      appStatus = "";
     } catch (e) {
       appStatus = `App scan failed: ${e}`;
     } finally {
       appsScanning = false;
+      if (appsRescanAgain) {
+        appsRescanAgain = false;
+        void rescanAppsNow();
+      }
     }
   }
 
   async function openActions(entry: ScoredRepo) {
     activeRepo = entry;
+    openedFromList = false;
     // Universal actions only — no `requires:` PATH walk, so this is fast even
     // on a cold cache. The menu opens on this alone; detected actions (npm /
     // cargo / docker / …) stream in afterward instead of blocking the open.
@@ -471,8 +628,41 @@
     void refreshRepoContext(entry.repo.path);
   }
 
+  // A repo the "New repository" screen just made — already in the list and
+  // cache backend-side, so go straight to its action menu.
+  function openCreated(repo: Repo) {
+    // The user may have left the form (mouse back, hidden overlay) while it ran.
+    if (mode !== "new-repo") return;
+    if (!setupTarget) query = "";
+    setupTarget = null;
+    void openActions({ repo, score: 0, matchIndices: [] });
+  }
+
+  // Back from the remove screen: to the list or action menu it came from.
+  function removeBack() {
+    if (openedFromList) backToList();
+    else {
+      removeTarget = null;
+      mode = "action-menu";
+    }
+  }
+
+  // Back from the new-repo screen: to the action menu it was opened from, or
+  // to the list.
+  function newRepoBack() {
+    if (setupTarget && !openedFromList) {
+      setupTarget = null;
+      mode = "action-menu";
+    } else {
+      backToList();
+    }
+  }
+
   function backToList() {
     mode = "repo-list";
+    setupTarget = null;
+    removeTarget = null;
+    openedFromList = false;
     activeRepo = null;
     actions = [];
     actionQuery = "";
@@ -564,16 +754,29 @@
     } else if (e.key === "Escape") {
       e.preventDefault();
       hideOverlay();
+    } else if (undoToast && e.key.toLowerCase() === "z" && e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      void undoRemove();
     } else if (e.key.toLowerCase() === "r" && e.ctrlKey) {
       e.preventDefault();
       if (appScope) rescanAppsNow();
       else rescan();
     } else if (
+      !appScope &&
+      e.key.toLowerCase() === "n" &&
+      e.ctrlKey &&
+      e.shiftKey &&
+      !e.altKey
+    ) {
+      // Same keys as Explorer's "New folder". In-app only — never a global hotkey.
+      e.preventDefault();
+      mode = "new-repo";
+    } else if (
       (e.key === "," || e.code === "Comma") &&
       (e.ctrlKey || e.metaKey)
     ) {
       e.preventDefault();
-      mode = "settings";
+      openSettings();
     }
   }
 
@@ -612,20 +815,240 @@
     }
   }
 
+  // --- right-click menus ---------------------------------------------------
+
+  /** The open right-click menu, if any. */
+  let ctx = $state<{ x: number; y: number; items: CtxItem[] } | null>(null);
+  let ctxMenu: ContextMenu | undefined = $state();
+  /** Bumped per menu, so a slow fetch can't fill in a menu that's been replaced. */
+  let ctxSeq = 0;
+
+  function closeCtx() {
+    ctx = null;
+  }
+
+  // A screen change takes any open menu with it.
+  $effect(() => {
+    void mode;
+    ctx = null;
+  });
+
+  /** Dev builds keep the webview's own menu (and its Inspect) on Shift+right-click. */
+  function wantsNative(e: MouseEvent): boolean {
+    return import.meta.env.DEV && e.shiftKey;
+  }
+
+  /** Open `items` at the pointer; `more` (if given) replaces them once it
+   *  resolves — for menus whose contents have to be fetched. */
+  function showCtx(e: MouseEvent, items: CtxItem[], more?: Promise<CtxItem[]>) {
+    e.preventDefault();
+    const seq = ++ctxSeq;
+    ctx = { x: e.clientX, y: e.clientY, items };
+    void more?.then((next) => {
+      if (ctx && seq === ctxSeq) ctx = { ...ctx, items: next };
+    });
+  }
+
+  // Anything without a menu of its own: text fields get Cut / Copy / Paste,
+  // everything else gets nothing — never the browser's Back / Reload / Print.
+  function onWindowContextMenu(e: MouseEvent) {
+    if (e.defaultPrevented || wantsNative(e)) return; // a row opened its own
+    const field = (e.target as HTMLElement | null)?.closest<
+      HTMLInputElement | HTMLTextAreaElement
+    >("textarea, input:not([type='checkbox']):not([type='radio'])");
+    if (field) openTextMenu(e, field);
+    else {
+      e.preventDefault();
+      closeCtx();
+    }
+  }
+
+  function openTextMenu(e: MouseEvent, el: HTMLInputElement | HTMLTextAreaElement) {
+    el.focus();
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? start;
+    const picked = el.value.slice(start, end);
+    const editable = !el.readOnly && !el.disabled;
+    // Replace the selection the way typing would, so `bind:value` sees it.
+    const insert = (text: string) => {
+      el.focus();
+      el.setRangeText(text, start, end, "end");
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    const items = (clip: string): CtxItem[] => [
+      {
+        kind: "item",
+        label: "Cut",
+        disabled: !picked || !editable,
+        run: () => {
+          void copyText(picked);
+          insert("");
+        },
+      },
+      { kind: "item", label: "Copy", icon: "copy", disabled: !picked, run: () => void copyText(picked) },
+      {
+        kind: "item",
+        label: "Paste",
+        disabled: !clip || !editable,
+        // A single-line field takes one line, as a native paste does.
+        run: () => insert(el instanceof HTMLInputElement ? clip.replace(/[\r\n]+/g, " ") : clip),
+      },
+      { kind: "separator" },
+      {
+        kind: "item",
+        label: "Select all",
+        disabled: !el.value,
+        run: () => {
+          el.focus();
+          el.select();
+        },
+      },
+    ];
+    // Paste stays greyed out until the clipboard has been read.
+    showCtx(e, items(""), readClipboard().then(items));
+  }
+
+  /** Run one of a repo's actions straight from its row in the list. */
+  function runFromList(entry: ScoredRepo, a: Action) {
+    if (a.remove) {
+      openRemove(entry, true);
+    } else if (a.provision) {
+      activeRepo = entry;
+      setupTarget = entry;
+      openedFromList = true;
+      mode = "new-repo";
+    } else if (a.prompt) {
+      activeRepo = entry;
+      promptTemplate = a.hint ?? "";
+      openedFromList = true;
+      mode = "run-command";
+    } else {
+      void execute(a, entry.repo.path);
+    }
+  }
+
+  // A repo row: the action page's most useful parts, a level up — open its
+  // actions, set up version control when it has none, the quick actions, and
+  // whatever this repo's history says gets used most.
+  function openRepoMenu(e: MouseEvent, entry: ScoredRepo) {
+    if (wantsNative(e)) return;
+    const head: CtxItem[] = [
+      { kind: "header", label: entry.repo.name },
+      { kind: "item", label: "Open actions", icon: "run", run: () => void openActions(entry) },
+    ];
+    const item = (a: Action): Extract<CtxItem, { kind: "item" }> => ({
+      kind: "item",
+      label: a.label,
+      icon: a.icon,
+      run: () => runFromList(entry, a),
+    });
+    const more = buildUniversalActions(entry.repo.path).then((acts) => {
+      const out = [...head];
+      const setup = acts.find((a) => a.provision);
+      if (setup) out.push({ kind: "separator" }, item(setup));
+      const quick = acts.filter((a) => a.hotkey);
+      if (quick.length) out.push({ kind: "separator" }, ...quick.map(item));
+      const used = acts
+        .filter((a) => !a.hotkey && !a.provision && !a.remove && a.usageScore > 0)
+        .sort((a, b) => b.usageScore - a.usageScore)
+        .slice(0, 4);
+      if (used.length) {
+        out.push({ kind: "separator" }, { kind: "header", label: "Used most here" }, ...used.map(item));
+      }
+      const rm = acts.find((a) => a.remove);
+      if (rm) out.push({ kind: "separator" }, { ...item(rm), danger: true });
+      return out;
+    });
+    showCtx(e, [...head, { kind: "loading", label: "Loading…" }], more);
+  }
+
+  // An app row: launch it, or get at the program behind it.
+  function openAppMenu(e: MouseEvent, app: AppEntry) {
+    if (wantsNative(e)) return;
+    const items: CtxItem[] = [
+      { kind: "header", label: app.name },
+      { kind: "item", label: "Launch", icon: "run", run: () => void runAppAndHide(app) },
+    ];
+    // Only a real executable has a folder and a path worth copying.
+    if (app.kind === "exe") {
+      items.push(
+        { kind: "separator" },
+        {
+          kind: "item",
+          label: "Show in file manager",
+          icon: "folder",
+          run: () =>
+            void showFolder(app.exec)
+              .then(dismissAfterLaunch)
+              .catch((err) => (appStatus = `Couldn't open the folder: ${err}`)),
+        },
+        {
+          kind: "item",
+          label: "Copy path",
+          icon: "copy",
+          run: () => void copyText(app.exec).then(dismissAfterLaunch),
+        },
+      );
+    }
+    showCtx(e, items);
+  }
+
+  // An action-menu row: run it, or copy the command it would run.
+  function openActionRowMenu(e: MouseEvent, i: number) {
+    if (wantsNative(e)) return;
+    const it = menuItems[i];
+    if (!it || it.kind === "loading") {
+      e.preventDefault();
+      return;
+    }
+    actionSel = i;
+    if (it.kind === "submenu") {
+      showCtx(e, [
+        { kind: "header", label: it.label },
+        { kind: "item", label: "Open", icon: "run", run: () => activateMenuItem(i) },
+      ]);
+      return;
+    }
+    const a = it.action;
+    const items: CtxItem[] = [
+      {
+        kind: "item",
+        label: a.prompt || a.provision || a.remove ? "Open…" : "Run",
+        icon: "run",
+        run: () => activateMenuItem(i),
+      },
+    ];
+    // `hint` is the resolved command line, except for the form-opening and
+    // frontend-only actions, and a bare terminal (whose hint is just a label).
+    if (a.hint && !a.clientSide && !a.prompt && !a.provision && !a.remove && a.hint !== "terminal") {
+      items.push({
+        kind: "item",
+        label: "Copy command",
+        icon: "copy",
+        run: () => void copyText(a.hint),
+      });
+    }
+    showCtx(e, items);
+  }
+
   // All keyboard handling runs at the window level and is dispatched by mode, so
   // navigation keeps working even when no element is focused (e.g. right after
   // returning from the action menu). Character keys fall through to the focused
   // search input untouched.
   function onWindowKeydown(e: KeyboardEvent) {
+    // An open menu takes every key until it closes.
+    if (ctx) {
+      ctxMenu?.keydown(e);
+      return;
+    }
     if (mode === "action-menu") {
       onMenuKeydown(e);
-    } else if (mode === "run-command") {
-      // The RunCommand component owns its keys (Enter / Esc).
+    } else if (mode === "run-command" || mode === "new-repo" || mode === "remove") {
+      // These components own their keys (Enter / Esc).
     } else if (mode === "settings") {
       if (e.key === "Escape") {
         e.preventDefault();
-        if (settingsDirty) settingsPanel?.nudge();
-        else backToList();
+        backToList();
       }
     } else {
       onListKeydown(e);
@@ -637,12 +1060,17 @@
   function onWindowMouse(e: MouseEvent) {
     if (e.button !== 3 && e.button !== 4) return;
     e.preventDefault();
+    if (ctx) {
+      closeCtx(); // back/forward first just dismisses an open menu
+      return;
+    }
     const back = e.button === 3;
     if (mode === "settings") {
-      if (back) {
-        if (settingsDirty) settingsPanel?.nudge();
-        else backToList();
-      }
+      if (back) backToList();
+    } else if (mode === "new-repo") {
+      if (back) newRepoBack();
+    } else if (mode === "remove") {
+      if (back) removeBack();
     } else if (mode === "action-menu") {
       if (back) menuBack();
       else if (menuItems[actionSel]?.kind === "submenu")
@@ -680,12 +1108,28 @@
         selected = 0;
         actionQuery = "";
         actionSel = 0;
+        closeCtx();
         backToList();
       }),
     );
-    unlisteners.push(onReposUpdated(() => void refresh()));
     unlisteners.push(
-      onAppsUpdated(() => void listApps().then((p) => (apps = p.apps))),
+      onReposUpdated(() => {
+        void refresh();
+        // Background rescans (the folder watcher) don't go through `rescan()`,
+        // so keep the count in the footer honest here.
+        if (!scanning) {
+          void listRepos().then((p) => setCounts(p.repos));
+        }
+      }),
+    );
+    unlisteners.push(
+      onAppsUpdated(
+        () =>
+          void listApps().then((p) => {
+            apps = p.apps;
+            appCount = p.apps.length;
+          }),
+      ),
     );
     unlisteners.push(
       onRepoContextUpdated((path) => {
@@ -702,7 +1146,7 @@
         }
       }),
     );
-    unlisteners.push(onGotoSettings(() => (mode = "settings")));
+    unlisteners.push(onGotoSettings(() => openSettings()));
 
     search?.focus();
     void loadInitial();
@@ -719,8 +1163,21 @@
   });
 </script>
 
+{#snippet glyph(key: string)}
+  <svg
+    class="h-3 w-3 shrink-0 text-white/50"
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    fill-rule="evenodd"
+    aria-hidden="true"
+  >
+    {#if icons[key].raw}{@html icons[key].raw}{:else}<path d={icons[key].d} />{/if}
+  </svg>
+{/snippet}
+
 <svelte:window
   onkeydown={onWindowKeydown}
+  oncontextmenu={onWindowContextMenu}
   onmousedown={onWindowMouse}
   onmouseup={(e) => {
     if (e.button === 3 || e.button === 4) e.preventDefault();
@@ -729,7 +1186,7 @@
 
 <main
   class="panel-surface relative mx-auto flex h-[480px] w-[760px] flex-col overflow-hidden
-         rounded border border-hair bg-panel/[0.82] backdrop-blur-xl"
+         rounded-sm border border-hair bg-panel/82 backdrop-blur-xl"
 >
   {#if mode === "repo-list"}
     <SearchInput
@@ -751,6 +1208,10 @@
           selected = i;
           if (filteredApps[i]) runAppAndHide(filteredApps[i].app);
         }}
+        oncontext={(i, e) => {
+          selected = i;
+          if (filteredApps[i]) openAppMenu(e, filteredApps[i].app);
+        }}
       />
     {:else if noRepos}
       <div
@@ -771,6 +1232,10 @@
           selected = i;
           if (results[i]) openActions(results[i]);
         }}
+        oncontext={(i, e) => {
+          selected = i;
+          if (results[i]) openRepoMenu(e, results[i]);
+        }}
       />
     {/if}
   {:else if mode === "action-menu" && activeRepo}
@@ -785,6 +1250,7 @@
       onrun={(i) => activateMenuItem(i)}
       onquickaction={runQuickAction}
       onback={menuBack}
+      oncontext={(i, e) => openActionRowMenu(e, i)}
     />
   {:else if mode === "run-command" && activeRepo}
     <RunCommand
@@ -793,13 +1259,27 @@
       template={promptTemplate}
       onrun={(cmd, sh) =>
         activeRepo && runCommandAndHide(activeRepo.repo.path, cmd, sh)}
-      onback={() => (mode = "action-menu")}
+      onback={() => (openedFromList ? backToList() : (mode = "action-menu"))}
+    />
+  {:else if mode === "new-repo"}
+    <NewRepo
+      existing={setupTarget
+        ? { path: setupTarget.repo.path, name: setupTarget.repo.name }
+        : null}
+      oncreated={openCreated}
+      onback={newRepoBack}
+    />
+  {:else if mode === "remove" && removeTarget}
+    <RemoveFolder
+      name={removeTarget.repo.name}
+      path={removeTarget.repo.path}
+      ondone={(undoable) => removeTarget && removed(removeTarget.repo.name, undoable)}
+      onback={removeBack}
     />
   {:else if mode === "settings"}
     <Settings
-      bind:this={settingsPanel}
+      initialPage={settingsPage}
       onback={backToList}
-      ondirtychange={(d) => (settingsDirty = d)}
       onsaved={() => {
         void getConfig().then((c) => {
           dismissMode = c.dismiss ?? "always";
@@ -808,7 +1288,26 @@
       }}
       onrescanrepos={rescan}
       onrescanapps={rescanAppsNow}
+      onunsaved={settingsUnsaved}
     />
+  {/if}
+
+  {#if undoToast && mode === "repo-list"}
+    <div
+      class="flex items-center gap-3 border-t border-hair bg-white/4 px-4 py-2 text-[12px] text-white/70"
+    >
+      <span class="min-w-0 flex-1 truncate">
+        Moved <span class="text-white/90">{undoToast.name}</span> to the {bin}.
+      </span>
+      <button
+        type="button"
+        onclick={() => void undoRemove()}
+        class="inline-flex shrink-0 items-center gap-1.5 rounded-sm border border-sky-400/50 bg-sky-400/10
+               px-2 py-0.5 text-[12px] text-sky-200 hover:bg-sky-400/20"
+      >
+        Undo <kbd>Ctrl+Z</kbd>
+      </button>
+    </div>
   {/if}
 
   <footer
@@ -819,14 +1318,14 @@
       {#if mode !== "settings"}
         <button
           type="button"
-          onclick={() => (mode = "settings")}
+          onclick={() => openSettings(noRepos ? "repos" : null)}
           title="Settings (Ctrl+,)"
           aria-label="Settings"
           class:settings-glow={noRepos}
           class="shrink-0 rounded-[3px] border p-1 text-white/80 transition-colors
                  {noRepos
             ? 'border-sky-400/60 bg-sky-400/10 text-white'
-            : 'border-white/15 bg-white/[0.09] hover:bg-white/20 hover:text-white'}"
+            : 'border-white/15 bg-white/9 hover:bg-white/20 hover:text-white'}"
         >
           <svg
             class="h-3 w-3"
@@ -847,11 +1346,44 @@
       {#if mode === "settings" && upd.current}
         <span class="shrink-0 tabular-nums text-sky-400">v{upd.current}</span>
       {/if}
-      <span class="truncate">{footerStatus}</span>
+      {#if showCounts && counts}
+        <span class="inline-flex shrink-0 items-center gap-2.5 tabular-nums">
+          <span
+            class="inline-flex items-center gap-1"
+            title="Repositories — folders under version control"
+          >
+            {@render glyph("branch")}{counts.repos}
+          </span>
+          <span
+            class="inline-flex items-center gap-1"
+            title="Folders without version control"
+          >
+            {@render glyph("folder")}{counts.folders}
+          </span>
+        </span>
+      {/if}
+      {#if showAppCount}
+        <span
+          class="inline-flex shrink-0 items-center gap-1 tabular-nums"
+          title="Installed apps"
+        >
+          {@render glyph("app")}{appCount}
+        </span>
+      {/if}
+      {#if notice}
+        <span class="truncate text-amber-300/90" title={notice}>{notice}</span>
+      {:else}
+        <span class="truncate">{footerStatus}</span>
+      {/if}
       {#if mode === "repo-list"}
         <span class="inline-flex shrink-0 items-center gap-1"
           ><kbd>Ctrl+R</kbd>rescan</span
         >
+        {#if !appScope}
+          <span class="inline-flex shrink-0 items-center gap-1"
+            ><kbd>Ctrl+Shift+N</kbd>new repo</span
+          >
+        {/if}
       {/if}
     </span>
     <span class="flex shrink-0 items-center gap-3.5">
@@ -861,7 +1393,7 @@
       {#if upd.info && mode !== "settings"}
         <button
           type="button"
-          onclick={() => (mode = "settings")}
+          onclick={() => openSettings("about")}
           title={`Update ${upd.info.version} available — open Settings`}
           class="inline-flex shrink-0 items-center rounded-[3px] border border-sky-400/50
                  bg-sky-400/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-sky-200
@@ -873,6 +1405,16 @@
     </span>
   </footer>
 </main>
+
+{#if ctx}
+  <ContextMenu
+    bind:this={ctxMenu}
+    x={ctx.x}
+    y={ctx.y}
+    items={ctx.items}
+    onclose={closeCtx}
+  />
+{/if}
 
 <style>
   /* Pulsing ring on the settings gear while no folders are configured. */

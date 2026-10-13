@@ -1,6 +1,52 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+@theme {
+  --font-mono: ui-monospace, SFMono-Regular, Cascadia Code, Consolas, monospace;
+
+  --color-panel: rgb(20 20 24);
+  --color-hair: rgb(255 255 255 / 0.08);
+
+  /* Tailwind 4 made its palette more saturated. These are the v3 values of
+     the shades the app uses, so it keeps its look — sky-300 is also the
+     accent baked into the custom icons (scripts/build-icons.mjs). */
+  --color-amber-100: #fef3c7;
+  --color-amber-200: #fde68a;
+  --color-amber-300: #fcd34d;
+  --color-amber-400: #fbbf24;
+  --color-amber-500: #f59e0b;
+  --color-emerald-200: #a7f3d0;
+  --color-emerald-300: #6ee7b7;
+  --color-emerald-400: #34d399;
+  --color-gray-200: #e5e7eb;
+  --color-orange-300: #fdba74;
+  --color-orange-400: #fb923c;
+  --color-red-200: #fecaca;
+  --color-red-300: #fca5a5;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-sky-200: #bae6fd;
+  --color-sky-300: #7dd3fc;
+  --color-sky-400: #38bdf8;
+  --color-sky-500: #0ea5e9;
+}
+
+/* Tailwind 3 defaults that v4 dropped, kept so nothing changes look or feel:
+   a border with no colour class is gray-200 (v4: the text colour), and
+   buttons show the pointer (v4: the default arrow). */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
 
 @layer base {
   :root {

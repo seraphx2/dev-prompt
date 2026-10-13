@@ -57,6 +57,14 @@ pub struct Action {
     /// template (may contain `{{input}}`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub prompt: bool,
+    /// Opens the "Set up version control" form for this folder rather than
+    /// spawning. See `RuleAction::provision`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub provision: bool,
+    /// Opens the "Move to Recycle Bin / Trash" confirmation rather than
+    /// spawning. See `RuleAction::remove`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub remove: bool,
 }
 
 // --- program resolution (process-global memo) -----------------------------
@@ -856,11 +864,57 @@ fn build_action(
             cwd: None,
             client_side: true,
             prompt: false,
+            provision: false,
+            remove: false,
         });
     }
 
     if ra.needs.iter().any(|k| resolver.resolve(k).is_none()) {
         return None;
+    }
+
+    if ra.remove {
+        // No process here — the frontend opens the confirmation. The label
+        // names this OS's bin; `universal_actions` keeps it off the roots.
+        return Some(Action {
+            id,
+            label: format!("Move to {}…", crate::removal::bin_name()),
+            hint: String::new(),
+            group: group.to_string(),
+            cluster: ra.cluster.clone(),
+            usage_score: 0.0,
+            icon: ra.icon.clone(),
+            hotkey: ra.hotkey.clone(),
+            program: String::new(),
+            args: Vec::new(),
+            cwd: None,
+            client_side: false,
+            prompt: false,
+            provision: false,
+            remove: true,
+        });
+    }
+
+    if ra.provision {
+        // No process here — the frontend opens the "Set up version control"
+        // form. `universal_actions` has already checked it applies.
+        return Some(Action {
+            id,
+            label: expand(&ra.name, t),
+            hint: String::new(),
+            group: group.to_string(),
+            cluster: ra.cluster.clone(),
+            usage_score: 0.0,
+            icon: ra.icon.clone(),
+            hotkey: ra.hotkey.clone(),
+            program: String::new(),
+            args: Vec::new(),
+            cwd: None,
+            client_side: false,
+            prompt: false,
+            provision: true,
+            remove: false,
+        });
     }
 
     if ra.prompt {
@@ -880,6 +934,8 @@ fn build_action(
             cwd: Some(cwd.to_string()),
             client_side: false,
             prompt: true,
+            provision: false,
+            remove: false,
         });
     }
 
@@ -931,6 +987,8 @@ fn build_action(
         cwd: final_cwd,
         client_side: false,
         prompt: false,
+        provision: false,
+        remove: false,
     })
 }
 
@@ -969,6 +1027,8 @@ fn provider_actions(
             cwd: c,
             client_side: false,
             prompt: false,
+            provision: false,
+            remove: false,
         }
     };
     let term = |id: String, label: String, argv: Vec<String>| term_in(id, label, argv, cwd);
@@ -1409,6 +1469,16 @@ fn universal_actions(config: &Config, repo: &Repo, resolver: &Resolver) -> Vec<A
         .actions
         .iter()
         .filter_map(|ra| {
+            // Only for a folder without version control, and only when there's
+            // a tool to set it up with. `which` is memoized, like `needs:`.
+            if ra.provision
+                && (repo.vcs.is_some() || !crate::provision::any_available(config))
+            {
+                return None;
+            }
+            if ra.remove && crate::removal::is_root(config, Path::new(&repo.path)) {
+                return None;
+            }
             let id = ra.action_id();
             let mut ra = ra.clone();
             // A file manager that needs more than a bare path (Directory Opus,
@@ -1689,7 +1759,11 @@ pub fn summarize(config: &Config, rules_path: String) -> ConfigSummary {
         let id = a.action_id();
         UniversalStatus {
             available: !disabled
-                && (a.client || a.needs.iter().all(|k| resolver.resolve(k).is_some())),
+                && if a.provision {
+                    crate::provision::any_available(config)
+                } else {
+                    a.client || a.needs.iter().all(|k| resolver.resolve(k).is_some())
+                },
             label: a.name.clone(),
             icon: a.icon.clone(),
             id,
@@ -1799,6 +1873,8 @@ mod tests {
             name: "npm run…".into(),
             run: Some("npm run {{input}}".into()),
             prompt: true,
+            provision: false,
+            remove: false,
             terminal: true,
             ..Default::default()
         };
@@ -2240,5 +2316,27 @@ mod tests {
         let idle = t.rules.iter().find(|r| !r.gate.is_empty()).unwrap();
         assert!(idle.hits.is_empty());
         assert!(!idle.gate.is_empty());
+    }
+
+    #[test]
+    fn move_to_bin_is_offered_for_folders_in_a_root_but_never_a_root() {
+        let root = std::env::temp_dir().join(format!("dp-rules-rm-{}", std::process::id()));
+        let inside = root.join("proj");
+        std::fs::create_dir_all(&inside).unwrap();
+        let mut cfg = crate::config::bundled_defaults();
+        cfg.roots = vec![root.to_string_lossy().into_owned()];
+        let at = |p: &std::path::Path| Repo {
+            name: "x".into(),
+            path: p.to_string_lossy().into_owned(),
+            vcs: Some("Git".into()),
+            sentinels: Vec::new(),
+            last_seen: 0,
+        };
+        let offered = |p: &std::path::Path| evaluate_universal(&cfg, &at(p)).iter().any(|a| a.remove);
+        assert!(offered(&inside));
+        assert!(!offered(&root));
+        let label = evaluate_universal(&cfg, &at(&inside)).into_iter().find(|a| a.remove).unwrap().label;
+        assert_eq!(label, format!("Move to {}…", crate::removal::bin_name()));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

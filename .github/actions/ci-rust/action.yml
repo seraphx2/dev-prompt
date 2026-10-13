@@ -20,18 +20,18 @@ runs:
           librsvg2-dev libayatana-appindicator3-dev
 
     - name: Setup Node
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version-file: .nvmrc
         cache: npm
 
     - name: Setup Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable (a branch: bump by hand)
       with:
         components: clippy
 
     - name: Cache Rust build
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
         workspaces: src-tauri
         cache-on-failure: "true"

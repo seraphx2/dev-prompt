@@ -66,6 +66,14 @@ cargo clippy --all-targets -- -D warnings      # required clean before merge
 npm run build && cd src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
+Every GitHub Action in `.github` is pinned to a full commit SHA with its
+version in a comment (`@<sha> # v7.0.1`), because the release job holds the
+updater signing key; Dependabot bumps both, including under `.github/actions`.
+Pin any new action the same way. `dtolnay/rust-toolchain` tracks a branch, so
+its pin is bumped by hand. `sync-dev.yml` fast-forwards `dev` to `main` after
+every push to `main`, so the PR's merge commit never leaves `dev` "out of
+date"; it leaves `dev` alone if it has newer commits.
+
 The Rust code is **hand-formatted, not `rustfmt`-shaped** — match the
 surrounding style rather than running `cargo fmt`.
 
@@ -76,8 +84,29 @@ surrounding style rather than running `cargo fmt`.
 1. **`scan.rs`** walks the configured root directories → `Vec<Repo>`.
    Discovery is driven by `markers` (`.git`, `*.sln`, `package.json`, …) and
    every rule's own `match` glob; nested repos collapse per `scan.collapse_nested`.
+   With `scan.top_level_folders`, every folder directly in a root is listed
+   too, marker or not, unless it only groups other repos.
 2. **`cache.rs`** persists that list to `repos.json` for instant startup; a
    stale cache triggers a background rescan rather than blocking the overlay.
+   **`watch.rs`** watches the roots while the app runs and rescans
+   (debounced) when a marker or a repo folder comes or goes — it drops
+   everything below `.git` / `node_modules` / … so git churn costs nothing.
+   On Linux it holds one inotify watch per folder down to the scan depth,
+   adding watches as folders appear rather than rebuilding. A sync whose
+   roots / depth / markers are unchanged keeps the running watcher (the app
+   watcher likewise keeps its sources), so autosaves cost nothing there.
+   **`app_watch.rs`** does the same for the `>` app list: Start Menu /
+   `%LOCALAPPDATA%\Programs` / `extra_dirs` folders plus the Uninstall and
+   Store registry keys (`RegNotifyChangeKeyValue`), or the XDG application
+   folders on Linux. `apps::update` re-gathers only the origins a change
+   touched (every row in `apps::Index` carries one) and must stay equal to a
+   full gather — the end-to-end tests in `app_watch.rs` check exactly that,
+   against real OS events in throwaway folders and registry keys.
+   **`removal.rs`** is "Move to Recycle Bin": never a permanent delete
+   (`trash` crate; Windows keeps its own nuke warning), paths re-validated in
+   the backend (listed, strictly inside a root, not a link), and an
+   assessment per VCS of what exists only locally — anything it can't check
+   counts as at risk, never as clean.
 3. On selecting a repo, **`inspect.rs`** walks its tree once into a
    `RepoContext` — root plus side-by-side / `packages/*`-style sub-projects,
    each with its manifest details (npm scripts + package manager, Cargo.toml,
@@ -96,7 +125,12 @@ surrounding style rather than running `cargo fmt`.
    (loaded config, scanned repos, per-repo contexts, installed-apps cache).
 6. The Svelte frontend (`App.svelte` + `lib/ipc.ts` typed wrappers) renders
    repo list → action menu → settings and drives everything through
-   `invoke()`.
+   `invoke()`
+   Settings lives in `lib/components/settings/`: a sidebar shell that owns
+   the form and autosaves (`save(patch, delay)` merges and serialises
+   partial `save_config` patches; `rescanNeeds` decides what a save
+   rescans), plus one component per page. There's no Save button — a new
+   field saves its own slice of the form via a patch builder in `model.ts`.
 
 ### Config layering — three files, precise merge semantics
 
@@ -109,7 +143,8 @@ surrounding style rather than running `cargo fmt`.
   `programs` merge **by key** (a key you set fully replaces the built-in
   candidate list for that key, it isn't merged item-by-item —
   `cfg.programs.insert(k, v)` in `config.rs`), `rules` prepend, `universal`
-  supports `.add` / `.disable`. The Settings screen never rewrites this file,
+  supports `.add` / `.disable`, `provision` merges by `id` (plus
+  `provision_disable`). The Settings screen never rewrites this file,
   so hand-written comments survive.
 - `merge_settings()` applies `config.yaml`; `merge_overrides()` applies
   `rules.yaml` — both in `config.rs`, both scalar-present-wins / list-append

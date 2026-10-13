@@ -19,19 +19,40 @@ export const icons: Record<string, Glyph> = {
     "raw": "<rect x=\"3\" y=\"3\" width=\"8\" height=\"8\" rx=\"1\"/><rect x=\"3\" y=\"13\" width=\"8\" height=\"8\" rx=\"1\"/><rect x=\"13\" y=\"13\" width=\"8\" height=\"8\" rx=\"1\"/><path fill=\"#7dd3fc\" d=\"M14.43 1.96 22.04 4.43 19.57 12.04 11.96 9.57Z\"/>"
   },
   "run": {
-    "d": "M8 5v14l11-7z"
+    "raw": "<path d=\"M10 5v14l11-7z\"/><path d=\"M3 9h4M3 15h4\" fill=\"none\" stroke=\"#7dd3fc\" stroke-width=\"2\" stroke-linecap=\"round\"/>"
   },
   "terminal": {
-    "d": "M3 4h18a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm3.7 4.3L10 11.6l-3.3 3.3 1.4 1.4L12.8 12 8.1 7.3 6.7 8.3zM13 15h5v2h-5z"
+    "raw": "<path d=\"M3 4h18a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm3.7 4.3L10 11.6l-3.3 3.3 1.4 1.4L12.8 12 8.1 7.3 6.7 8.3zM12 14h7v4h-7z\"/><path fill=\"#7dd3fc\" d=\"M13 15h5v2h-5z\"/>"
   },
   "folder": {
-    "d": "M4 4h6l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"
+    "raw": "<path fill=\"#7dd3fc\" d=\"M4 4h6l2 2h8a2 2 0 0 1 2 2v.5H2V6a2 2 0 0 1 2-2z\"/><path d=\"M2 10h20v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z\"/>"
   },
   "copy": {
-    "d": "M9 3h9a2 2 0 0 1 2 2v9h-2V5H9V3zM5 7h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"
+    "raw": "<path fill=\"#7dd3fc\" d=\"M9 3h9a2 2 0 0 1 2 2v9h-2V5H9V3z\"/><path d=\"M5 7h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z\"/>"
   },
   "code": {
-    "d": "M9.4 16.6 4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0L19.2 12l-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"
+    "raw": "<path d=\"M9.4 16.6 4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0L19.2 12l-4.6-4.6L16 6l6 6-6 6-1.4-1.4z\"/><path d=\"M13.4 6.5 10.6 17.5\" fill=\"none\" stroke=\"#7dd3fc\" stroke-width=\"2\" stroke-linecap=\"round\"/>"
+  },
+  "trash": {
+    "raw": "<path fill=\"#7dd3fc\" d=\"M9.5 2.5h5a1 1 0 0 1 1 1v1h4a1 1 0 0 1 0 2h-15a1 1 0 0 1 0-2h4v-1a1 1 0 0 1 1-1z\"/><path fill-rule=\"evenodd\" d=\"M5.5 8h13l-1 11.8a2 2 0 0 1-2 1.7h-7a2 2 0 0 1-2-1.7zm4 3v7.5h1.6V11zm3.4 0v7.5h1.6V11z\"/>"
+  },
+  "branch": {
+    "raw": "<path d=\"M7 7v10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/><circle cx=\"7\" cy=\"5\" r=\"2.6\"/><circle cx=\"7\" cy=\"19\" r=\"2.6\"/><path d=\"M7 15c0-4 3-6.5 7.6-7.2\" fill=\"none\" stroke=\"#7dd3fc\" stroke-width=\"2\" stroke-linecap=\"round\"/><circle cx=\"17\" cy=\"7.5\" r=\"2.6\" fill=\"#7dd3fc\"/>"
+  },
+  "sliders": {
+    "raw": "<path d=\"M3 5h18v2H3zM3 11h9.6v2H3zm16.4 0H21v2h-1.6zM3 17h18v2H3z\"/><circle cx=\"8\" cy=\"6\" r=\"2.6\"/><circle cx=\"11\" cy=\"18\" r=\"2.6\"/><circle cx=\"16\" cy=\"12\" r=\"2.6\" fill=\"#7dd3fc\"/>"
+  },
+  "rules": {
+    "raw": "<path d=\"M9 5h12v2H9zM9 11h12v2H9zM9 17h12v2H9z\"/><path fill=\"#7dd3fc\" d=\"M3 4.5h3v3H3zM3 10.5h3v3H3zM3 16.5h3v3H3z\"/>"
+  },
+  "trace": {
+    "raw": "<path fill-rule=\"evenodd\" d=\"M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm0 2.2a4.8 4.8 0 1 1 0 9.6 4.8 4.8 0 0 1 0-9.6z\"/><path d=\"M15.3 15.3 20.6 20.6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.8\" stroke-linecap=\"round\"/><circle cx=\"10\" cy=\"10\" r=\"3.2\" fill=\"#7dd3fc\"/>"
+  },
+  "shapes": {
+    "raw": "<circle cx=\"7\" cy=\"7.5\" r=\"4.3\"/><rect x=\"3\" y=\"14\" width=\"18\" height=\"7\" rx=\"1.5\"/><path fill=\"#7dd3fc\" d=\"M17 3.2 21.6 11.6H12.4Z\"/>"
+  },
+  "info": {
+    "raw": "<path fill-rule=\"evenodd\" d=\"M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.25 8.6h2.5V18h-2.5zM12 4.8a2.3 2.3 0 1 0 0 4.6 2.3 2.3 0 0 0 0-4.6z\"/><circle cx=\"12\" cy=\"7.1\" r=\"1.4\" fill=\"#7dd3fc\"/>"
   },
   "rider": {
     "d": "M0 0v24h24V0zm7.031 3.113A4.063 4.063 0 0 1 9.72 4.14a3.23 3.23 0 0 1 .84 2.28A3.16 3.16 0 0 1 8.4 9.54l2.46 3.6H8.28L6.12 9.9H4.38v3.24H2.16V3.12c1.61-.004 3.281.009 4.871-.007zm5.509.007h3.96c3.18 0 5.34 2.16 5.34 5.04 0 2.82-2.16 5.04-5.34 5.04h-3.96zm4.069 1.976c-.607.01-1.235.004-1.849.004v6.06h1.74a2.882 2.882 0 0 0 3.06-3 2.897 2.897 0 0 0-2.951-3.064zM4.319 5.1v2.88H6.6c1.08 0 1.68-.6 1.68-1.44 0-.96-.66-1.44-1.74-1.44zM2.16 19.5h9V21h-9Z",

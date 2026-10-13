@@ -7,6 +7,7 @@
     selected,
     onselect,
     onactivate,
+    oncontext,
   }: {
     entries: ScoredRepo[];
     selected: number;
@@ -14,6 +15,8 @@
     onselect: (i: number) => void;
     /** Row clicked -> open that repo's actions. */
     onactivate: (i: number) => void;
+    /** Row right-clicked -> its context menu. */
+    oncontext?: (i: number, e: MouseEvent) => void;
   } = $props();
 
   let container: HTMLDivElement | undefined = $state();
@@ -45,7 +48,7 @@
     </div>
   {:else}
     {#each entries as entry, i (entry.repo.path)}
-      <div data-idx={i}>
+      <div data-idx={i} oncontextmenu={(e) => oncontext?.(i, e)} role="presentation">
         <ResultRow
           {entry}
           active={i === selected}

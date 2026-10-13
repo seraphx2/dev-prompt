@@ -45,9 +45,9 @@ WebView.
   first, then detected per-ecosystem actions; multi-project repos collapse into
   drill-in submenus. Actions gracefully disappear when the tool they need isn't
   installed.
-- **Settings screen** — roots, hotkey, scan depth, cache lifetime, a read-only
-  view of the active rules/programs, and a software-update check. Reachable from
-  the overlay (`Ctrl+,`) or the tray icon.
+- **Settings screen** — a sidebar of pages (General, Repos, Tools, Apps, the
+  rules viewer / tracer / icon list, About) that saves each change as you make
+  it. Reachable from the overlay (`Ctrl+,`) or the tray icon.
 - **System tray** — Show / Settings / Quit; the overlay otherwise has no taskbar
   presence.
 - **In-app auto-update** — checks GitHub Releases, downloads and installs signed
@@ -130,7 +130,7 @@ or `~/.config/dev-prompt/`):
   Managed entirely by the **Settings** screen; you don't normally touch it.
 - **`rules.yaml`** — overrides for the rule engine: extra `markers`, `programs`,
   `rules`, and `universal` actions layered over the bundled defaults. Hand-edited
-  (Settings ▸ Rules ▸ Open rules file), ships as a commented scaffold.
+  (Settings ▸ Active rules ▸ Open rules file), ships as a commented scaffold.
 
 Settings reference: [`docs/configuration.md`](docs/configuration.md). The rule
 engine — merge rules, every field, and worked examples (pin an editor path, add a
@@ -146,7 +146,11 @@ installed-app list (`>` scope) is cached alongside it at
 
 1. **Discovery** — a directory is a "repo" if it contains any `markers` entry
    _or_ matches any rule's `match` glob (`.git`, `*.sln`, `package.json`,
-   `Cargo.toml`, `pom.xml`, `Gemfile`, …).
+   `Cargo.toml`, `pom.xml`, `Gemfile`, …). Every folder directly inside a root
+   is listed too, marker or not (Settings ▸ Repos ▸ "List every folder directly
+   inside a root"), unless it only holds other repos. While the app runs, the roots
+   are watched, so repos created, deleted or moved in show up within a second
+   or so.
 2. **Inspection** — on selection, the repo tree is read for project manifests and
    their details (scripts, package manager, Python runner, compose files).
 3. **Rules** — `default_config.yaml` maps manifests to actions. `requires: [bin]`
@@ -200,7 +204,7 @@ smoke-testing a Linux bundle locally.
 ## Usage
 
 dev-prompt is meant to sit in the background and be summoned by its hotkey, so
-turn on **Settings ▸ Start at login** — then the hotkey is live from every boot
+turn on **Settings ▸ General ▸ Start at login** — then the hotkey is live from every boot
 and the app is never a window you have to find. (On Flatpak your desktop asks
 permission the first time; on the AppImage there's no autostart hook, so add one
 via your desktop's session settings.)
@@ -213,9 +217,25 @@ via your desktop's session settings.)
 | `Up` / `Down`        | move selection                                        |
 | `Enter`              | open the action menu for the selected repo            |
 | `Ctrl+R`             | force a rescan                                        |
+| `Ctrl+Shift+N`       | create a new repository (see below)                   |
 | `Delete`             | clear the query                                       |
 | `Ctrl+,`             | open Settings                                         |
 | `Esc` / click away   | hide the overlay                                      |
+
+**New repository** (`Ctrl+Shift+N`) creates a folder in one of your roots and
+sets up version control in it — Git, Jujutsu, Mercurial, Breezy or Darcs,
+whichever are installed — then opens its action menu. Pick a name, a root (if
+you have more than one) and a tool; `Tab` moves between fields, `Enter`
+creates, `Esc` goes back. If setup fails, the error is shown and the folder is
+removed again. No remotes are set up; do that from your terminal or editor.
+
+A folder that isn't under version control yet (notes, documents, a project you
+haven't set up) shows up without a badge, and its action menu offers **Set up
+version control…** — the same form, for that folder. If setup fails, only what
+it added is removed; nothing already in the folder is touched.
+Subversion isn't offered — see
+[docs/rules-engine.md](docs/rules-engine.md#subversion-in-new-repository) for
+why, and how to add it anyway.
 
 **Action menu**
 
@@ -225,6 +245,31 @@ via your desktop's session settings.)
 | `Enter` | run the selected action, or drill into a sub-project |
 | `Tab`   | drill into the selected sub-project                  |
 | `Esc`   | step back one level (sub-project → menu → repo list) |
+
+**Right-click** works where it's useful, styled like the rest of the app:
+
+- a **repo** — open its actions, its quick actions (terminal, file manager,
+  copy path, run command), "Set up version control…" when it has none, the
+  actions you use most in that repo, and "Move to Recycle Bin…" (see below);
+- an **app** in `>` — launch it, show its folder, copy its path;
+- an **action** — run it, or copy the command it would run;
+- a **text field** — cut, copy, paste, select all.
+
+Anywhere else right-click does nothing — the browser's own Back / Reload /
+Print menu never shows. (In a dev build, Shift+right-click still opens it, for
+Inspect.)
+
+**Move to Recycle Bin** (Trash on Linux) — from a repo's right-click menu or
+its action menu — never deletes outright: the folder goes to the bin, Undo
+(`Ctrl+Z`) appears right after, and on Windows a folder too big for the bin
+gets Windows' own "permanently delete?" prompt rather than vanishing. First it
+checks what exists nowhere else: uncommitted changes, commits on no remote,
+stashes / shelves, repos nested inside, or no version control at all. A clean
+repo whose commits are all on a remote is one click; anything else lists what's
+at risk and asks you to type the folder's name. Git, Mercurial and Jujutsu are
+checked fully offline; for Subversion, Breezy, Darcs and Fossil only local
+changes can be checked without contacting the remote, so those always ask for
+the name. Your root folders themselves are never offered.
 
 The mouse **back / forward** buttons work throughout: back == `Esc` for the
 current screen, forward == open the action menu on the repo list, or drill
@@ -252,7 +297,9 @@ src/                        Svelte frontend (overlay UI)
   lib/fuzzy.ts              fzf-style scorer
   lib/updater.ts            auto-update check / install
   lib/components/           SearchInput, ResultList, ResultRow, ActionMenu,
-                            Settings, Highlight, ClearButton
+                            Highlight, ClearButton, …
+  lib/components/settings/  the Settings shell (sidebar + autosave) and one
+                            component per page
 src-tauri/                  Rust backend
   src/config.rs             config schema, load/merge, path expansion
   src/default_config.yaml   bundled markers / programs / rules / universal

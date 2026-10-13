@@ -1,14 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
   Action,
   AppConfig,
   AppEntry,
   AppListPayload,
+  ConfigPatch,
   ConfigSummary,
   FileManagerOption,
+  NewRepoOptions,
+  RemovalAssessment,
+  Repo,
   RepoListPayload,
   RepoTrace,
   ScoredRepo,
@@ -92,24 +96,7 @@ export function reloadConfig(): Promise<AppConfig> {
 }
 
 /** Save an editable subset of settings; returns the updated config. */
-export function saveConfig(patch: {
-  hotkey?: string;
-  /** "" turns the second (app-launcher) hotkey off. */
-  apps_hotkey?: string;
-  roots?: string[];
-  cache_ttl_secs?: number;
-  dismiss?: "always" | "keep_on_blur" | "manual";
-  scan_max_depth?: number;
-  collapse_nested?: boolean | "auto";
-  /** "" clears the pin / template / shell back to auto. */
-  terminal?: string;
-  terminal_template?: string;
-  shell?: string;
-  /** "" clears the pin / template back to auto. */
-  filemanager?: string;
-  filemanager_template?: string;
-  apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
-}): Promise<AppConfig> {
+export function saveConfig(patch: ConfigPatch): Promise<AppConfig> {
   return invoke<AppConfig>("save_config", { patch });
 }
 
@@ -145,6 +132,62 @@ export function runCommand(
   shell?: string,
 ): Promise<void> {
   return invoke<void>("run_command", { path, command, shell: shell || null });
+}
+
+/** Roots + installed version-control setups for the "New repository" screen. */
+export function newRepoOptions(): Promise<NewRepoOptions> {
+  return invoke<NewRepoOptions>("new_repo_options");
+}
+
+/** Whether each path (`~` / environment variables allowed) is an existing folder. */
+export function foldersExist(paths: string[]): Promise<boolean[]> {
+  return invoke<boolean[]>("folders_exist", { paths });
+}
+
+/** Why `name` can't be created under `root`; `null` when it can. */
+export function checkNewRepo(root: string, name: string): Promise<string | null> {
+  return invoke<string | null>("check_new_repo", { root, name });
+}
+
+/**
+ * Create `<root>/<name>` and run version-control setup `tool` in it. Resolves to
+ * the new repo (already added to the list); rejects with the tool's error.
+ */
+export function createRepo(
+  root: string,
+  name: string,
+  tool: string,
+  values: Record<string, string>,
+): Promise<Repo> {
+  return invoke<Repo>("create_repo", { root, name, tool, values });
+}
+
+/**
+ * Set up version control in an existing folder that has none. Resolves to the
+ * versioned repo (already updated in the list); rejects with the tool's error.
+ */
+export function initRepo(
+  path: string,
+  tool: string,
+  values: Record<string, string>,
+): Promise<Repo> {
+  return invoke<Repo>("init_repo", { path, tool, values });
+}
+
+/** What moving the folder at `path` to the bin would lose. */
+export function assessRemoval(path: string): Promise<RemovalAssessment> {
+  return invoke<RemovalAssessment>("assess_removal", { path });
+}
+
+/** Move a listed folder to the Recycle Bin / Trash. Resolves to whether Undo
+ *  is available. */
+export function removeFolder(path: string): Promise<boolean> {
+  return invoke<boolean>("remove_folder", { path });
+}
+
+/** Put the folder last moved to the bin back. Resolves to its path. */
+export function undoRemoval(): Promise<string> {
+  return invoke<string>("undo_removal");
 }
 
 /** Cache-first list of installed apps for the `>` scope. */
@@ -250,6 +293,25 @@ export function setDismissOnBlur(enabled: boolean): Promise<void> {
 
 export function copyPath(path: string): Promise<void> {
   return writeText(path);
+}
+
+/** Put any text on the clipboard. */
+export function copyText(text: string): Promise<void> {
+  return writeText(text);
+}
+
+/** The clipboard's text, or "" when it holds none (an image, nothing). */
+export async function readClipboard(): Promise<string> {
+  try {
+    return (await readText()) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Open the folder holding `path` in the user's file manager. */
+export function showFolder(path: string): Promise<void> {
+  return invoke<void>("show_folder", { path });
 }
 
 /**

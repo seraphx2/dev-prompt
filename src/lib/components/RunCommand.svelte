@@ -74,7 +74,7 @@
 <div class="flex items-center gap-2 border-b border-hair px-3 py-2.5">
   <button
     type="button"
-    class="shrink-0 rounded px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
+    class="shrink-0 rounded-sm px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
     onclick={onback}
     aria-label="Back"
   >
@@ -88,7 +88,7 @@
     bind:value={shellSel}
     onkeydown={onKey}
     title="Shell to run in"
-    class="shrink-0 cursor-pointer rounded border border-hair bg-white/[0.04] py-1 pl-1.5 pr-6 text-[12px] text-white/80 focus:outline-none"
+    class="shrink-0 cursor-pointer rounded-sm border border-hair bg-white/4 py-1 pl-1.5 pr-6 text-[12px] text-white/80 focus:outline-hidden"
   >
     {#each shells as s (s)}
       <option value={s}>{s}</option>
@@ -111,7 +111,7 @@
       spellcheck="false"
       autocomplete="off"
       placeholder={parts.parameterized ? "" : "command to run…"}
-      class="min-w-0 flex-1 bg-transparent text-white/90 placeholder:text-white/25 focus:outline-none"
+      class="min-w-0 flex-1 bg-transparent text-white/90 placeholder:text-white/25 focus:outline-hidden"
     />
     {#if parts.parameterized}
       <span class="whitespace-pre text-white/40">{parts.after}</span>

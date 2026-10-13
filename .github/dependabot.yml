@@ -4,8 +4,12 @@
 # separate repo setting and open PRs only for actual advisories.
 version: 2
 updates:
+  # Actions are pinned to commit SHAs with the version in a comment; this bumps
+  # both. The composite actions under .github/actions are scanned too.
   - package-ecosystem: github-actions
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     target-branch: dev
     schedule:
       interval: weekly

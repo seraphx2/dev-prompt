@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { classifyHotkey } from "../hotkeys";
+  import { classifyHotkey } from "../../hotkeys";
 
   let {
     label,
@@ -104,10 +104,10 @@
     type="button"
     onclick={start}
     onkeydown={onKey}
-    class="flex w-full items-center justify-between rounded border px-2 py-1.5 text-left transition-colors
+    class="flex w-full items-center justify-between rounded-sm border px-2 py-1.5 text-left transition-colors
            {capturing
-      ? 'border-orange-400/60 bg-orange-400/[0.08]'
-      : 'border-hair bg-white/[0.04] hover:border-white/25'}"
+      ? 'border-orange-400/60 bg-orange-400/8'
+      : 'border-hair bg-white/4 hover:border-white/25'}"
   >
     <span
       class="font-mono text-[12px] {capturing ? 'text-white/40' : 'text-white/90'}"
@@ -121,7 +121,7 @@
 
   {#if pending}
     <div
-      class="rounded border border-amber-400/40 bg-amber-400/[0.07] px-2.5 py-2 text-[11px]"
+      class="rounded-sm border border-amber-400/40 bg-amber-400/[0.07] px-2.5 py-2 text-[11px]"
     >
       <div class="text-amber-200/90">
         <span class="font-mono text-white/90">{pending}</span> — {pendingReason}
@@ -131,13 +131,13 @@
           type="button"
           disabled={busy}
           onclick={confirmPending}
-          class="rounded border border-amber-400/50 bg-amber-400/15 px-2 py-1 text-amber-100 hover:bg-amber-400/25 disabled:opacity-50"
+          class="rounded-sm border border-amber-400/50 bg-amber-400/15 px-2 py-1 text-amber-100 hover:bg-amber-400/25 disabled:opacity-50"
           >Use it anyway</button
         >
         <button
           type="button"
           onclick={start}
-          class="rounded border border-hair px-2 py-1 text-white/50 hover:bg-white/10"
+          class="rounded-sm border border-hair px-2 py-1 text-white/50 hover:bg-white/10"
           >Pick another</button
         >
       </div>

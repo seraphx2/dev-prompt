@@ -71,6 +71,8 @@ pub struct Config {
     pub rules: Vec<Rule>,
     /// Always-available actions.
     pub universal: UniversalConfig,
+    /// Version-control setups offered by the "New repository" screen.
+    pub provision: Vec<Provisioner>,
     /// Built-in rules the user turned off (kept for the settings viewer, never
     /// evaluated).
     #[serde(skip)]
@@ -98,6 +100,7 @@ impl Default for Config {
             programs: BTreeMap::new(),
             rules: Vec::new(),
             universal: UniversalConfig::default(),
+            provision: Vec::new(),
             disabled_rules: Vec::new(),
         }
     }
@@ -133,6 +136,9 @@ pub struct ScanConfig {
     pub max_depth: usize,
     /// What to do when a discovered repo sits inside another discovered repo.
     pub collapse_nested: CollapseNested,
+    /// List every folder directly inside a root, marker or not — except one
+    /// that only groups other repos. Deeper folders still need a marker.
+    pub top_level_folders: bool,
 }
 
 impl Default for ScanConfig {
@@ -140,6 +146,7 @@ impl Default for ScanConfig {
         ScanConfig {
             max_depth: 4,
             collapse_nested: CollapseNested::default(),
+            top_level_folders: true,
         }
     }
 }
@@ -356,6 +363,13 @@ pub struct RuleAction {
     pub prompt: bool,
     /// Handled in the frontend (e.g. copy path). No process spawned.
     pub client: bool,
+    /// Opens the "Set up version control" form for this folder instead of
+    /// running anything. Universal only; offered when the folder has no
+    /// version control yet and some `provision:` entry is installed.
+    pub provision: bool,
+    /// Opens the "Move to Recycle Bin / Trash" confirmation for this folder.
+    /// Universal only; never offered for a folder that is one of the roots.
+    pub remove: bool,
     /// Icon key for the menu row (see `src/lib/icons.ts` / Settings ▸ Icons).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
@@ -386,6 +400,35 @@ pub struct UniversalConfig {
     /// Built-ins the user turned off — kept for the settings viewer.
     #[serde(skip)]
     pub disabled: Vec<RuleAction>,
+}
+
+/// One `provision:` entry — how the "New repository" screen (Ctrl+Shift+N) puts
+/// version control into a folder it just created. See `provision.rs`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct Provisioner {
+    pub id: String,
+    pub label: String,
+    /// Bare executables that must be on `PATH` for this to be offered. Each
+    /// `run` command's program is checked as well.
+    pub requires: Vec<String>,
+    /// Extra inputs shown on the form; a field's value is `{{<id>}}` in `run`.
+    pub fields: Vec<ProvisionField>,
+    /// Commands run in order inside the new folder, each an argv list.
+    /// `{{dir}}` / `{{name}}` / `{{root}}` and every field id are expanded.
+    pub run: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct ProvisionField {
+    pub id: String,
+    pub label: String,
+    /// Prefilled value when `default_from` is unset or prints nothing.
+    pub default: String,
+    /// A command (argv) whose first line of output prefills the field, e.g.
+    /// `git config --get init.defaultBranch`.
+    pub default_from: Vec<String>,
 }
 
 // --- user config (the on-disk file) ---------------------------------------
@@ -439,6 +482,11 @@ pub struct RuleOverrides {
     pub rules_disable: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub universal: Option<UniversalPatch>,
+    /// Merged by `id`: a matching built-in is replaced, a new id is added.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub provision: Vec<Provisioner>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub provision_disable: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -550,6 +598,16 @@ fn merge_overrides(cfg: &mut Config, u: RuleOverrides) {
             cfg.universal.actions = kept;
         }
         cfg.universal.actions.extend(p.add);
+    }
+
+    for p in u.provision {
+        match cfg.provision.iter_mut().find(|b| b.id == p.id) {
+            Some(slot) => *slot = p,
+            None => cfg.provision.push(p),
+        }
+    }
+    if !u.provision_disable.is_empty() {
+        cfg.provision.retain(|p| !u.provision_disable.contains(&p.id));
     }
 }
 
@@ -855,9 +913,20 @@ mod tests {
         let y = serde_yaml_ng::to_string(&ScanConfig {
             max_depth: 4,
             collapse_nested: CollapseNested::Auto,
+            top_level_folders: true,
         })
         .unwrap();
         assert!(y.contains("collapse_nested: auto"), "{y}");
+    }
+
+    #[test]
+    fn top_level_folders_defaults_on_and_survives_an_older_config() {
+        assert!(bundled_defaults().scan.top_level_folders);
+        // A `scan:` block written before the key existed keeps the default.
+        let s: ScanConfig = serde_yaml_ng::from_str("max_depth: 3").unwrap();
+        assert!(s.top_level_folders);
+        let s: ScanConfig = serde_yaml_ng::from_str("top_level_folders: false").unwrap();
+        assert!(!s.top_level_folders);
     }
 
     #[test]
@@ -951,6 +1020,54 @@ rules_disable: [docker-image]
         assert!(ov.rules.is_empty());
         assert!(ov.rules_disable.is_empty());
         assert!(ov.universal.is_none());
+        assert!(ov.provision.is_empty());
+        assert!(ov.provision_disable.is_empty());
+    }
+
+    #[test]
+    fn bundled_defaults_carry_the_provisioners() {
+        let cfg = bundled_defaults();
+        let ids: Vec<&str> = cfg.provision.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["git", "jj", "hg", "brz", "darcs"]);
+        // Subversion stays docs-only: its repository has to live outside the
+        // working folder (see docs/rules-engine.md).
+        assert!(!ids.contains(&"svn"));
+        for p in &cfg.provision {
+            assert!(!p.run.is_empty(), "`{}` has no commands", p.id);
+            assert!(p.run.iter().all(|argv| !argv.is_empty()), "`{}` has an empty command", p.id);
+            assert!(
+                crate::provision::check_template(p).is_ok(),
+                "`{}`: {:?}",
+                p.id,
+                crate::provision::check_template(p)
+            );
+        }
+    }
+
+    #[test]
+    fn rules_file_merges_provision_by_id_and_disables() {
+        let mut cfg = bundled_defaults();
+        let ov: RuleOverrides = serde_yaml_ng::from_str(
+            r#"
+provision:
+  - id: git
+    label: Git (no branch)
+    requires: [git]
+    run: [[git, init]]
+  - id: svn
+    label: Subversion
+    run: [[svnadmin, create, "{{root}}/.svnrepos/{{name}}"]]
+provision_disable: [darcs]
+"#,
+        )
+        .unwrap();
+        merge_overrides(&mut cfg, ov);
+        let git = cfg.provision.iter().find(|p| p.id == "git").unwrap();
+        assert_eq!(git.label, "Git (no branch)");
+        assert!(git.fields.is_empty());
+        assert_eq!(cfg.provision[0].id, "git"); // replaced in place, not appended
+        assert_eq!(cfg.provision.last().unwrap().id, "svn");
+        assert!(!cfg.provision.iter().any(|p| p.id == "darcs"));
     }
 
     #[test]

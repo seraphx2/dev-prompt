@@ -31,6 +31,15 @@ pub struct AppState {
     pub apps: Mutex<Vec<AppEntry>>,
     /// Age (secs) of `apps`; -1 when never cached.
     pub apps_age_secs: Mutex<i64>,
+    /// Every gathered row `apps` was combined from (see `apps::Index`), so the
+    /// app watcher can apply one change without gathering everything.
+    pub apps_index: Mutex<apps::Index>,
+    /// Held for the length of an app scan or update, so they never overlap.
+    pub apps_gate: Mutex<()>,
+    /// Watches where apps get installed (see `app_watch.rs`); `None` when off.
+    pub app_watcher: Mutex<Option<crate::app_watch::Watching>>,
+    /// The folder last moved to the Recycle Bin / Trash, for Undo.
+    pub last_removed: Mutex<Option<trash::TrashItem>>,
     /// Whether losing focus dismisses the overlay. Off while the settings
     /// screen is open so clicking away to copy a path doesn't nuke edits.
     pub dismiss_on_blur: Mutex<bool>,
@@ -41,6 +50,12 @@ pub struct AppState {
     /// closes it (Esc, launching something, the hotkey, Alt+F4). Cleared on that
     /// first dismiss, after which `dismiss_on_blur` governs as usual.
     pub sticky_open: Mutex<bool>,
+    /// Watches the roots for repos appearing or going (see `watch.rs`); `None`
+    /// when no watcher could be started. Replaced on every config change.
+    pub watcher: Mutex<Option<crate::watch::RepoWatcher>>,
+    /// Held for the length of a rescan, so the watcher's and the user's never
+    /// overlap.
+    pub scan_gate: Mutex<()>,
 }
 
 impl AppState {
@@ -52,7 +67,11 @@ impl AppState {
             contexts: HashMap::new(),
             age_secs: -1,
         });
-        let (apps, apps_age) = cache::load_apps().unwrap_or((Vec::new(), -1));
+        let loaded_apps = cache::load_apps().unwrap_or(cache::LoadedApps {
+            apps: Vec::new(),
+            index: apps::Index::default(),
+            age_secs: -1,
+        });
         // Seed blur-dismiss from the saved preference; the frontend re-asserts it
         // per screen (off for Settings / run-command) once it mounts.
         let dismiss_on_blur = config.dismiss == config::DismissMode::Always;
@@ -61,11 +80,17 @@ impl AppState {
             repos: Mutex::new(loaded.repos),
             contexts: Mutex::new(loaded.contexts),
             age_secs: Mutex::new(loaded.age_secs),
-            apps: Mutex::new(apps),
-            apps_age_secs: Mutex::new(apps_age),
+            apps: Mutex::new(loaded_apps.apps),
+            apps_age_secs: Mutex::new(loaded_apps.age_secs),
+            apps_index: Mutex::new(loaded_apps.index),
+            apps_gate: Mutex::new(()),
+            app_watcher: Mutex::new(None),
+            last_removed: Mutex::new(None),
             dismiss_on_blur: Mutex::new(dismiss_on_blur),
             first_run,
             sticky_open: Mutex::new(first_run),
+            watcher: Mutex::new(None),
+            scan_gate: Mutex::new(()),
         }
     }
 }
@@ -115,30 +140,44 @@ pub fn list_repos(state: State<'_, AppState>) -> RepoListPayload {
 }
 
 #[tauri::command]
-pub async fn rescan_repos(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> AppResult<RepoListPayload> {
-    // Re-read config.yaml so edits to `roots` / rules take effect without an app
-    // restart. A YAML syntax error surfaces here instead of being silently
-    // ignored, and stale program lookups are forgotten.
-    crate::rules::clear_program_cache();
-    let cfg = config::load()?;
-    *state.config.lock().unwrap() = cfg.clone();
-    let previous = state.repos.lock().unwrap().clone();
-
-    // Filesystem walk + per-repo inspection off the main thread. Doing the
-    // inspection here (while the walk's dir entries are still cache-warm) is far
-    // cheaper than a cold walk later when the action menu is opened.
-    let (fresh, contexts) = tauri::async_runtime::spawn_blocking(move || {
-        let roots = resolved_roots(&cfg);
-        let repos = scan::scan(&roots, &cfg);
-        let discovery = config::compile_globset(&config::discovery_globs(&cfg));
-        let contexts = inspect::inspect_all(repos.iter().map(|r| r.path.as_str()), &discovery);
-        (repos, contexts)
+pub async fn rescan_repos(app: AppHandle) -> AppResult<RepoListPayload> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = rescan_blocking(&app, true)?;
+        // `roots` / `scan` may have changed on disk.
+        crate::watch::sync(&app);
+        Ok(out)
     })
     .await
-    .map_err(|e| AppError::msg(format!("scan task failed: {e}")))?;
+    .map_err(|e| AppError::msg(format!("scan task failed: {e}")))?
+}
+
+/// Walk the roots and replace the repo list (and cache), then emit
+/// `repos:updated`. Blocking — run it off the UI thread. `reload` re-reads
+/// `config.yaml` / `rules.yaml` first, so edits to `roots` or rules apply
+/// without a restart and a YAML error surfaces instead of being ignored; the
+/// watcher's rescans skip that and use the config already loaded.
+pub fn rescan_blocking(app: &AppHandle, reload: bool) -> AppResult<RepoListPayload> {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let _gate = state.scan_gate.lock().unwrap();
+
+    let cfg = if reload {
+        crate::rules::clear_program_cache();
+        let cfg = config::load()?;
+        *state.config.lock().unwrap() = cfg.clone();
+        cfg
+    } else {
+        state.config.lock().unwrap().clone()
+    };
+    let previous = state.repos.lock().unwrap().clone();
+
+    // Doing the inspection here (while the walk's dir entries are still
+    // cache-warm) is far cheaper than a cold walk later when the action menu
+    // is opened.
+    let roots = resolved_roots(&cfg);
+    let fresh = scan::scan(&roots, &cfg);
+    let discovery = config::compile_globset(&config::discovery_globs(&cfg));
+    let contexts = inspect::inspect_all(fresh.iter().map(|r| r.path.as_str()), &discovery);
 
     let merged = cache::merge(&previous, fresh);
     cache::save(&merged, &contexts)?;
@@ -160,6 +199,200 @@ pub fn search_repos(
 ) -> Vec<ScoredRepo> {
     let repos = state.repos.lock().unwrap();
     index::search(&query, &repos, limit.unwrap_or(200))
+}
+
+// --- new repository (Ctrl+Shift+N) -----------------------------------------
+
+/// Roots and installed version-control setups for the "New repository" form.
+/// `async` + `spawn_blocking`: the PATH checks and each field's `default_from`
+/// command (e.g. `git config --get init.defaultBranch`) spawn processes.
+#[tauri::command]
+pub async fn new_repo_options(
+    state: State<'_, AppState>,
+) -> AppResult<crate::provision::NewRepoOptions> {
+    let cfg = state.config.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || crate::provision::options(&cfg))
+        .await
+        .map_err(|e| AppError::msg(format!("new repository task failed: {e}")))
+}
+
+/// Whether each path (as typed in Settings: `~` and environment variables
+/// allowed) names an existing folder. Settings won't save one that doesn't.
+#[tauri::command]
+pub fn folders_exist(paths: Vec<String>) -> Vec<bool> {
+    paths.iter().map(|p| config::expand_path(p).is_dir()).collect()
+}
+
+/// Why `name` can't be created under `root` (`None` = it can). Called as the
+/// user types, so it only reads the disk.
+#[tauri::command]
+pub fn check_new_repo(state: State<'_, AppState>, root: String, name: String) -> Option<String> {
+    let cfg = state.config.lock().unwrap();
+    crate::provision::check_target(&cfg, &root, &name).err()
+}
+
+/// Create `<root>/<name>`, run the chosen setup in it, and add the result to
+/// the repo list (and cache) without a rescan. Emits `repos:updated`.
+#[tauri::command]
+pub async fn create_repo(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    root: String,
+    name: String,
+    tool: String,
+    values: HashMap<String, String>,
+) -> AppResult<Repo> {
+    let cfg = state.config.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = crate::provision::create(&cfg, &root, &name, &tool, &values)?;
+        let ctx = inspect_cold(&repo.path, &cfg);
+        put_repo(&app, &repo, ctx);
+        Ok::<_, AppError>(repo)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("new repository task failed: {e}")))?
+}
+
+/// Run a version-control setup in an existing folder that has none ("Set up
+/// version control…"). The repo's list entry is replaced with the versioned
+/// one. Emits `repos:updated`.
+#[tauri::command]
+pub async fn init_repo(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    tool: String,
+    values: HashMap<String, String>,
+) -> AppResult<Repo> {
+    let cfg = state.config.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = crate::provision::init_existing(&cfg, &path, &tool, &values)?;
+        let ctx = inspect_cold(&repo.path, &cfg);
+        put_repo(&app, &repo, ctx);
+        Ok::<_, AppError>(repo)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("version-control setup task failed: {e}")))?
+}
+
+/// Add `repo` to the list (replacing an entry at the same path), store its
+/// inspection, save the cache and tell the frontend. Blocking — it waits for
+/// a rescan in progress, whose older list would otherwise overwrite this.
+fn put_repo(app: &AppHandle, repo: &Repo, ctx: RepoContext) {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let _gate = state.scan_gate.lock().unwrap();
+    {
+        let mut repos = state.repos.lock().unwrap();
+        repos.retain(|r| r.path != repo.path);
+        repos.push(repo.clone());
+        repos.sort_by_key(|r| r.name.to_lowercase());
+    }
+    state.contexts.lock().unwrap().insert(repo.path.clone(), ctx);
+    save_list(app, &state);
+}
+
+/// Take `dir` and everything below it out of the list. Blocking, like
+/// [`put_repo`], for the same reason.
+fn drop_from_list(app: &AppHandle, dir: &Path) {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let _gate = state.scan_gate.lock().unwrap();
+    state.repos.lock().unwrap().retain(|r| !Path::new(&r.path).starts_with(dir));
+    state.contexts.lock().unwrap().retain(|p, _| !Path::new(p).starts_with(dir));
+    save_list(app, &state);
+}
+
+/// Save the list to the cache and tell the frontend it changed.
+fn save_list(app: &AppHandle, state: &AppState) {
+    let repos = state.repos.lock().unwrap().clone();
+    let contexts = state.contexts.lock().unwrap().clone();
+    let _ = cache::save(&repos, &contexts);
+    let _ = app.emit("repos:updated", ());
+}
+
+// --- move to Recycle Bin / Trash -------------------------------------------
+
+/// What moving `path` to the bin would lose, for the confirmation dialog.
+/// Runs version-control queries, so it's off the UI thread.
+#[tauri::command]
+pub async fn assess_removal(
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<crate::removal::Assessment> {
+    let dir = {
+        let cfg = state.config.lock().unwrap();
+        let repos = state.repos.lock().unwrap();
+        crate::removal::check_removable(&cfg, &repos, &path).map_err(AppError::msg)?
+    };
+    tauri::async_runtime::spawn_blocking(move || crate::removal::assess(&dir))
+        .await
+        .map_err(|e| AppError::msg(format!("checking the folder failed: {e}")))
+}
+
+/// Move a listed folder to the Recycle Bin / Trash and take it out of the
+/// list. The path is checked again here — the frontend's word isn't enough
+/// for something this destructive. Returns whether Undo is available.
+#[tauri::command]
+pub async fn remove_folder(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<bool> {
+    let dir = {
+        let cfg = state.config.lock().unwrap();
+        let repos = state.repos.lock().unwrap();
+        crate::removal::check_removable(&cfg, &repos, &path).map_err(AppError::msg)?
+    };
+    // Windows may ask "permanently delete?" (a folder too big for the bin, a
+    // drive without one); that prompt must not open behind the overlay.
+    let _ = window.set_always_on_top(false);
+    let item = tauri::async_runtime::spawn_blocking(move || {
+        let item = crate::removal::move_to_trash(&dir)?;
+        drop_from_list(&app, &dir);
+        Ok::<_, AppError>(item)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("moving the folder failed: {e}")))??;
+
+    let undoable = item.is_some();
+    *state.last_removed.lock().unwrap() = item;
+    Ok(undoable)
+}
+
+/// Put the folder last moved to the bin back, and rescan so it's listed again
+/// exactly as the scan would list it. Returns its path.
+#[tauri::command]
+pub async fn undo_removal(app: AppHandle, state: State<'_, AppState>) -> AppResult<String> {
+    let item = state
+        .last_removed
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or_else(|| AppError::msg("There's nothing to undo."))?;
+    let kept = item.clone();
+    let restored = tauri::async_runtime::spawn_blocking(move || {
+        let path = crate::removal::restore(item)?;
+        // It's back either way; a failed rescan mustn't read as a failed
+        // undo. The watcher sees the folder return and lists it then.
+        if let Err(e) = rescan_blocking(&app, false) {
+            eprintln!("rescan after undo failed: {e}");
+        }
+        Ok::<_, AppError>(path)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("restoring the folder failed: {e}")))?;
+    match restored {
+        Ok(path) => Ok(path.to_string_lossy().into_owned()),
+        Err(e) => {
+            // Still in the bin: keep Undo available for another try.
+            if kept.original_path().symlink_metadata().is_err() {
+                *state.last_removed.lock().unwrap() = Some(kept);
+            }
+            Err(e)
+        }
+    }
 }
 
 /// Patch each universal-tier action's `usage_score` in from `action_usage`.
@@ -406,10 +639,12 @@ pub async fn config_summary(
 /// Re-read `config.yaml` + `rules.yaml` from disk, forget memoized program
 /// lookups, and return the fresh merged config (does not re-scan repos).
 #[tauri::command]
-pub fn reload_config(state: State<'_, AppState>) -> AppResult<Config> {
+pub fn reload_config(app: AppHandle, state: State<'_, AppState>) -> AppResult<Config> {
     crate::rules::clear_program_cache();
     let cfg = config::load()?;
     *state.config.lock().unwrap() = cfg.clone();
+    crate::watch::sync_in_background(&app);
+    crate::app_watch::sync_in_background(&app);
     Ok(cfg)
 }
 
@@ -424,6 +659,7 @@ pub struct ConfigPatch {
     pub dismiss: Option<config::DismissMode>,
     pub scan_max_depth: Option<usize>,
     pub collapse_nested: Option<config::CollapseNested>,
+    pub top_level_folders: Option<bool>,
     /// `Some("")` clears the pin / template / shell back to auto.
     pub terminal: Option<String>,
     pub terminal_template: Option<String>,
@@ -471,13 +707,19 @@ pub fn save_config(
     if let Some(d) = patch.dismiss {
         user.dismiss = Some(d);
     }
-    if patch.scan_max_depth.is_some() || patch.collapse_nested.is_some() {
+    if patch.scan_max_depth.is_some()
+        || patch.collapse_nested.is_some()
+        || patch.top_level_folders.is_some()
+    {
         let mut scan = user.scan.clone().unwrap_or_default();
         if let Some(depth) = patch.scan_max_depth {
             scan.max_depth = depth.max(1);
         }
         if let Some(cn) = patch.collapse_nested {
             scan.collapse_nested = cn;
+        }
+        if let Some(t) = patch.top_level_folders {
+            scan.top_level_folders = t;
         }
         user.scan = Some(scan);
     }
@@ -622,6 +864,8 @@ pub fn save_config(
     let merged = config::load()?;
     *state.config.lock().unwrap() = merged.clone();
     sync_taskbar_visibility(&app, &merged);
+    crate::watch::sync_in_background(&app);
+    crate::app_watch::sync_in_background(&app);
     Ok(merged)
 }
 
@@ -752,6 +996,8 @@ pub async fn run_command(
             cwd,
             client_side: false,
             prompt: false,
+            provision: false,
+            remove: false,
         };
         launch::launch(&action, &repo)
     })
@@ -808,27 +1054,71 @@ pub fn list_apps(state: State<'_, AppState>) -> AppsPayload {
 
 /// Re-enumerate installed apps off the UI thread. Emits `apps:updated`.
 #[tauri::command]
-pub async fn rescan_apps(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppsPayload> {
+pub async fn rescan_apps(app: AppHandle) -> AppResult<AppsPayload> {
+    tauri::async_runtime::spawn_blocking(move || rescan_apps_blocking(&app))
+        .await
+        .map_err(|e| AppError::msg(format!("app scan task failed: {e}")))?
+}
+
+/// Gather every app source in full and replace the list (and cache), then emit
+/// `apps:updated`. Blocking — run it off the UI thread.
+pub fn rescan_apps_blocking(app: &AppHandle) -> AppResult<AppsPayload> {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let _gate = state.apps_gate.lock().unwrap();
     let cfg = state.config.lock().unwrap().clone();
+    let index = apps::gather_all(&cfg, &apps::Sources::from_config(&cfg))?;
+    Ok(store_apps(app, &state, index))
+}
 
-    let fresh = if cfg.apps.enabled {
-        tauri::async_runtime::spawn_blocking(move || apps::discover(&cfg))
-            .await
-            .map_err(|e| AppError::msg(format!("app scan task failed: {e}")))?
-    } else {
-        Vec::new()
+/// Apply what the app watcher saw: re-gather only the items it touched. Falls
+/// back to a full rescan when there's no index to update (a cache written
+/// before incremental updates existed) or the update itself fails.
+pub fn update_apps_blocking(app: &AppHandle, changes: &[apps::Change]) -> AppResult<()> {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let updated = {
+        let _gate = state.apps_gate.lock().unwrap();
+        let cfg = state.config.lock().unwrap().clone();
+        let index = state.apps_index.lock().unwrap().clone();
+        let have_index = !index.gathered.is_empty() || state.apps.lock().unwrap().is_empty();
+        if have_index {
+            match apps::update(&cfg, &apps::Sources::from_config(&cfg), &index, changes) {
+                Ok(next) => {
+                    store_apps(app, &state, next);
+                    true
+                }
+                Err(e) => {
+                    eprintln!("app update failed, rescanning: {e}");
+                    false
+                }
+            }
+        } else {
+            false
+        }
     };
+    if !updated {
+        rescan_apps_blocking(app)?;
+    }
+    Ok(())
+}
 
-    cache::save_apps(&fresh)?;
-    *state.apps.lock().unwrap() = fresh.clone();
+/// Combine `index` into the list, save both, update state, emit `apps:updated`.
+fn store_apps(app: &AppHandle, state: &AppState, index: apps::Index) -> AppsPayload {
+    let list = apps::combine(&index);
+    if let Err(e) = cache::save_apps(&list, &index) {
+        eprintln!("saving apps.json failed: {e}");
+    }
+    *state.apps.lock().unwrap() = list.clone();
+    *state.apps_index.lock().unwrap() = index;
     *state.apps_age_secs.lock().unwrap() = 0;
 
     let _ = app.emit("apps:updated", ());
-    Ok(AppsPayload {
-        apps: apps_with_usage(fresh),
+    AppsPayload {
+        apps: apps_with_usage(list),
         age_secs: 0,
         stale: false,
-    })
+    }
 }
 
 /// Launch an installed app, bumping its frecency count only if the launch
@@ -1008,6 +1298,40 @@ fn open_with_os_handler(window: &tauri::WebviewWindow, target: &std::ffi::OsStr)
         .map_err(|e| AppError::msg(format!("could not open {}: {e}", target.to_string_lossy())))?;
 
     let _ = window.set_always_on_top(false);
+    Ok(())
+}
+
+/// Open the folder holding `path` (or `path` itself, if it's a folder) in the
+/// user's file manager — the same resolution, pin and template as the
+/// "Show in file manager" action. Feeds the app row's right-click menu.
+#[tauri::command]
+pub async fn show_folder(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<()> {
+    let p = Path::new(&path);
+    let dir = if p.is_dir() { p } else { p.parent().unwrap_or(p) }.to_path_buf();
+    let cfg = state.config.lock().unwrap().clone();
+    let launched = tauri::async_runtime::spawn_blocking(move || {
+        let repo = Repo {
+            name: dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            path: dir.to_string_lossy().into_owned(),
+            vcs: None,
+            sentinels: Vec::new(),
+            last_seen: 0,
+        };
+        match evaluate_universal(&cfg, &repo).into_iter().find(|a| a.id == "filemanager") {
+            Some(action) => launch::launch(&action, &repo).map(|_| None),
+            // No file manager resolved at all: let the OS pick one.
+            None => Ok(Some(dir)),
+        }
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("show folder task failed: {e}")))??;
+    if let Some(dir) = launched {
+        open_with_os_handler(&window, dir.as_os_str())?;
+    }
     Ok(())
 }
 

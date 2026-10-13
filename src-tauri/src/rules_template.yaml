@@ -37,3 +37,14 @@
 # universal:
 #   add:
 #     - { id: helix, name: "Edit in Helix", run: "hx {{path}}", terminal: true, needs: [helix] }
+
+# Version-control setups for the New repository screen (Ctrl+Shift+N). Merged
+# by id; provision_disable: [id] hides a built-in. Subversion needs a separate
+# repository folder — see "Subversion in New repository" in the docs above.
+# provision:
+#   - id: git
+#     label: Git (no initial branch)
+#     requires: [git]
+#     run:
+#       - [git, init]
+# provision_disable: [darcs]

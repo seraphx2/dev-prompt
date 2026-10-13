@@ -19,6 +19,7 @@
     onrun,
     onquickaction,
     onback,
+    oncontext,
   }: {
     repoName: string;
     /** Sub-project name when drilled into one, else null. */
@@ -33,6 +34,8 @@
     onrun: (i: number) => void;
     onquickaction: (action: Action) => void;
     onback: () => void;
+    /** Row right-clicked -> its context menu. */
+    oncontext?: (i: number, e: MouseEvent) => void;
   } = $props();
 
   let container: HTMLDivElement | undefined = $state();
@@ -65,7 +68,7 @@
 <div class="flex items-center gap-2 border-b border-hair px-3 py-2.5">
   <button
     type="button"
-    class="shrink-0 rounded px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
+    class="shrink-0 rounded-sm px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
     onclick={onback}
     aria-label="Back"
   >
@@ -83,7 +86,7 @@
     placeholder="Filter actions…"
     spellcheck="false"
     autocomplete="off"
-    class="min-w-0 flex-1 bg-transparent text-[13px] text-white/90 placeholder:text-white/25 focus:outline-none"
+    class="min-w-0 flex-1 bg-transparent text-[13px] text-white/90 placeholder:text-white/25 focus:outline-hidden"
   />
   <ClearButton
     show={!!filter}
@@ -100,7 +103,7 @@
       <button
         type="button"
         class="flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5
-               text-[13px] text-white/70 transition-colors hover:bg-white/[0.06] hover:text-white/90"
+               text-[13px] text-white/70 transition-colors hover:bg-white/6 hover:text-white/90"
         onclick={() => onquickaction(qa.action)}
       >
         <kbd>{qa.key}</kbd>
@@ -128,8 +131,9 @@
           ? 'cursor-default'
           : i === selected
             ? 'bg-white/10'
-            : 'hover:bg-white/[0.04]'}"
+            : 'hover:bg-white/4'}"
         onclick={() => onrun(i)}
+        oncontextmenu={(e) => oncontext?.(i, e)}
         onpointerenter={() => {
           if (item.kind === "loading") return;
           if (i !== selected) skipScroll = true;
@@ -193,7 +197,9 @@
           >
             {#if g.raw}{@html g.raw}{:else}<path d={g.d} />{/if}
           </svg>
-          <span class="flex-1 truncate text-[13px] text-white/90">
+          <span
+            class="flex-1 truncate text-[13px] {item.action.remove ? 'text-red-300' : 'text-white/90'}"
+          >
             <Highlight text={item.action.label} indices={item.positions} />
           </span>
           <span

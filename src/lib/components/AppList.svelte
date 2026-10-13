@@ -8,6 +8,7 @@
     scanning = false,
     onselect,
     onactivate,
+    oncontext,
   }: {
     entries: { app: AppEntry; positions: number[] }[];
     selected: number;
@@ -15,6 +16,8 @@
     scanning?: boolean;
     onselect: (i: number) => void;
     onactivate: (i: number) => void;
+    /** Row right-clicked -> its context menu. */
+    oncontext?: (i: number, e: MouseEvent) => void;
   } = $props();
 
   let container: HTMLDivElement | undefined = $state();
@@ -41,7 +44,7 @@
     </div>
   {:else}
     {#each entries as e, i (e.app.exec)}
-      <div data-idx={i}>
+      <div data-idx={i} oncontextmenu={(e) => oncontext?.(i, e)} role="presentation">
         <AppRow
           app={e.app}
           positions={e.positions}

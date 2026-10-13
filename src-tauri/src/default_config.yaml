@@ -35,6 +35,10 @@ scan:
   #                     (not a submodule/worktree `.git` file), not in the
   #                     ancestor's .gitmodules, not under vendor/ third_party/ …
   collapse_nested: true
+  # List every folder directly inside a root even when it has no marker (notes,
+  # documents, a project not under version control yet). A folder that only
+  # groups other repos is left out. Deeper folders still need a marker.
+  top_level_folders: true
 cache_ttl_secs: 900
 # When the overlay closes itself:
 #   always       (default) — on focus loss, and after launching an action
@@ -440,8 +444,9 @@ rules:
         icon: eclipse
 
 # --- universal actions -------------------------------------------------
-# The first four work on every system; everything below is an app that may or
-# may not be installed (and is hidden via `needs:` when it isn't). Grouped:
+# The first four work on every system, and set-up-vcs is for unversioned
+# folders; everything after is an app that may or may not be installed (and is
+# hidden via `needs:` when it isn't). Grouped:
 # AI CLIs, then AI editors, then editors/IDEs, then git tools.
 universal:
   actions:
@@ -449,6 +454,9 @@ universal:
     - { id: filemanager, name: "Show in file manager", program: "{{filemanager}}", args: ["{{path}}"], icon: folder, hotkey: "Ctrl+E" }
     - { id: copy-path, name: "Copy path", client: true, icon: copy, hotkey: "Ctrl+C" }
     - { id: run-command, name: "Run command…", prompt: true, terminal: true, icon: run, hotkey: "Ctrl+R" }
+    # Only for a folder with no version control, and only when a `provision:`
+    # entry is installed. Unclustered, so it sits at the top of the list.
+    - { id: set-up-vcs, name: "Set up version control…", provision: true, icon: branch }
 
     # AI coding CLIs (terminal agents), alphabetical. `icon:` names the intended
     # brand key even where no glyph ships yet — it lights up if one is added.
@@ -489,3 +497,34 @@ universal:
     - { id: gitkraken, name: "Open in GitKraken", program: "{{gitkraken}}", args: ["-p", "{{path}}"], needs: [gitkraken], icon: gitkraken, cluster: git }
     - { id: sublime-merge, name: "Open in Sublime Merge", program: "{{smerge}}", args: ["{{path}}"], needs: [smerge], icon: git, cluster: git }
     - { id: lazygit, name: "lazygit", run: "lazygit", terminal: true, needs: [lazygit], icon: git, cluster: git }
+
+    # Last of all: move the folder to the Recycle Bin / Trash (the label names
+    # this OS's bin). Never offered for a root. Its own cluster keeps it at
+    # the bottom, after every known one.
+    - { id: remove-folder, name: "Move to Recycle Bin…", remove: true, icon: trash, cluster: remove }
+
+# --- new repository (Ctrl+Shift+N on the repo list) ---------------------------
+# Version-control setups the "New repository" screen offers. It creates the
+# folder under the chosen root, then runs `run` inside it, in order. Each entry
+# is offered only when every `requires:` binary and every command's program is
+# on PATH. A field is a form input; its value is {{<id>}} in `run`, alongside
+# {{dir}} (the new folder), {{name}} (its name), {{root}} (the chosen root) and
+# {{root_url}} (that root as a file:// URL).
+# Only tools that create a repository inside the folder itself belong here —
+# Subversion and Fossil keep it elsewhere; see docs/rules-engine.md.
+provision:
+  - id: git
+    label: Git
+    requires: [git]
+    fields:
+      - id: branch
+        label: Initial branch
+        default: main
+        default_from: [git, config, --get, init.defaultBranch]
+    run:
+      - [git, init, "--initial-branch={{branch}}"]
+  # Colocated with Git or not per the user's own `git.colocate` jj setting.
+  - { id: jj, label: Jujutsu, requires: [jj], run: [[jj, git, init]] }
+  - { id: hg, label: Mercurial, requires: [hg], run: [[hg, init]] }
+  - { id: brz, label: Breezy (Bazaar), requires: [brz], run: [[brz, init]] }
+  - { id: darcs, label: Darcs, requires: [darcs], run: [[darcs, init]] }
