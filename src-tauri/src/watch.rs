@@ -86,6 +86,14 @@ impl Filter {
             return None;
         }
 
+        // Only something appearing, going or moving can change the list. On
+        // Windows, writing *inside* a folder also reports the folder itself as
+        // modified — so without this, every write in `.git` (each `git status`)
+        // would read as "the `.git` marker changed".
+        if matches!(kind, EventKind::Modify(m) if !matches!(m, ModifyKind::Name(_))) {
+            return None;
+        }
+
         if self.discovery.is_match(last.to_lowercase()) {
             return Some(Signal::Rescan); // a marker came or went
         }
@@ -140,10 +148,6 @@ fn has_marker(dir: &Path, discovery: &GlobSet) -> bool {
 pub fn sync(app: &AppHandle) {
     let state = app.state::<AppState>();
     let cfg = state.config.lock().unwrap().clone();
-    let filter = Filter::new(&cfg);
-    let roots = filter.roots.clone();
-    let max_depth = filter.max_depth;
-
     let tx = signals(app).clone();
     let handler_app = app.clone();
     let holds_repo = move |p: &Path| {
@@ -151,6 +155,24 @@ pub fn sync(app: &AppHandle) {
         let repos = state.repos.lock().unwrap();
         repos.iter().any(|r| Path::new(&r.path).starts_with(p))
     };
+    let watcher = start(&cfg, holds_repo, move |s| {
+        let _ = tx.send(s);
+    });
+    *state.watcher.lock().unwrap() = watcher;
+}
+
+/// Watch `cfg`'s roots, passing what each relevant event means to
+/// `on_signal`. `holds_repo(p)` says whether a listed repo is at or below `p`.
+/// `None` when no watcher could be created at all.
+fn start(
+    cfg: &Config,
+    holds_repo: impl Fn(&Path) -> bool + Send + 'static,
+    on_signal: impl Fn(Signal) + Send + 'static,
+) -> Option<RecommendedWatcher> {
+    let filter = Filter::new(cfg);
+    let roots = filter.roots.clone();
+    let max_depth = filter.max_depth;
+
     let made = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let signal = match res {
             // The OS dropped events (buffer overflow): assume the worst.
@@ -167,26 +189,25 @@ pub fn sync(app: &AppHandle) {
             },
         };
         if let Some(s) = signal {
-            let _ = tx.send(s);
+            on_signal(s);
         }
     });
     let mut watcher = match made {
         Ok(w) => w,
         Err(e) => {
             eprintln!("repo watcher unavailable: {e}");
-            *state.watcher.lock().unwrap() = None;
-            return;
+            return None;
         }
     };
 
     for root in &roots {
-        if let Err(e) = watch_root(&mut watcher, root, max_depth, &cfg) {
+        if let Err(e) = watch_root(&mut watcher, root, max_depth, cfg) {
             // Typically the inotify watch limit; the open-time check covers it.
             eprintln!("watching {} stopped early: {e}", root.display());
             break;
         }
     }
-    *state.watcher.lock().unwrap() = Some(watcher);
+    Some(watcher)
 }
 
 /// [`sync`] on its own thread — for callers on the UI thread, since on Linux
@@ -265,6 +286,7 @@ fn signals(app: &AppHandle) -> &'static Sender<Signal> {
 mod tests {
     use super::*;
     use notify::event::{CreateKind, RemoveKind};
+    use std::sync::mpsc;
 
     const CREATE_DIR: EventKind = EventKind::Create(CreateKind::Folder);
     const CREATE_FILE: EventKind = EventKind::Create(CreateKind::File);
@@ -306,6 +328,11 @@ mod tests {
         assert_eq!(f.classify(&at("a/b/c/d/e/.git"), &CREATE_DIR, &none), None);
         // An ordinary file edit inside a project: dropped.
         assert_eq!(f.classify(&at("proj/src/main.rs"), &CREATE_FILE, &none), None);
+        // Windows reporting `.git` itself as modified after a write inside it,
+        // or a manifest being edited: neither changes the list.
+        let modified = EventKind::Modify(ModifyKind::Any);
+        assert_eq!(f.classify(&at("proj/.git"), &modified, &none), None);
+        assert_eq!(f.classify(&at("proj/package.json"), &modified, &none), None);
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -353,6 +380,57 @@ mod tests {
         // Linux still needs a watch on it; nothing else does.
         let want = if cfg!(target_os = "linux") { Some(Signal::Rewatch) } else { None };
         assert_eq!(got, want);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Real OS events, end to end through the filter: what a user does in
+    /// Explorer or a terminal must come out as a rescan, and git's own
+    /// churn inside `.git` must not.
+    #[test]
+    fn real_events_signal_a_rescan_and_vcs_churn_does_not() {
+        let root = tmp("real");
+        std::fs::create_dir_all(root.join("listed/.git")).unwrap();
+        let mut cfg = config::bundled_defaults();
+        cfg.roots = vec![root.to_string_lossy().into_owned()];
+        let listed = root.join("listed");
+        let (tx, rx) = mpsc::channel();
+        let _w = start(&cfg, move |p| listed.starts_with(p), move |s| {
+            let _ = tx.send(s);
+        })
+        .expect("a watcher");
+        std::thread::sleep(Duration::from_millis(300));
+
+        let next = |what: &str| {
+            let got = rx.recv_timeout(Duration::from_secs(10));
+            assert_eq!(got, Ok(Signal::Rescan), "{what}");
+            // Let the burst finish, then empty the queue for the next step.
+            std::thread::sleep(Duration::from_millis(500));
+            while rx.try_recv().is_ok() {}
+        };
+
+        // `git init` in a new project, two levels down.
+        std::fs::create_dir_all(root.join("group/proj")).unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        while rx.try_recv().is_ok() {}
+        std::fs::create_dir(root.join("group/proj/.git")).unwrap();
+        next("a new .git");
+
+        // Work inside a repo: nothing.
+        std::fs::write(root.join("listed/.git/index.lock"), "x").unwrap();
+        std::fs::write(root.join("listed/.git/HEAD"), "ref: refs/heads/main").unwrap();
+        assert!(
+            rx.recv_timeout(Duration::from_secs(2)).is_err(),
+            "changes inside .git must not rescan"
+        );
+
+        // A listed repo deleted.
+        std::fs::remove_dir_all(root.join("listed")).unwrap();
+        next("a deleted repo");
+
+        // A folder added directly in the root.
+        std::fs::create_dir(root.join("notes")).unwrap();
+        next("a new top-level folder");
+
         let _ = std::fs::remove_dir_all(&root);
     }
 }
