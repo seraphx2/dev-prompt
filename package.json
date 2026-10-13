@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
+    "check:tauri": "node scripts/check-tauri-versions.mjs",
     "version:calver": "node scripts/version.mjs"
   },
   "license": "MIT",
