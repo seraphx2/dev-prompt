@@ -28,9 +28,13 @@
 
   async function check() {
     checked = false;
-    await pollUpdates();
+    await pollUpdates({ manual: true });
     checked = true;
   }
+
+  /** Installs itself (the installer, the AppImage); anything else gets the
+   *  release page instead. */
+  const installable = $derived(upd.mode === "self");
 
   async function install() {
     installing = true;
@@ -69,27 +73,44 @@
 
   {#if upd.info}
     <div class="flex items-center gap-3 rounded-sm border border-sky-400/40 bg-sky-500/8 px-3 py-2">
-      <button
-        type="button"
-        onclick={install}
-        disabled={installing}
-        class="shrink-0 rounded-sm bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
-      >
-        {installing ? "Installing…" : "Install"}
-      </button>
+      {#if installable}
+        <button
+          type="button"
+          onclick={install}
+          disabled={installing}
+          class="shrink-0 rounded-sm bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+        >
+          {installing ? "Installing…" : "Install"}
+        </button>
+      {:else}
+        <button
+          type="button"
+          onclick={() => openReleasesPage()}
+          class="shrink-0 rounded-sm bg-sky-500/80 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500"
+        >
+          Download ↗
+        </button>
+      {/if}
       <div class="min-w-0 flex-1">
         <div class="flex items-baseline justify-between gap-3">
           <span class="text-[12px] text-white/80">
             Version <span class="font-mono text-sky-300">{upd.info.version}</span> is available.
           </span>
-          <button
-            type="button"
-            onclick={() => openReleasesPage()}
-            class="shrink-0 text-[11px] text-sky-300/70 hover:text-sky-300 hover:underline"
-          >
-            What's changed ↗
-          </button>
+          {#if installable}
+            <button
+              type="button"
+              onclick={() => openReleasesPage()}
+              class="shrink-0 text-[11px] text-sky-300/70 hover:text-sky-300 hover:underline"
+            >
+              What's changed ↗
+            </button>
+          {/if}
         </div>
+        {#if !installable}
+          <div class="mt-0.5 text-[11px] text-white/40">
+            This copy doesn't install updates itself — the release page has the installer.
+          </div>
+        {/if}
         {#if installError}
           <div class="mt-1 text-[11px] text-red-300">{installError}</div>
         {/if}
@@ -98,16 +119,8 @@
   {:else if upd.mode === "managed"}
     <p class={ui.help}>
       Updates come through your package manager (<span class="font-mono">apt</span> /
-      <span class="font-mono">dnf</span> / <span class="font-mono">pacman -Syu</span>).
-    </p>
-  {:else if upd.mode === "unmanaged"}
-    <p class={ui.help}>
-      This build doesn't auto-update.
-      <button
-        type="button"
-        onclick={() => openReleasesPage()}
-        class="text-sky-300/70 hover:text-sky-300 hover:underline">Get the latest ↗</button
-      >
+      <span class="font-mono">dnf</span> / <span class="font-mono">pacman -Syu</span> /
+      <span class="font-mono">flatpak update</span>).
     </p>
   {:else}
     <div class="flex items-center gap-3">
@@ -115,9 +128,20 @@
         {upd.checking ? "Checking…" : "Check for updates"}
       </button>
       {#if checked && !upd.checking}
-        <span class="text-[11px] text-white/40">You're on the latest version.</span>
+        {#if upd.error}
+          <span class="min-w-0 truncate text-[11px] text-red-300" title={upd.error}
+            >Couldn't check: {upd.error}</span
+          >
+        {:else}
+          <span class="text-[11px] text-white/40">You're on the latest version.</span>
+        {/if}
       {/if}
     </div>
+    {#if upd.mode === "unmanaged"}
+      <p class={ui.help}>
+        This copy doesn't install updates itself; a newer version links to its download.
+      </p>
+    {/if}
   {/if}
 </div>
 
