@@ -163,6 +163,39 @@ const GENERIC = {
       `<path d="M7 15c0-4 3-6.5 7.6-7.2" fill="none" stroke="${SKY}" stroke-width="2" stroke-linecap="round"/>` +
       `<circle cx="17" cy="7.5" r="2.6" fill="${SKY}"/>`,
   },
+  // Three slider tracks; the middle knob is sky, its track cut back around it.
+  sliders: {
+    raw:
+      '<path d="M3 5h18v2H3zM3 11h9.6v2H3zm16.4 0H21v2h-1.6zM3 17h18v2H3z"/>' +
+      '<circle cx="8" cy="6" r="2.6"/><circle cx="11" cy="18" r="2.6"/>' +
+      `<circle cx="16" cy="12" r="2.6" fill="${SKY}"/>`,
+  },
+  // A list: three lines with sky bullets.
+  rules: {
+    raw:
+      '<path d="M9 5h12v2H9zM9 11h12v2H9zM9 17h12v2H9z"/>' +
+      `<path fill="${SKY}" d="M3 4.5h3v3H3zM3 10.5h3v3H3zM3 16.5h3v3H3z"/>`,
+  },
+  // A magnifier with a sky lens, set clear of the rim.
+  trace: {
+    raw:
+      '<path fill-rule="evenodd" d="M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm0 2.2a4.8 4.8 0 1 1 0 9.6 4.8 4.8 0 0 1 0-9.6z"/>' +
+      '<path d="M15.3 15.3 20.6 20.6" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/>' +
+      `<circle cx="10" cy="10" r="3.2" fill="${SKY}"/>`,
+  },
+  // A circle, a bar and a sky triangle: "shapes", for the icon gallery.
+  shapes: {
+    raw:
+      '<circle cx="7" cy="7.5" r="4.3"/>' +
+      '<rect x="3" y="14" width="18" height="7" rx="1.5"/>' +
+      `<path fill="${SKY}" d="M17 3.2 21.6 11.6H12.4Z"/>`,
+  },
+  // An "i" cut through a disc; the dot is sky, inside its own cut-out.
+  info: {
+    raw:
+      '<path fill-rule="evenodd" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.25 8.6h2.5V18h-2.5zM12 4.8a2.3 2.3 0 1 0 0 4.6 2.3 2.3 0 0 0 0-4.6z"/>' +
+      `<circle cx="12" cy="7.1" r="1.4" fill="${SKY}"/>`,
+  },
 };
 
 const pascal = (s) => "si" + s.charAt(0).toUpperCase() + s.slice(1);

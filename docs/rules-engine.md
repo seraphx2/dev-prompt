@@ -13,8 +13,8 @@ the canonical, inline-documented schema). You extend or override them in
 - Windows — `%APPDATA%\dev-prompt\rules.yaml`
 - Linux — `~/.config/dev-prompt/rules.yaml`
 
-Open it from **Settings ▸ Rules ▸ Open rules file**; it ships as a commented
-scaffold. After editing, hit **Settings ▸ Rules ▸ Reload config** (or restart) —
+Open it from **Settings ▸ Active rules ▸ Open rules file**; it ships as a commented
+scaffold. After editing, hit **Reload rules** on the same page (or restart) —
 see [Applying changes](#applying-changes).
 
 Your *settings* — `hotkey`, `apps_hotkey`, `roots`, `scan`, `cache_ttl_secs`,
@@ -36,8 +36,8 @@ has no effect. See [configuration.md](configuration.md).
 | `universal` | `universal.disable: [id]` removes built-ins, `universal.add: [...]` appends yours. |
 | `provision` | **Merged by `id`.** Your `git:` entry replaces the built-in one; a new id is added. `provision_disable: [id]` removes a built-in. |
 
-A disabled built-in isn't deleted — it still appears in the Settings
-"Active configuration" viewer marked *disabled*, it's just never evaluated. This
+A disabled built-in isn't deleted — it still appears under
+Settings ▸ Active rules marked *disabled*, it's just never evaluated. This
 is so you can see what you turned off.
 
 `rules.yaml` ships as a commented scaffold; uncomment the sections you need.
@@ -130,7 +130,7 @@ actions:
   - name: "make"
     run: "make"
     terminal: true
-    icon: run                 # glyph for the menu row — see Settings > Icons
+    icon: run                 # glyph for the menu row — see Settings ▸ Icons
 
   - name: "npm run…"
     run: "npm run {{input}}"  # prompt: opens the "Run command…" input;
@@ -421,9 +421,9 @@ markers:
 
 ## Applying changes
 
-- **Settings ▸ Rules ▸ Reload config** re-reads `config.yaml` + `rules.yaml`,
+- **Settings ▸ Active rules ▸ Reload rules** re-reads `config.yaml` + `rules.yaml`,
   clears the program-lookup cache, and rescans.
-- The Settings "Active configuration" panel shows the merged result — which
+- **Settings ▸ Active rules** shows the merged result — which
   programs resolved, which rules are live vs. unmet vs. disabled.
 - A malformed `rules.yaml` surfaces as an error on Reload (and blocks the merge)
   rather than being silently ignored.

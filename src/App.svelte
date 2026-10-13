@@ -8,7 +8,8 @@
   import NewRepo from "./lib/components/NewRepo.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
   import RemoveFolder from "./lib/components/RemoveFolder.svelte";
-  import Settings from "./lib/components/Settings.svelte";
+  import Settings from "./lib/components/settings/Settings.svelte";
+  import type { Page as SettingsPage } from "./lib/components/settings/model";
   import {
     buildActions,
     buildDetectedActions,
@@ -59,11 +60,13 @@
     | "new-repo"
     | "remove";
 
-  let settingsPanel: Settings | undefined = $state();
-  // Whether Settings has unsaved edits — Esc and the mouse back-button call
-  // `backToList()` directly, bypassing Settings' own `onback`, so they need
-  // this to gate leaving too.
-  let settingsDirty = $state(false);
+  /** The page Settings opens on; null for the one it showed last. */
+  let settingsPage = $state<SettingsPage | null>(null);
+
+  function openSettings(page: SettingsPage | null = null) {
+    settingsPage = page;
+    mode = "settings";
+  }
 
   let query = $state("");
   let results = $state<ScoredRepo[]>([]);
@@ -528,8 +531,14 @@
     if (payload.stale || payload.ageSecs < 0) void rescan();
   }
 
+  // A rescan asked for mid-scan runs once more afterwards: the settings it
+  // should see may have been saved after the running one started.
+  let rescanAgain = false;
   async function rescan() {
-    if (scanning) return;
+    if (scanning) {
+      rescanAgain = true;
+      return;
+    }
     scanning = true;
     status = "Scanning repos…";
     try {
@@ -540,6 +549,10 @@
       status = `Scan failed: ${e}`;
     } finally {
       scanning = false;
+      if (rescanAgain) {
+        rescanAgain = false;
+        void rescan();
+      }
     }
   }
 
@@ -555,8 +568,12 @@
     }
   }
 
+  let appsRescanAgain = false;
   async function rescanAppsNow() {
-    if (appsScanning) return;
+    if (appsScanning) {
+      appsRescanAgain = true;
+      return;
+    }
     appsScanning = true;
     appStatus = "Scanning apps…";
     try {
@@ -568,6 +585,10 @@
       appStatus = `App scan failed: ${e}`;
     } finally {
       appsScanning = false;
+      if (appsRescanAgain) {
+        appsRescanAgain = false;
+        void rescanAppsNow();
+      }
     }
   }
 
@@ -742,7 +763,7 @@
       (e.ctrlKey || e.metaKey)
     ) {
       e.preventDefault();
-      mode = "settings";
+      openSettings();
     }
   }
 
@@ -1014,8 +1035,7 @@
     } else if (mode === "settings") {
       if (e.key === "Escape") {
         e.preventDefault();
-        if (settingsDirty) settingsPanel?.nudge();
-        else backToList();
+        backToList();
       }
     } else {
       onListKeydown(e);
@@ -1033,10 +1053,7 @@
     }
     const back = e.button === 3;
     if (mode === "settings") {
-      if (back) {
-        if (settingsDirty) settingsPanel?.nudge();
-        else backToList();
-      }
+      if (back) backToList();
     } else if (mode === "new-repo") {
       if (back) newRepoBack();
     } else if (mode === "remove") {
@@ -1116,7 +1133,7 @@
         }
       }),
     );
-    unlisteners.push(onGotoSettings(() => (mode = "settings")));
+    unlisteners.push(onGotoSettings(() => openSettings()));
 
     search?.focus();
     void loadInitial();
@@ -1248,9 +1265,8 @@
     />
   {:else if mode === "settings"}
     <Settings
-      bind:this={settingsPanel}
+      initialPage={settingsPage}
       onback={backToList}
-      ondirtychange={(d) => (settingsDirty = d)}
       onsaved={() => {
         void getConfig().then((c) => {
           dismissMode = c.dismiss ?? "always";
@@ -1288,7 +1304,7 @@
       {#if mode !== "settings"}
         <button
           type="button"
-          onclick={() => (mode = "settings")}
+          onclick={() => openSettings(noRepos ? "repos" : null)}
           title="Settings (Ctrl+,)"
           aria-label="Settings"
           class:settings-glow={noRepos}
@@ -1359,7 +1375,7 @@
       {#if upd.info && mode !== "settings"}
         <button
           type="button"
-          onclick={() => (mode = "settings")}
+          onclick={() => openSettings("about")}
           title={`Update ${upd.info.version} available — open Settings`}
           class="inline-flex shrink-0 items-center rounded-[3px] border border-sky-400/50
                  bg-sky-400/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-sky-200

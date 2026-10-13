@@ -45,9 +45,9 @@ WebView.
   first, then detected per-ecosystem actions; multi-project repos collapse into
   drill-in submenus. Actions gracefully disappear when the tool they need isn't
   installed.
-- **Settings screen** — roots, hotkey, scan depth, cache lifetime, a read-only
-  view of the active rules/programs, and a software-update check. Reachable from
-  the overlay (`Ctrl+,`) or the tray icon.
+- **Settings screen** — a sidebar of pages (General, Repos, Tools, Apps, the
+  rules viewer / tracer / icon list, About) that saves each change as you make
+  it. Reachable from the overlay (`Ctrl+,`) or the tray icon.
 - **System tray** — Show / Settings / Quit; the overlay otherwise has no taskbar
   presence.
 - **In-app auto-update** — checks GitHub Releases, downloads and installs signed
@@ -130,7 +130,7 @@ or `~/.config/dev-prompt/`):
   Managed entirely by the **Settings** screen; you don't normally touch it.
 - **`rules.yaml`** — overrides for the rule engine: extra `markers`, `programs`,
   `rules`, and `universal` actions layered over the bundled defaults. Hand-edited
-  (Settings ▸ Rules ▸ Open rules file), ships as a commented scaffold.
+  (Settings ▸ Active rules ▸ Open rules file), ships as a commented scaffold.
 
 Settings reference: [`docs/configuration.md`](docs/configuration.md). The rule
 engine — merge rules, every field, and worked examples (pin an editor path, add a
@@ -147,8 +147,8 @@ installed-app list (`>` scope) is cached alongside it at
 1. **Discovery** — a directory is a "repo" if it contains any `markers` entry
    _or_ matches any rule's `match` glob (`.git`, `*.sln`, `package.json`,
    `Cargo.toml`, `pom.xml`, `Gemfile`, …). Every folder directly inside a root
-   is listed too, marker or not (Settings ▸ "List every folder directly inside
-   a root"), unless it only holds other repos. While the app runs, the roots
+   is listed too, marker or not (Settings ▸ Repos ▸ "List every folder directly
+   inside a root"), unless it only holds other repos. While the app runs, the roots
    are watched, so repos created, deleted or moved in show up within a second
    or so.
 2. **Inspection** — on selection, the repo tree is read for project manifests and
@@ -204,7 +204,7 @@ smoke-testing a Linux bundle locally.
 ## Usage
 
 dev-prompt is meant to sit in the background and be summoned by its hotkey, so
-turn on **Settings ▸ Start at login** — then the hotkey is live from every boot
+turn on **Settings ▸ General ▸ Start at login** — then the hotkey is live from every boot
 and the app is never a window you have to find. (On Flatpak your desktop asks
 permission the first time; on the AppImage there's no autostart hook, so add one
 via your desktop's session settings.)
@@ -297,7 +297,9 @@ src/                        Svelte frontend (overlay UI)
   lib/fuzzy.ts              fzf-style scorer
   lib/updater.ts            auto-update check / install
   lib/components/           SearchInput, ResultList, ResultRow, ActionMenu,
-                            Settings, Highlight, ClearButton
+                            Highlight, ClearButton, …
+  lib/components/settings/  the Settings shell (sidebar + autosave) and one
+                            component per page
 src-tauri/                  Rust backend
   src/config.rs             config schema, load/merge, path expansion
   src/default_config.yaml   bundled markers / programs / rules / universal

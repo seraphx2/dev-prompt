@@ -7,6 +7,7 @@ import type {
   AppConfig,
   AppEntry,
   AppListPayload,
+  ConfigPatch,
   ConfigSummary,
   FileManagerOption,
   NewRepoOptions,
@@ -95,25 +96,7 @@ export function reloadConfig(): Promise<AppConfig> {
 }
 
 /** Save an editable subset of settings; returns the updated config. */
-export function saveConfig(patch: {
-  hotkey?: string;
-  /** "" turns the second (app-launcher) hotkey off. */
-  apps_hotkey?: string;
-  roots?: string[];
-  cache_ttl_secs?: number;
-  dismiss?: "always" | "keep_on_blur" | "manual";
-  scan_max_depth?: number;
-  collapse_nested?: boolean | "auto";
-  top_level_folders?: boolean;
-  /** "" clears the pin / template / shell back to auto. */
-  terminal?: string;
-  terminal_template?: string;
-  shell?: string;
-  /** "" clears the pin / template back to auto. */
-  filemanager?: string;
-  filemanager_template?: string;
-  apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
-}): Promise<AppConfig> {
+export function saveConfig(patch: ConfigPatch): Promise<AppConfig> {
   return invoke<AppConfig>("save_config", { patch });
 }
 

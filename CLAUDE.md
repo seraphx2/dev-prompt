@@ -122,7 +122,12 @@ surrounding style rather than running `cargo fmt`.
    (loaded config, scanned repos, per-repo contexts, installed-apps cache).
 6. The Svelte frontend (`App.svelte` + `lib/ipc.ts` typed wrappers) renders
    repo list → action menu → settings and drives everything through
-   `invoke()`.
+   `invoke()`
+   Settings lives in `lib/components/settings/`: a sidebar shell that owns
+   the form and autosaves (`save(patch, delay)` merges and serialises
+   partial `save_config` patches; `rescanNeeds` decides what a save
+   rescans), plus one component per page. There's no Save button — a new
+   field saves its own slice of the form via a patch builder in `model.ts`.
 
 ### Config layering — three files, precise merge semantics
 

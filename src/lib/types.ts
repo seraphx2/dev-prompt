@@ -91,6 +91,27 @@ export interface AppConfig {
   apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
 }
 
+/** A partial settings save — only the fields present are written. */
+export interface ConfigPatch {
+  hotkey?: string;
+  /** "" turns the second (app-launcher) hotkey off. */
+  apps_hotkey?: string;
+  roots?: string[];
+  cache_ttl_secs?: number;
+  dismiss?: "always" | "keep_on_blur" | "manual";
+  scan_max_depth?: number;
+  collapse_nested?: boolean | "auto";
+  top_level_folders?: boolean;
+  /** "" clears the pin / template / shell back to auto. */
+  terminal?: string;
+  terminal_template?: string;
+  shell?: string;
+  /** "" clears the pin / template back to auto. */
+  filemanager?: string;
+  filemanager_template?: string;
+  apps?: { enabled: boolean; extra_dirs: string[]; exclude: string[] };
+}
+
 /** An installed terminal emulator dev-prompt can drive — for the Settings dropdown. */
 export interface TerminalOption {
   id: string;

@@ -18,14 +18,15 @@ programs, rules, actions, universal, template variables — see
 **[rules-engine.md](rules-engine.md)**.
 
 Everything below is set from the **Settings** screen and stored in `config.yaml`.
-Changes apply the moment you hit **Save** (the hotkey re-registers live);
-`roots` / `scan` / `cache_ttl_secs` take effect on the next rescan.
+There's no Save button: each change saves itself (a typed value after a short
+pause, a root folder when you leave its field) and the hotkey re-registers
+live.
 
 ---
 
 ## Hotkeys
 
-Two global hotkeys, set from **Settings ▸ Global hotkeys**:
+Two global hotkeys, set from **Settings ▸ General ▸ Global hotkeys**:
 
 ```yaml
 # config.yaml
@@ -52,10 +53,9 @@ stays active.
 
 ## Start at login
 
-**Settings ▸ Start at login** registers dev-prompt to launch (silently, into the
+**Settings ▸ General ▸ Start at login** registers dev-prompt to launch (silently, into the
 tray) when you log in — recommended, since the app is only useful when it's
-already running to catch the hotkey. It applies immediately, not on Save, and
-the OS is the source of truth: the checkbox reflects the actual autostart entry.
+already running to catch the hotkey. The OS is the source of truth: the checkbox reflects the actual autostart entry.
 
 - **Windows / native Linux** — writes the platform autostart entry directly
   (`~/.config/autostart/dev-prompt.desktop` or a `Run` key).
@@ -70,7 +70,7 @@ the OS is the source of truth: the checkbox reflects the actual autostart entry.
 ## Terminal
 
 Which terminal emulator "Open in terminal" and every `terminal: true` action
-open. Set from **Settings ▸ Terminal**. **Windows only** for now — other
+open. Set from **Settings ▸ Tools ▸ Terminal**. **Windows only** for now — other
 platforms run the command directly.
 
 ```yaml
@@ -101,13 +101,13 @@ nothing — both already agree with dev-prompt's own default.
 
 A one-shot command is wrapped in a shell so the window stays open and keeps a
 real console (ANSI colour, a live TTY — tools like Claude Code need it). The
-shell is `pwsh` (else Windows PowerShell) unless you set **Settings ▸ Shell** /
+shell is `pwsh` (else Windows PowerShell) unless you set **Settings ▸ Tools ▸ Shell** /
 `shell:` — `cmd`, `bash`, `nu`, … are recognised for their "run and hold" flags.
 The **Run command…** action picks a shell per-run, defaulting to that setting.
 
 ### File manager
 
-Which program "Show in file manager" opens. Set from **Settings ▸ File
+Which program "Show in file manager" opens. Set from **Settings ▸ Tools ▸ File
 manager**. Unlike Terminal, dev-prompt doesn't need a table of known
 invocations here — nearly every file manager opens a folder given as a bare
 path argument, the same contract `explorer.exe` has, so every installed
@@ -160,7 +160,7 @@ against the current icon theme (then Adwaita / breeze / Papirus / hicolor, then
 platform.
 
 ```yaml
-# config.yaml — managed from Settings ▸ "Index installed apps"
+# config.yaml — managed from Settings ▸ Apps
 apps:
   enabled: true
   extra_dirs:                 # extra folders to scan for portable executables
@@ -192,7 +192,7 @@ the first time something changes. A full rescan still runs once a day, and
 
 ```yaml
 # config.yaml
-roots:                        # folders to scan for repos — Settings ▸ Roots
+roots:                        # folders to scan for repos — Settings ▸ Repos
   - D:\git
 scan:
   max_depth: 4                # how deep under a root to look
@@ -208,7 +208,7 @@ scan:
 cache_ttl_secs: 900           # how long the discovered repo list stays fresh
                               #   before the next open triggers a background rescan
 dismiss: always               # when the overlay closes itself — Settings ▸
-                              #   Overlay dismissal:
+                              #   General ▸ Overlay dismissal:
                               #   always       = on focus loss, and after an action
                               #   keep_on_blur = ignore focus loss; still close
                               #                  after an action or on Esc
@@ -238,9 +238,9 @@ regardless.
 
 ## Applying changes
 
-- Settings changes apply the moment you hit **Save** — the hotkey re-registers
-  live; `roots` / `scan` / `cache_ttl_secs` take effect on the next rescan
-  (`Ctrl+R` forces one), and the folder watcher follows the new roots
-  straight away.
-- To reload `rules.yaml`, use **Settings ▸ Rules ▸ Reload config** — see
+- Settings save as you change them — the hotkey re-registers live; a change to
+  `roots` or `scan` rescans the repos (and the folder watcher follows the new
+  roots) straight away, a change to `apps` re-gathers the app list, and
+  `cache_ttl_secs` applies from the next time the cache is checked.
+- To reload `rules.yaml`, use **Settings ▸ Active rules ▸ Reload rules** — see
   [rules-engine.md](rules-engine.md#applying-changes).

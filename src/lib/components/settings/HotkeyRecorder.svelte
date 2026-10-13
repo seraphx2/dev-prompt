@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { classifyHotkey } from "../hotkeys";
+  import { classifyHotkey } from "../../hotkeys";
 
   let {
     label,
