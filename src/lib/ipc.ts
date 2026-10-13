@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
   Action,
@@ -288,6 +288,25 @@ export function setDismissOnBlur(enabled: boolean): Promise<void> {
 
 export function copyPath(path: string): Promise<void> {
   return writeText(path);
+}
+
+/** Put any text on the clipboard. */
+export function copyText(text: string): Promise<void> {
+  return writeText(text);
+}
+
+/** The clipboard's text, or "" when it holds none (an image, nothing). */
+export async function readClipboard(): Promise<string> {
+  try {
+    return (await readText()) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Open the folder holding `path` in the user's file manager. */
+export function showFolder(path: string): Promise<void> {
+  return invoke<void>("show_folder", { path });
 }
 
 /**

@@ -19,6 +19,7 @@
     onrun,
     onquickaction,
     onback,
+    oncontext,
   }: {
     repoName: string;
     /** Sub-project name when drilled into one, else null. */
@@ -33,6 +34,8 @@
     onrun: (i: number) => void;
     onquickaction: (action: Action) => void;
     onback: () => void;
+    /** Row right-clicked -> its context menu. */
+    oncontext?: (i: number, e: MouseEvent) => void;
   } = $props();
 
   let container: HTMLDivElement | undefined = $state();
@@ -130,6 +133,7 @@
             ? 'bg-white/10'
             : 'hover:bg-white/[0.04]'}"
         onclick={() => onrun(i)}
+        oncontextmenu={(e) => oncontext?.(i, e)}
         onpointerenter={() => {
           if (item.kind === "loading") return;
           if (i !== selected) skipScroll = true;

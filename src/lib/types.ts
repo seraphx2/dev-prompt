@@ -203,3 +203,19 @@ export interface ProvisionTool {
   /** Raw argv templates (`{{dir}}`, `{{name}}`, `{{root}}`, field ids). */
   run: string[][];
 }
+
+/** A line in the right-click menu (`ContextMenu.svelte`). */
+export type CtxItem =
+  | {
+      kind: "item";
+      label: string;
+      /** Icon key from `lib/icons.ts`. */
+      icon?: string | null;
+      disabled?: boolean;
+      run: () => void;
+    }
+  | { kind: "separator" }
+  /** A dim, non-interactive title line (the repo / app name). */
+  | { kind: "header"; label: string }
+  /** Shown while the rest of the menu is still being fetched. */
+  | { kind: "loading"; label: string };

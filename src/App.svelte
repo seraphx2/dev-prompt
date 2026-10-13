@@ -6,12 +6,14 @@
   import ActionMenu from "./lib/components/ActionMenu.svelte";
   import RunCommand from "./lib/components/RunCommand.svelte";
   import NewRepo from "./lib/components/NewRepo.svelte";
+  import ContextMenu from "./lib/components/ContextMenu.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import {
     buildActions,
     buildDetectedActions,
     buildUniversalActions,
     copyPath,
+    copyText,
     getConfig,
     hideOverlay,
     listApps,
@@ -22,6 +24,7 @@
     onOverlayShown,
     onReposUpdated,
     onRepoContextUpdated,
+    readClipboard,
     refreshRepoContext,
     rescanApps,
     rescanRepos,
@@ -30,8 +33,16 @@
     runCommand,
     searchRepos,
     setDismissOnBlur,
+    showFolder,
   } from "./lib/ipc";
-  import type { Action, AppEntry, MenuItem, Repo, ScoredRepo } from "./lib/types";
+  import type {
+    Action,
+    AppEntry,
+    CtxItem,
+    MenuItem,
+    Repo,
+    ScoredRepo,
+  } from "./lib/types";
   import { fuzzyScore } from "./lib/fuzzy";
   import { icons } from "./lib/icons";
   import { upd, pollUpdates } from "./lib/updateStore.svelte";
@@ -118,6 +129,9 @@
   /** Set while the new-repo screen is setting up an existing folder (opened
    *  from the action menu) rather than creating a new one. */
   let setupTarget = $state<ScoredRepo | null>(null);
+  /** The run-command / setup screen was opened from a repo row's right-click
+   *  menu, so Back returns to the list rather than to an action menu. */
+  let openedFromList = $state(false);
 
   const SUB_PREFIX = "Detected · ";
 
@@ -505,6 +519,7 @@
 
   async function openActions(entry: ScoredRepo) {
     activeRepo = entry;
+    openedFromList = false;
     // Universal actions only — no `requires:` PATH walk, so this is fast even
     // on a cold cache. The menu opens on this alone; detected actions (npm /
     // cargo / docker / …) stream in afterward instead of blocking the open.
@@ -538,7 +553,7 @@
   // Back from the new-repo screen: to the action menu it was opened from, or
   // to the list.
   function newRepoBack() {
-    if (setupTarget) {
+    if (setupTarget && !openedFromList) {
       setupTarget = null;
       mode = "action-menu";
     } else {
@@ -549,6 +564,7 @@
   function backToList() {
     mode = "repo-list";
     setupTarget = null;
+    openedFromList = false;
     activeRepo = null;
     actions = [];
     actionQuery = "";
@@ -698,11 +714,228 @@
     }
   }
 
+  // --- right-click menus ---------------------------------------------------
+
+  /** The open right-click menu, if any. */
+  let ctx = $state<{ x: number; y: number; items: CtxItem[] } | null>(null);
+  let ctxMenu: ContextMenu | undefined = $state();
+  /** Bumped per menu, so a slow fetch can't fill in a menu that's been replaced. */
+  let ctxSeq = 0;
+
+  function closeCtx() {
+    ctx = null;
+  }
+
+  // A screen change takes any open menu with it.
+  $effect(() => {
+    void mode;
+    ctx = null;
+  });
+
+  /** Dev builds keep the webview's own menu (and its Inspect) on Shift+right-click. */
+  function wantsNative(e: MouseEvent): boolean {
+    return import.meta.env.DEV && e.shiftKey;
+  }
+
+  /** Open `items` at the pointer; `more` (if given) replaces them once it
+   *  resolves — for menus whose contents have to be fetched. */
+  function showCtx(e: MouseEvent, items: CtxItem[], more?: Promise<CtxItem[]>) {
+    e.preventDefault();
+    const seq = ++ctxSeq;
+    ctx = { x: e.clientX, y: e.clientY, items };
+    void more?.then((next) => {
+      if (ctx && seq === ctxSeq) ctx = { ...ctx, items: next };
+    });
+  }
+
+  // Anything without a menu of its own: text fields get Cut / Copy / Paste,
+  // everything else gets nothing — never the browser's Back / Reload / Print.
+  function onWindowContextMenu(e: MouseEvent) {
+    if (e.defaultPrevented || wantsNative(e)) return; // a row opened its own
+    const field = (e.target as HTMLElement | null)?.closest<
+      HTMLInputElement | HTMLTextAreaElement
+    >("textarea, input:not([type='checkbox']):not([type='radio'])");
+    if (field) openTextMenu(e, field);
+    else {
+      e.preventDefault();
+      closeCtx();
+    }
+  }
+
+  function openTextMenu(e: MouseEvent, el: HTMLInputElement | HTMLTextAreaElement) {
+    el.focus();
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? start;
+    const picked = el.value.slice(start, end);
+    const editable = !el.readOnly && !el.disabled;
+    // Replace the selection the way typing would, so `bind:value` sees it.
+    const insert = (text: string) => {
+      el.focus();
+      el.setRangeText(text, start, end, "end");
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    const items = (clip: string): CtxItem[] => [
+      {
+        kind: "item",
+        label: "Cut",
+        disabled: !picked || !editable,
+        run: () => {
+          void copyText(picked);
+          insert("");
+        },
+      },
+      { kind: "item", label: "Copy", icon: "copy", disabled: !picked, run: () => void copyText(picked) },
+      {
+        kind: "item",
+        label: "Paste",
+        disabled: !clip || !editable,
+        // A single-line field takes one line, as a native paste does.
+        run: () => insert(el instanceof HTMLInputElement ? clip.replace(/[\r\n]+/g, " ") : clip),
+      },
+      { kind: "separator" },
+      {
+        kind: "item",
+        label: "Select all",
+        disabled: !el.value,
+        run: () => {
+          el.focus();
+          el.select();
+        },
+      },
+    ];
+    // Paste stays greyed out until the clipboard has been read.
+    showCtx(e, items(""), readClipboard().then(items));
+  }
+
+  /** Run one of a repo's actions straight from its row in the list. */
+  function runFromList(entry: ScoredRepo, a: Action) {
+    if (a.provision) {
+      activeRepo = entry;
+      setupTarget = entry;
+      openedFromList = true;
+      mode = "new-repo";
+    } else if (a.prompt) {
+      activeRepo = entry;
+      promptTemplate = a.hint ?? "";
+      openedFromList = true;
+      mode = "run-command";
+    } else {
+      void execute(a, entry.repo.path);
+    }
+  }
+
+  // A repo row: the action page's most useful parts, a level up — open its
+  // actions, set up version control when it has none, the quick actions, and
+  // whatever this repo's history says gets used most.
+  function openRepoMenu(e: MouseEvent, entry: ScoredRepo) {
+    if (wantsNative(e)) return;
+    const head: CtxItem[] = [
+      { kind: "header", label: entry.repo.name },
+      { kind: "item", label: "Open actions", icon: "run", run: () => void openActions(entry) },
+    ];
+    const item = (a: Action): CtxItem => ({
+      kind: "item",
+      label: a.label,
+      icon: a.icon,
+      run: () => runFromList(entry, a),
+    });
+    const more = buildUniversalActions(entry.repo.path).then((acts) => {
+      const out = [...head];
+      const setup = acts.find((a) => a.provision);
+      if (setup) out.push({ kind: "separator" }, item(setup));
+      const quick = acts.filter((a) => a.hotkey);
+      if (quick.length) out.push({ kind: "separator" }, ...quick.map(item));
+      const used = acts
+        .filter((a) => !a.hotkey && !a.provision && a.usageScore > 0)
+        .sort((a, b) => b.usageScore - a.usageScore)
+        .slice(0, 4);
+      if (used.length) {
+        out.push({ kind: "separator" }, { kind: "header", label: "Used most here" }, ...used.map(item));
+      }
+      return out;
+    });
+    showCtx(e, [...head, { kind: "loading", label: "Loading…" }], more);
+  }
+
+  // An app row: launch it, or get at the program behind it.
+  function openAppMenu(e: MouseEvent, app: AppEntry) {
+    if (wantsNative(e)) return;
+    const items: CtxItem[] = [
+      { kind: "header", label: app.name },
+      { kind: "item", label: "Launch", icon: "run", run: () => void runAppAndHide(app) },
+    ];
+    // Only a real executable has a folder and a path worth copying.
+    if (app.kind === "exe") {
+      items.push(
+        { kind: "separator" },
+        {
+          kind: "item",
+          label: "Show in file manager",
+          icon: "folder",
+          run: () =>
+            void showFolder(app.exec)
+              .then(dismissAfterLaunch)
+              .catch((err) => (appStatus = `Couldn't open the folder: ${err}`)),
+        },
+        {
+          kind: "item",
+          label: "Copy path",
+          icon: "copy",
+          run: () => void copyText(app.exec).then(dismissAfterLaunch),
+        },
+      );
+    }
+    showCtx(e, items);
+  }
+
+  // An action-menu row: run it, or copy the command it would run.
+  function openActionRowMenu(e: MouseEvent, i: number) {
+    if (wantsNative(e)) return;
+    const it = menuItems[i];
+    if (!it || it.kind === "loading") {
+      e.preventDefault();
+      return;
+    }
+    actionSel = i;
+    if (it.kind === "submenu") {
+      showCtx(e, [
+        { kind: "header", label: it.label },
+        { kind: "item", label: "Open", icon: "run", run: () => activateMenuItem(i) },
+      ]);
+      return;
+    }
+    const a = it.action;
+    const items: CtxItem[] = [
+      {
+        kind: "item",
+        label: a.prompt || a.provision ? "Open…" : "Run",
+        icon: "run",
+        run: () => activateMenuItem(i),
+      },
+    ];
+    // `hint` is the resolved command line, except for the form-opening and
+    // frontend-only actions, and a bare terminal (whose hint is just a label).
+    if (a.hint && !a.clientSide && !a.prompt && !a.provision && a.hint !== "terminal") {
+      items.push({
+        kind: "item",
+        label: "Copy command",
+        icon: "copy",
+        run: () => void copyText(a.hint),
+      });
+    }
+    showCtx(e, items);
+  }
+
   // All keyboard handling runs at the window level and is dispatched by mode, so
   // navigation keeps working even when no element is focused (e.g. right after
   // returning from the action menu). Character keys fall through to the focused
   // search input untouched.
   function onWindowKeydown(e: KeyboardEvent) {
+    // An open menu takes every key until it closes.
+    if (ctx) {
+      ctxMenu?.keydown(e);
+      return;
+    }
     if (mode === "action-menu") {
       onMenuKeydown(e);
     } else if (mode === "run-command" || mode === "new-repo") {
@@ -723,6 +956,10 @@
   function onWindowMouse(e: MouseEvent) {
     if (e.button !== 3 && e.button !== 4) return;
     e.preventDefault();
+    if (ctx) {
+      closeCtx(); // back/forward first just dismisses an open menu
+      return;
+    }
     const back = e.button === 3;
     if (mode === "settings") {
       if (back) {
@@ -768,6 +1005,7 @@
         selected = 0;
         actionQuery = "";
         actionSel = 0;
+        closeCtx();
         backToList();
       }),
     );
@@ -836,6 +1074,7 @@
 
 <svelte:window
   onkeydown={onWindowKeydown}
+  oncontextmenu={onWindowContextMenu}
   onmousedown={onWindowMouse}
   onmouseup={(e) => {
     if (e.button === 3 || e.button === 4) e.preventDefault();
@@ -866,6 +1105,10 @@
           selected = i;
           if (filteredApps[i]) runAppAndHide(filteredApps[i].app);
         }}
+        oncontext={(i, e) => {
+          selected = i;
+          if (filteredApps[i]) openAppMenu(e, filteredApps[i].app);
+        }}
       />
     {:else if noRepos}
       <div
@@ -886,6 +1129,10 @@
           selected = i;
           if (results[i]) openActions(results[i]);
         }}
+        oncontext={(i, e) => {
+          selected = i;
+          if (results[i]) openRepoMenu(e, results[i]);
+        }}
       />
     {/if}
   {:else if mode === "action-menu" && activeRepo}
@@ -900,6 +1147,7 @@
       onrun={(i) => activateMenuItem(i)}
       onquickaction={runQuickAction}
       onback={menuBack}
+      oncontext={(i, e) => openActionRowMenu(e, i)}
     />
   {:else if mode === "run-command" && activeRepo}
     <RunCommand
@@ -908,7 +1156,7 @@
       template={promptTemplate}
       onrun={(cmd, sh) =>
         activeRepo && runCommandAndHide(activeRepo.repo.path, cmd, sh)}
-      onback={() => (mode = "action-menu")}
+      onback={() => (openedFromList ? backToList() : (mode = "action-menu"))}
     />
   {:else if mode === "new-repo"}
     <NewRepo
@@ -1025,6 +1273,16 @@
     </span>
   </footer>
 </main>
+
+{#if ctx}
+  <ContextMenu
+    bind:this={ctxMenu}
+    x={ctx.x}
+    y={ctx.y}
+    items={ctx.items}
+    onclose={closeCtx}
+  />
+{/if}
 
 <style>
   /* Pulsing ring on the settings gear while no folders are configured. */

@@ -1190,6 +1190,40 @@ fn open_with_os_handler(window: &tauri::WebviewWindow, target: &std::ffi::OsStr)
     Ok(())
 }
 
+/// Open the folder holding `path` (or `path` itself, if it's a folder) in the
+/// user's file manager — the same resolution, pin and template as the
+/// "Show in file manager" action. Feeds the app row's right-click menu.
+#[tauri::command]
+pub async fn show_folder(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<()> {
+    let p = Path::new(&path);
+    let dir = if p.is_dir() { p } else { p.parent().unwrap_or(p) }.to_path_buf();
+    let cfg = state.config.lock().unwrap().clone();
+    let launched = tauri::async_runtime::spawn_blocking(move || {
+        let repo = Repo {
+            name: dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            path: dir.to_string_lossy().into_owned(),
+            vcs: None,
+            sentinels: Vec::new(),
+            last_seen: 0,
+        };
+        match evaluate_universal(&cfg, &repo).into_iter().find(|a| a.id == "filemanager") {
+            Some(action) => launch::launch(&action, &repo).map(|_| None),
+            // No file manager resolved at all: let the OS pick one.
+            None => Ok(Some(dir)),
+        }
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("show folder task failed: {e}")))??;
+    if let Some(dir) = launched {
+        open_with_os_handler(&window, dir.as_os_str())?;
+    }
+    Ok(())
+}
+
 /// Open `rules.yaml` with the OS default handler for `.yaml` (or the "Open
 /// with" picker when nothing is associated).
 #[tauri::command]

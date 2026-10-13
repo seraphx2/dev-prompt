@@ -421,6 +421,7 @@ pub fn run() {
             commands::list_apps,
             commands::rescan_apps,
             commands::run_app,
+            commands::show_folder,
             commands::open_rules_file,
             commands::open_releases_page,
             commands::open_install_dir,

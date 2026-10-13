@@ -246,6 +246,19 @@ why, and how to add it anyway.
 | `Tab`   | drill into the selected sub-project                  |
 | `Esc`   | step back one level (sub-project → menu → repo list) |
 
+**Right-click** works where it's useful, styled like the rest of the app:
+
+- a **repo** — open its actions, its quick actions (terminal, file manager,
+  copy path, run command), "Set up version control…" when it has none, and
+  the actions you use most in that repo;
+- an **app** in `>` — launch it, show its folder, copy its path;
+- an **action** — run it, or copy the command it would run;
+- a **text field** — cut, copy, paste, select all.
+
+Anywhere else right-click does nothing — the browser's own Back / Reload /
+Print menu never shows. (In a dev build, Shift+right-click still opens it, for
+Inspect.)
+
 The mouse **back / forward** buttons work throughout: back == `Esc` for the
 current screen, forward == open the action menu on the repo list, or drill
 into a sub-project from within it.

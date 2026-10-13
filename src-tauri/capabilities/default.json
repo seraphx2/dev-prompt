@@ -17,6 +17,7 @@
     "os:allow-platform",
     "os:allow-os-type",
     "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-read-text",
     "updater:default",
     "process:default",
     "notification:default",
