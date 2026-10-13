@@ -1,5 +1,21 @@
 Package: dev-prompt
 Architecture: amd64
+Version: 2026.1013.1
+Priority: optional
+Maintainer: seraphx2
+Installed-Size: 10362
+Depends: libayatana-appindicator3-1, libwebkit2gtk-4.1-0, libgtk-3-0
+Filename: pool/main/d/dev-prompt/dev-prompt_2026.1013.1_amd64.deb
+Size: 4697036
+MD5sum: ca67313db04294992622dbac96fad4fd
+SHA1: 609ff602aac432aede73170ae2611dfc0f7f6b9c
+SHA256: 3663dbeb55347879b007f8c123eb74c5a2e6279110594c43116ef095e458b5c1
+SHA512: d7865e8cde46a5790dcb28f1438305f92ad95a524fce813c6210ffb4936fb58ba3d34127fbba7c2cd0ed7865426f05d548d03ad2f2d0b36c30d82d3ff6e97c79
+Description: Cross-platform command-palette overlay for launching dev repositories
+ (none)
+
+Package: dev-prompt
+Architecture: amd64
 Version: 2026.906.1
 Priority: optional
 Maintainer: seraphx2
