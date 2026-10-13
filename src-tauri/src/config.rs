@@ -367,6 +367,9 @@ pub struct RuleAction {
     /// running anything. Universal only; offered when the folder has no
     /// version control yet and some `provision:` entry is installed.
     pub provision: bool,
+    /// Opens the "Move to Recycle Bin / Trash" confirmation for this folder.
+    /// Universal only; never offered for a folder that is one of the roots.
+    pub remove: bool,
     /// Icon key for the menu row (see `src/lib/icons.ts` / Settings ▸ Icons).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,

@@ -121,14 +121,22 @@
         class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13px]
                {item.disabled
           ? 'cursor-default text-white/25'
-          : i === sel
-            ? 'bg-white/10 text-white'
-            : 'text-white/85 hover:bg-white/10'}"
+          : item.danger
+            ? i === sel
+              ? 'bg-red-500/20 text-red-200'
+              : 'text-red-300 hover:bg-red-500/20 hover:text-red-200'
+            : i === sel
+              ? 'bg-white/10 text-white'
+              : 'text-white/85 hover:bg-white/10'}"
         onpointerenter={() => (sel = item.disabled ? -1 : i)}
         onclick={() => run(i)}
       >
         <svg
-          class="h-3.5 w-3.5 shrink-0 {item.disabled ? 'opacity-40' : 'text-white/60'}"
+          class="h-3.5 w-3.5 shrink-0 {item.disabled
+            ? 'opacity-40'
+            : item.danger
+              ? 'text-red-300'
+              : 'text-white/60'}"
           viewBox={g?.vb ?? "0 0 24 24"}
           fill="currentColor"
           fill-rule="evenodd"

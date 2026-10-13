@@ -39,6 +39,8 @@ export interface Action {
   prompt?: boolean;
   /** Opens the "Set up version control" form for this folder instead of running. */
   provision?: boolean;
+  /** Opens the "Move to Recycle Bin / Trash" confirmation instead of running. */
+  remove?: boolean;
 }
 
 /** A row in the action menu — a runnable action, or a drill-in to a
@@ -212,6 +214,8 @@ export type CtxItem =
       /** Icon key from `lib/icons.ts`. */
       icon?: string | null;
       disabled?: boolean;
+      /** Destructive: drawn in red. */
+      danger?: boolean;
       run: () => void;
     }
   | { kind: "separator" }
@@ -219,3 +223,17 @@ export type CtxItem =
   | { kind: "header"; label: string }
   /** Shown while the rest of the menu is still being fetched. */
   | { kind: "loading"; label: string };
+
+/** What moving a folder to the Recycle Bin / Trash would lose. */
+export interface RemovalAssessment {
+  name: string;
+  path: string;
+  /** The version-control system found ("Git", "Mercurial", …), if any. */
+  vcs?: string | null;
+  /** What would be lost, worded for the dialog. */
+  risks: string[];
+  /** What couldn't be checked, and why — treated like a risk. */
+  unknown: string[];
+  /** Typing the folder's name is required to confirm. */
+  needsTyped: boolean;
+}

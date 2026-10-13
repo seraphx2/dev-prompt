@@ -37,6 +37,8 @@ thiserror = "2"
 # Watches the roots so repos created or removed outside dev-prompt show up
 # without a rescan (watch.rs).
 notify = "8"
+# Moves removed folders to the Recycle Bin / Trash, and restores them (Undo).
+trash = "5"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"

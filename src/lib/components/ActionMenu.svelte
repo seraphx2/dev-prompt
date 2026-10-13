@@ -197,7 +197,9 @@
           >
             {#if g.raw}{@html g.raw}{:else}<path d={g.d} />{/if}
           </svg>
-          <span class="flex-1 truncate text-[13px] text-white/90">
+          <span
+            class="flex-1 truncate text-[13px] {item.action.remove ? 'text-red-300' : 'text-white/90'}"
+          >
             <Highlight text={item.action.label} indices={item.positions} />
           </span>
           <span

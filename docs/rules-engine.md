@@ -167,6 +167,9 @@ or when the action has no program at all (a gated `terminal: true`).
   on `PATH` rather than `programs` keys.
 - `client: true` is reserved for the built-in `copy-path`; custom client
   actions aren't wired up.
+- `remove: true` doesn't run anything — it opens the **Move to Recycle Bin**
+  confirmation for the folder (the built-in `remove-folder` action; the label
+  names this OS's bin). Never offered for a root folder. Universal only.
 - `provision: true` doesn't run anything — it opens the **Set up version
   control** form for the folder (the built-in `set-up-vcs` action). It only
   appears for a folder with no version control yet, and only when some

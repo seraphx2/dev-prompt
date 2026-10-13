@@ -7,6 +7,7 @@
   import RunCommand from "./lib/components/RunCommand.svelte";
   import NewRepo from "./lib/components/NewRepo.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
+  import RemoveFolder from "./lib/components/RemoveFolder.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import {
     buildActions,
@@ -34,6 +35,7 @@
     searchRepos,
     setDismissOnBlur,
     showFolder,
+    undoRemoval,
   } from "./lib/ipc";
   import type {
     Action,
@@ -49,7 +51,13 @@
 
   const DAY_MS = 24 * 60 * 60 * 1000;
 
-  type Mode = "repo-list" | "action-menu" | "settings" | "run-command" | "new-repo";
+  type Mode =
+    | "repo-list"
+    | "action-menu"
+    | "settings"
+    | "run-command"
+    | "new-repo"
+    | "remove";
 
   let settingsPanel: Settings | undefined = $state();
   // Whether Settings has unsaved edits — Esc and the mouse back-button call
@@ -132,6 +140,44 @@
   /** The run-command / setup screen was opened from a repo row's right-click
    *  menu, so Back returns to the list rather than to an action menu. */
   let openedFromList = $state(false);
+  /** The folder the "Move to Recycle Bin / Trash" screen is for. */
+  let removeTarget = $state<ScoredRepo | null>(null);
+  /** The folder just moved to the bin, while Undo is offered. */
+  let undoToast = $state<{ name: string } | null>(null);
+  let undoTimer: ReturnType<typeof setTimeout> | undefined;
+  const UNDO_MS = 20_000;
+  const bin =
+    document.documentElement.dataset.os === "windows" ? "Recycle Bin" : "Trash";
+
+  function openRemove(entry: ScoredRepo, fromList: boolean) {
+    removeTarget = entry;
+    openedFromList = fromList;
+    mode = "remove";
+  }
+
+  function removed(name: string, undoable: boolean) {
+    backToList();
+    clearTimeout(undoTimer);
+    if (undoable) {
+      undoToast = { name };
+      undoTimer = setTimeout(() => (undoToast = null), UNDO_MS);
+    } else {
+      status = `Moved ${name} to the ${bin}. Restore it from there if you need it.`;
+    }
+  }
+
+  async function undoRemove() {
+    if (!undoToast) return;
+    const { name } = undoToast;
+    undoToast = null;
+    clearTimeout(undoTimer);
+    try {
+      await undoRemoval();
+      status = `Restored ${name}.`;
+    } catch (e) {
+      status = `Couldn't restore ${name}: ${e}`;
+    }
+  }
 
   const SUB_PREFIX = "Detected · ";
 
@@ -316,6 +362,8 @@
       subGroup = it.target;
       actionQuery = "";
       actionSel = 0;
+    } else if (it.action.remove) {
+      if (activeRepo) openRemove(activeRepo, false);
     } else if (it.action.provision) {
       openSetup();
     } else if (it.action.prompt) {
@@ -349,7 +397,8 @@
       dismissMode === "always" &&
         mode !== "settings" &&
         mode !== "run-command" &&
-        mode !== "new-repo",
+        mode !== "new-repo" &&
+        mode !== "remove",
     );
   });
 
@@ -383,6 +432,11 @@
             ? [
                 ["Tab", "next field"],
                 ["Enter", setupTarget ? "set up" : "create"],
+                ["Esc", "back"],
+              ]
+          : mode === "remove"
+            ? [
+                ["Enter", "move"],
                 ["Esc", "back"],
               ]
           : [
@@ -550,6 +604,15 @@
     void openActions({ repo, score: 0, matchIndices: [] });
   }
 
+  // Back from the remove screen: to the list or action menu it came from.
+  function removeBack() {
+    if (openedFromList) backToList();
+    else {
+      removeTarget = null;
+      mode = "action-menu";
+    }
+  }
+
   // Back from the new-repo screen: to the action menu it was opened from, or
   // to the list.
   function newRepoBack() {
@@ -564,6 +627,7 @@
   function backToList() {
     mode = "repo-list";
     setupTarget = null;
+    removeTarget = null;
     openedFromList = false;
     activeRepo = null;
     actions = [];
@@ -656,6 +720,9 @@
     } else if (e.key === "Escape") {
       e.preventDefault();
       hideOverlay();
+    } else if (undoToast && e.key.toLowerCase() === "z" && e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      void undoRemove();
     } else if (e.key.toLowerCase() === "r" && e.ctrlKey) {
       e.preventDefault();
       if (appScope) rescanAppsNow();
@@ -809,7 +876,9 @@
 
   /** Run one of a repo's actions straight from its row in the list. */
   function runFromList(entry: ScoredRepo, a: Action) {
-    if (a.provision) {
+    if (a.remove) {
+      openRemove(entry, true);
+    } else if (a.provision) {
       activeRepo = entry;
       setupTarget = entry;
       openedFromList = true;
@@ -833,7 +902,7 @@
       { kind: "header", label: entry.repo.name },
       { kind: "item", label: "Open actions", icon: "run", run: () => void openActions(entry) },
     ];
-    const item = (a: Action): CtxItem => ({
+    const item = (a: Action): Extract<CtxItem, { kind: "item" }> => ({
       kind: "item",
       label: a.label,
       icon: a.icon,
@@ -846,12 +915,14 @@
       const quick = acts.filter((a) => a.hotkey);
       if (quick.length) out.push({ kind: "separator" }, ...quick.map(item));
       const used = acts
-        .filter((a) => !a.hotkey && !a.provision && a.usageScore > 0)
+        .filter((a) => !a.hotkey && !a.provision && !a.remove && a.usageScore > 0)
         .sort((a, b) => b.usageScore - a.usageScore)
         .slice(0, 4);
       if (used.length) {
         out.push({ kind: "separator" }, { kind: "header", label: "Used most here" }, ...used.map(item));
       }
+      const rm = acts.find((a) => a.remove);
+      if (rm) out.push({ kind: "separator" }, { ...item(rm), danger: true });
       return out;
     });
     showCtx(e, [...head, { kind: "loading", label: "Loading…" }], more);
@@ -908,14 +979,14 @@
     const items: CtxItem[] = [
       {
         kind: "item",
-        label: a.prompt || a.provision ? "Open…" : "Run",
+        label: a.prompt || a.provision || a.remove ? "Open…" : "Run",
         icon: "run",
         run: () => activateMenuItem(i),
       },
     ];
     // `hint` is the resolved command line, except for the form-opening and
     // frontend-only actions, and a bare terminal (whose hint is just a label).
-    if (a.hint && !a.clientSide && !a.prompt && !a.provision && a.hint !== "terminal") {
+    if (a.hint && !a.clientSide && !a.prompt && !a.provision && !a.remove && a.hint !== "terminal") {
       items.push({
         kind: "item",
         label: "Copy command",
@@ -938,7 +1009,7 @@
     }
     if (mode === "action-menu") {
       onMenuKeydown(e);
-    } else if (mode === "run-command" || mode === "new-repo") {
+    } else if (mode === "run-command" || mode === "new-repo" || mode === "remove") {
       // These components own their keys (Enter / Esc).
     } else if (mode === "settings") {
       if (e.key === "Escape") {
@@ -968,6 +1039,8 @@
       }
     } else if (mode === "new-repo") {
       if (back) newRepoBack();
+    } else if (mode === "remove") {
+      if (back) removeBack();
     } else if (mode === "action-menu") {
       if (back) menuBack();
       else if (menuItems[actionSel]?.kind === "submenu")
@@ -1166,6 +1239,13 @@
       oncreated={openCreated}
       onback={newRepoBack}
     />
+  {:else if mode === "remove" && removeTarget}
+    <RemoveFolder
+      name={removeTarget.repo.name}
+      path={removeTarget.repo.path}
+      ondone={(undoable) => removeTarget && removed(removeTarget.repo.name, undoable)}
+      onback={removeBack}
+    />
   {:else if mode === "settings"}
     <Settings
       bind:this={settingsPanel}
@@ -1180,6 +1260,24 @@
       onrescanrepos={rescan}
       onrescanapps={rescanAppsNow}
     />
+  {/if}
+
+  {#if undoToast && mode === "repo-list"}
+    <div
+      class="flex items-center gap-3 border-t border-hair bg-white/[0.04] px-4 py-2 text-[12px] text-white/70"
+    >
+      <span class="min-w-0 flex-1 truncate">
+        Moved <span class="text-white/90">{undoToast.name}</span> to the {bin}.
+      </span>
+      <button
+        type="button"
+        onclick={() => void undoRemove()}
+        class="inline-flex shrink-0 items-center gap-1.5 rounded border border-sky-400/50 bg-sky-400/10
+               px-2 py-0.5 text-[12px] text-sky-200 hover:bg-sky-400/20"
+      >
+        Undo <kbd>Ctrl+Z</kbd>
+      </button>
+    </div>
   {/if}
 
   <footer

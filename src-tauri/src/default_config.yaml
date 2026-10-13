@@ -498,6 +498,11 @@ universal:
     - { id: sublime-merge, name: "Open in Sublime Merge", program: "{{smerge}}", args: ["{{path}}"], needs: [smerge], icon: git, cluster: git }
     - { id: lazygit, name: "lazygit", run: "lazygit", terminal: true, needs: [lazygit], icon: git, cluster: git }
 
+    # Last of all: move the folder to the Recycle Bin / Trash (the label names
+    # this OS's bin). Never offered for a root. Its own cluster keeps it at
+    # the bottom, after every known one.
+    - { id: remove-folder, name: "Move to Recycle Bin…", remove: true, icon: trash, cluster: remove }
+
 # --- new repository (Ctrl+Shift+N on the repo list) ---------------------------
 # Version-control setups the "New repository" screen offers. It creates the
 # folder under the chosen root, then runs `run` inside it, in order. Each entry

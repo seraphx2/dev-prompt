@@ -452,7 +452,7 @@ fn display_command(argv: &[String]) -> String {
 /// Run `program` to completion with stdin closed and output captured, killing
 /// it after `timeout`. `Ok` is its stdout; `Err` explains the failure using
 /// the tail of what it printed.
-fn run_captured(program: &str, args: &[String], cwd: &Path, timeout: Duration) -> Result<String, String> {
+pub(crate) fn run_captured(program: &str, args: &[String], cwd: &Path, timeout: Duration) -> Result<String, String> {
     let mut cmd = command_for(program, args, cwd);
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| format!("couldn't start it ({e})"))?;

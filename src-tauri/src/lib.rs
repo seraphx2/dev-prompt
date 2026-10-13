@@ -24,6 +24,7 @@ mod inspect;
 mod launch;
 mod maven;
 mod provision;
+mod removal;
 mod rules;
 mod scan;
 mod usage;
@@ -418,6 +419,9 @@ pub fn run() {
             commands::check_new_repo,
             commands::create_repo,
             commands::init_repo,
+            commands::assess_removal,
+            commands::remove_folder,
+            commands::undo_removal,
             commands::list_apps,
             commands::rescan_apps,
             commands::run_app,

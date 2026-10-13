@@ -38,6 +38,8 @@ pub struct AppState {
     pub apps_gate: Mutex<()>,
     /// Watches where apps get installed (see `app_watch.rs`); `None` when off.
     pub app_watcher: Mutex<Option<crate::app_watch::Watching>>,
+    /// The folder last moved to the Recycle Bin / Trash, for Undo.
+    pub last_removed: Mutex<Option<trash::TrashItem>>,
     /// Whether losing focus dismisses the overlay. Off while the settings
     /// screen is open so clicking away to copy a path doesn't nuke edits.
     pub dismiss_on_blur: Mutex<bool>,
@@ -83,6 +85,7 @@ impl AppState {
             apps_index: Mutex::new(loaded_apps.index),
             apps_gate: Mutex::new(()),
             app_watcher: Mutex::new(None),
+            last_removed: Mutex::new(None),
             dismiss_on_blur: Mutex::new(dismiss_on_blur),
             first_run,
             sticky_open: Mutex::new(first_run),
@@ -283,6 +286,92 @@ fn put_repo(app: &AppHandle, state: &AppState, repo: &Repo, ctx: RepoContext) {
     let contexts = state.contexts.lock().unwrap().clone();
     let _ = cache::save(&repos, &contexts);
     let _ = app.emit("repos:updated", ());
+}
+
+// --- move to Recycle Bin / Trash -------------------------------------------
+
+/// What moving `path` to the bin would lose, for the confirmation dialog.
+/// Runs version-control queries, so it's off the UI thread.
+#[tauri::command]
+pub async fn assess_removal(
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<crate::removal::Assessment> {
+    let dir = {
+        let cfg = state.config.lock().unwrap();
+        let repos = state.repos.lock().unwrap();
+        crate::removal::check_removable(&cfg, &repos, &path).map_err(AppError::msg)?
+    };
+    tauri::async_runtime::spawn_blocking(move || crate::removal::assess(&dir))
+        .await
+        .map_err(|e| AppError::msg(format!("checking the folder failed: {e}")))
+}
+
+/// Move a listed folder to the Recycle Bin / Trash and take it out of the
+/// list. The path is checked again here — the frontend's word isn't enough
+/// for something this destructive. Returns whether Undo is available.
+#[tauri::command]
+pub async fn remove_folder(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<bool> {
+    let dir = {
+        let cfg = state.config.lock().unwrap();
+        let repos = state.repos.lock().unwrap();
+        crate::removal::check_removable(&cfg, &repos, &path).map_err(AppError::msg)?
+    };
+    // Windows may ask "permanently delete?" (a folder too big for the bin, a
+    // drive without one); that prompt must not open behind the overlay.
+    let _ = window.set_always_on_top(false);
+    let target = dir.clone();
+    let item = tauri::async_runtime::spawn_blocking(move || crate::removal::move_to_trash(&target))
+        .await
+        .map_err(|e| AppError::msg(format!("moving the folder failed: {e}")))??;
+
+    let undoable = item.is_some();
+    *state.last_removed.lock().unwrap() = item;
+    {
+        let mut repos = state.repos.lock().unwrap();
+        repos.retain(|r| !Path::new(&r.path).starts_with(&dir));
+    }
+    state.contexts.lock().unwrap().retain(|p, _| !Path::new(p).starts_with(&dir));
+    let repos = state.repos.lock().unwrap().clone();
+    let contexts = state.contexts.lock().unwrap().clone();
+    let _ = cache::save(&repos, &contexts);
+    let _ = app.emit("repos:updated", ());
+    Ok(undoable)
+}
+
+/// Put the folder last moved to the bin back, and rescan so it's listed again
+/// exactly as the scan would list it. Returns its path.
+#[tauri::command]
+pub async fn undo_removal(app: AppHandle, state: State<'_, AppState>) -> AppResult<String> {
+    let item = state
+        .last_removed
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or_else(|| AppError::msg("There's nothing to undo."))?;
+    let kept = item.clone();
+    let restored = tauri::async_runtime::spawn_blocking(move || {
+        let path = crate::removal::restore(item)?;
+        rescan_blocking(&app, false)?;
+        Ok::<_, AppError>(path)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("restoring the folder failed: {e}")))?;
+    match restored {
+        Ok(path) => Ok(path.to_string_lossy().into_owned()),
+        Err(e) => {
+            // Still in the bin: keep Undo available for another try.
+            if kept.original_path().symlink_metadata().is_err() {
+                *state.last_removed.lock().unwrap() = Some(kept);
+            }
+            Err(e)
+        }
+    }
 }
 
 /// Patch each universal-tier action's `usage_score` in from `action_usage`.
@@ -887,6 +976,7 @@ pub async fn run_command(
             client_side: false,
             prompt: false,
             provision: false,
+            remove: false,
         };
         launch::launch(&action, &repo)
     })

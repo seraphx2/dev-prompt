@@ -249,8 +249,8 @@ why, and how to add it anyway.
 **Right-click** works where it's useful, styled like the rest of the app:
 
 - a **repo** — open its actions, its quick actions (terminal, file manager,
-  copy path, run command), "Set up version control…" when it has none, and
-  the actions you use most in that repo;
+  copy path, run command), "Set up version control…" when it has none, the
+  actions you use most in that repo, and "Move to Recycle Bin…" (see below);
 - an **app** in `>` — launch it, show its folder, copy its path;
 - an **action** — run it, or copy the command it would run;
 - a **text field** — cut, copy, paste, select all.
@@ -258,6 +258,18 @@ why, and how to add it anyway.
 Anywhere else right-click does nothing — the browser's own Back / Reload /
 Print menu never shows. (In a dev build, Shift+right-click still opens it, for
 Inspect.)
+
+**Move to Recycle Bin** (Trash on Linux) — from a repo's right-click menu or
+its action menu — never deletes outright: the folder goes to the bin, Undo
+(`Ctrl+Z`) appears right after, and on Windows a folder too big for the bin
+gets Windows' own "permanently delete?" prompt rather than vanishing. First it
+checks what exists nowhere else: uncommitted changes, commits on no remote,
+stashes / shelves, repos nested inside, or no version control at all. A clean
+repo whose commits are all on a remote is one click; anything else lists what's
+at risk and asks you to type the folder's name. Git, Mercurial and Jujutsu are
+checked fully offline; for Subversion, Breezy, Darcs and Fossil only local
+changes can be checked without contacting the remote, so those always ask for
+the name. Your root folders themselves are never offered.
 
 The mouse **back / forward** buttons work throughout: back == `Esc` for the
 current screen, forward == open the action menu on the repo list, or drill

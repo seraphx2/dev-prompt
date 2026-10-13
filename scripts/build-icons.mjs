@@ -147,6 +147,13 @@ const GENERIC = {
       '<path d="M9.4 16.6 4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0L19.2 12l-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/>' +
       `<path d="M13.4 6.5 10.6 17.5" fill="none" stroke="${SKY}" stroke-width="2" stroke-linecap="round"/>`,
   },
+  // A bin: the lid and handle sky, lifted clear of the can, which has two
+  // slots cut through it.
+  trash: {
+    raw:
+      `<path fill="${SKY}" d="M9.5 2.5h5a1 1 0 0 1 1 1v1h4a1 1 0 0 1 0 2h-15a1 1 0 0 1 0-2h4v-1a1 1 0 0 1 1-1z"/>` +
+      '<path fill-rule="evenodd" d="M5.5 8h13l-1 11.8a2 2 0 0 1-2 1.7h-7a2 2 0 0 1-2-1.7zm4 3v7.5h1.6V11zm3.4 0v7.5h1.6V11z"/>',
+  },
   // Version control in general, not any one tool: a trunk with a branch
   // forking off it. Stroked lines between solid dots; the branch is sky.
   branch: {

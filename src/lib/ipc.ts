@@ -10,6 +10,7 @@ import type {
   ConfigSummary,
   FileManagerOption,
   NewRepoOptions,
+  RemovalAssessment,
   Repo,
   RepoListPayload,
   RepoTrace,
@@ -183,6 +184,22 @@ export function initRepo(
   values: Record<string, string>,
 ): Promise<Repo> {
   return invoke<Repo>("init_repo", { path, tool, values });
+}
+
+/** What moving the folder at `path` to the bin would lose. */
+export function assessRemoval(path: string): Promise<RemovalAssessment> {
+  return invoke<RemovalAssessment>("assess_removal", { path });
+}
+
+/** Move a listed folder to the Recycle Bin / Trash. Resolves to whether Undo
+ *  is available. */
+export function removeFolder(path: string): Promise<boolean> {
+  return invoke<boolean>("remove_folder", { path });
+}
+
+/** Put the folder last moved to the bin back. Resolves to its path. */
+export function undoRemoval(): Promise<string> {
+  return invoke<string>("undo_removal");
 }
 
 /** Cache-first list of installed apps for the `>` scope. */

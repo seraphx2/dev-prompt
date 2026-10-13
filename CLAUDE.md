@@ -99,6 +99,11 @@ surrounding style rather than running `cargo fmt`.
    touched (every row in `apps::Index` carries one) and must stay equal to a
    full gather — the end-to-end tests in `app_watch.rs` check exactly that,
    against real OS events in throwaway folders and registry keys.
+   **`removal.rs`** is "Move to Recycle Bin": never a permanent delete
+   (`trash` crate; Windows keeps its own nuke warning), paths re-validated in
+   the backend (listed, strictly inside a root, not a link), and an
+   assessment per VCS of what exists only locally — anything it can't check
+   counts as at risk, never as clean.
 3. On selecting a repo, **`inspect.rs`** walks its tree once into a
    `RepoContext` — root plus side-by-side / `packages/*`-style sub-projects,
    each with its manifest details (npm scripts + package manager, Cargo.toml,
