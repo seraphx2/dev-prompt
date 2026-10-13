@@ -9,10 +9,14 @@ import {
   depthPatch,
   filemanagerPatch,
   formFromConfig,
+  depthProblem,
   rescanNeeds,
   rootsPatch,
+  sortFolders,
+  templateProblem,
   terminalPatch,
   ttlPatch,
+  ttlProblem,
 } from "./model";
 
 const base = (over: Partial<AppConfig> = {}): AppConfig => ({
@@ -64,9 +68,9 @@ describe("formFromConfig", () => {
 
 describe("patches", () => {
   it("cleans the root list", () => {
-    const f = formFromConfig(base());
-    f.roots = [" D:\\git ", "", "E:\\src", "D:\\git"];
-    expect(rootsPatch(f)).toEqual({ roots: ["D:\\git", "E:\\src"] });
+    expect(rootsPatch([" D:\\git ", "", "E:\\src", "D:\\git"])).toEqual({
+      roots: ["D:\\git", "E:\\src"],
+    });
   });
 
   it("skips a number field mid-edit", () => {
@@ -94,13 +98,24 @@ describe("patches", () => {
 
   it("sends the app excludes back untouched", () => {
     const f = formFromConfig(base({ apps: { enabled: true, extra_dirs: ["D:\\tools", ""], exclude: ["Foo"] } }));
-    expect(appsPatch(f)).toEqual({
+    expect(appsPatch(f, f.appExtraDirs)).toEqual({
       apps: { enabled: true, extra_dirs: ["D:\\tools"], exclude: ["Foo"] },
     });
   });
 });
 
 describe("folder lists", () => {
+  it("saves only the folders that exist", () => {
+    const exists = new Map([
+      ["D:\\git", true],
+      ["D:\\gi", false],
+    ]);
+    const got = sortFolders([" D:\\git", "D:\\gi", "", "E:\\typed-since"], exists);
+    expect(got.good).toEqual(["D:\\git"]);
+    expect(got.bad).toEqual(["D:\\gi"]);
+    expect(got.problems).toEqual([null, "Folder not found.", null, null]);
+  });
+
   it("adds picked folders once, dropping blank rows", () => {
     expect(addFolders(["D:\\git", ""], ["E:\\src", "D:\\git"])).toEqual(["D:\\git", "E:\\src"]);
     expect(cleanList(["", " "])).toEqual([]);
@@ -126,5 +141,32 @@ describe("rescanNeeds", () => {
     const off = base({ apps: { enabled: false, extra_dirs: [], exclude: [] } });
     expect(rescanNeeds(base(), off).apps).toBe(false);
     expect(rescanNeeds(off, base()).apps).toBe(true);
+  });
+});
+
+describe("validation", () => {
+  it("bounds the numbers", () => {
+    expect(depthProblem(4)).toBeNull();
+    expect(depthProblem(0)).not.toBeNull();
+    expect(depthProblem(13)).not.toBeNull();
+    expect(depthProblem(2.5)).not.toBeNull();
+    expect(depthProblem(NaN)).not.toBeNull();
+    expect(ttlProblem(1)).toBeNull();
+    expect(ttlProblem(0)).not.toBeNull();
+  });
+
+  it("accepts a template with its placeholders", () => {
+    expect(templateProblem("terminal", "wezterm start --cwd {{dir}} -- {{cmd}}")).toBeNull();
+    expect(templateProblem("terminal", "x --cd {{dir}}")).toBeNull();
+    expect(templateProblem("filemanager", "dopus /cmd Go {{path}}")).toBeNull();
+  });
+
+  it("rejects an empty, unfinished or wrong template", () => {
+    expect(templateProblem("terminal", "  ")).toMatch(/Type a template/);
+    expect(templateProblem("terminal", "wezterm start --cwd {{di")).toMatch(/isn't closed/);
+    expect(templateProblem("terminal", "wezterm }} x")).toMatch(/isn't closed/);
+    expect(templateProblem("terminal", "x {{path}}")).toMatch(/isn't a placeholder here/);
+    expect(templateProblem("terminal", "x {{ dir }}")).toMatch(/isn't a placeholder here/);
+    expect(templateProblem("filemanager", "dopus")).toMatch(/needs \{\{path\}\}/);
   });
 });

@@ -287,7 +287,8 @@ impl Checker<'_> {
         let paths = self.run("for remotes", "hg", &["paths"]);
         match paths.as_deref().map(str::trim) {
             Some("") => {
-                if self.run_quiet("hg", &["log", "-r", "tip", "-T", "x"]).is_some_and(|o| !o.trim().is_empty()) {
+                // Failing to read the history counts as unknown, not as "no history".
+                if self.run("for commits", "hg", &["log", "-r", "tip", "-T", "x"]).is_some_and(|o| !o.trim().is_empty()) {
                     self.risks.push("It has no remote, so its whole history exists only here.".into());
                 }
             }
@@ -385,15 +386,14 @@ impl Checker<'_> {
     }
 
     fn darcs(&mut self) {
-        // `whatsnew` exits 1 with "No changes!" when there's nothing to report.
-        match self.run_quiet("darcs", &["whatsnew", "--summary", "--look-for-adds"]) {
-            Some(out) => self.risks.extend(describe_changes(&out, "a")),
-            None => {
-                // Distinguish "no changes" (exit 1) from a real failure by
-                // asking for the repo root, which only fails when darcs does.
-                if self.run("for uncommitted changes", "darcs", &["show", "repo"]).is_none() {
-                    return;
-                }
+        // `whatsnew` exits 1 with "No changes!" when there's nothing to report;
+        // any other failure (a timeout included) leaves the changes unchecked.
+        if let Some(darcs) = which("darcs") {
+            let args = ["whatsnew", "--summary", "--look-for-adds"].map(String::from);
+            match run_captured(&darcs, &args, self.dir, CHECK_TIMEOUT) {
+                Ok(out) => self.risks.extend(describe_changes(&out, "a")),
+                Err(e) if e.starts_with("exit code 1.") && e.contains("No changes!") => {}
+                Err(e) => self.unknown.push(format!("Couldn't check for uncommitted changes: {e}")),
             }
         }
         self.unknown.push(

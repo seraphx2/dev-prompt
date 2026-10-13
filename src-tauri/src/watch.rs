@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use globset::GlobSet;
@@ -31,10 +31,31 @@ const MAX_WAIT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Signal {
-    /// Linux only: a folder appeared that needs its own inotify watch.
-    Rewatch,
     /// The repo list may have changed.
     Rescan,
+}
+
+/// A running watcher over the roots; dropping it stops it.
+pub struct RepoWatcher {
+    /// The config it was built from (see [`watch_key`]), so a sync that
+    /// changes nothing it depends on keeps it instead of rebuilding.
+    key: String,
+    /// Shared with the Linux thread that adds watches for new folders.
+    _inner: Arc<Mutex<RecommendedWatcher>>,
+}
+
+/// Everything [`Filter`] and the watches depend on.
+fn watch_key(cfg: &Config) -> String {
+    format!(
+        "{:?}",
+        (
+            config::resolved_roots(cfg),
+            cfg.scan.max_depth,
+            cfg.scan.top_level_folders,
+            config::discovery_globs(cfg),
+            config::vcs_markers(cfg),
+        )
+    )
 }
 
 /// What the event handler needs to judge a path, captured per [`sync`].
@@ -128,11 +149,25 @@ impl Filter {
             if has_marker(path, &self.discovery) {
                 return Some(Signal::Rescan);
             }
-            if cfg!(target_os = "linux") {
-                return Some(Signal::Rewatch);
-            }
         }
         None
+    }
+
+    /// Linux: how many levels below `path` — a folder that just appeared —
+    /// still need inotify watches, or `None` if it needs none (outside the
+    /// scan depth, or inside `.git` / `node_modules` / …).
+    fn levels_below(&self, path: &Path) -> Option<usize> {
+        let root = self.roots.iter().find(|r| path.starts_with(r))?;
+        let rel: Vec<String> = path
+            .strip_prefix(root)
+            .ok()?
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        if rel.is_empty() || rel.len() > self.max_depth || rel.iter().any(|seg| self.is_opaque(seg)) {
+            return None;
+        }
+        path.is_dir().then(|| self.max_depth - rel.len())
     }
 }
 
@@ -143,11 +178,18 @@ fn has_marker(dir: &Path, discovery: &GlobSet) -> bool {
     })
 }
 
-/// (Re)build the watcher for the current config. Called at startup and after
-/// anything that can change the roots, the scan depth or the markers.
+/// (Re)build the watcher for the current config, unless it was built from the
+/// same roots, depth and markers. Called at startup and after every config
+/// save, reload or rescan.
 pub fn sync(app: &AppHandle) {
     let state = app.state::<AppState>();
     let cfg = state.config.lock().unwrap().clone();
+    // Settings save often; one that changes nothing the watcher depends on
+    // keeps it, rather than dropping events while it's rebuilt (and, on
+    // Linux, re-walking every root).
+    if state.watcher.lock().unwrap().as_ref().is_some_and(|w| w.key == watch_key(&cfg)) {
+        return;
+    }
     let tx = signals(app).clone();
     let handler_app = app.clone();
     let holds_repo = move |p: &Path| {
@@ -167,29 +209,44 @@ pub fn sync(app: &AppHandle) {
 fn start(
     cfg: &Config,
     holds_repo: impl Fn(&Path) -> bool + Send + 'static,
-    on_signal: impl Fn(Signal) + Send + 'static,
-) -> Option<RecommendedWatcher> {
-    let filter = Filter::new(cfg);
-    let roots = filter.roots.clone();
-    let max_depth = filter.max_depth;
+    on_signal: impl Fn(Signal) + Send + Sync + 'static,
+) -> Option<RepoWatcher> {
+    let filter = Arc::new(Filter::new(cfg));
+    let on_signal = Arc::new(on_signal);
+    // Linux: a folder that appears needs watches of its own. They're added on
+    // another thread — the watcher can't be changed from inside its own
+    // event handler.
+    let (new_tx, new_rx) = mpsc::channel::<(PathBuf, usize)>();
 
+    let f = filter.clone();
+    let signal = on_signal.clone();
     let made = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        let signal = match res {
+        let ev = match res {
             // The OS dropped events (buffer overflow): assume the worst.
-            Err(_) => Some(Signal::Rescan),
-            Ok(ev) if ev.need_rescan() => Some(Signal::Rescan),
-            Ok(ev) => match ev.kind {
-                EventKind::Access(_)
-                | EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Metadata(_)) => None,
-                ref kind => ev
-                    .paths
-                    .iter()
-                    .filter_map(|p| filter.classify(p, kind, &holds_repo))
-                    .max(),
-            },
+            Err(_) => return signal(Signal::Rescan),
+            Ok(ev) if ev.need_rescan() => return signal(Signal::Rescan),
+            Ok(ev) => ev,
         };
-        if let Some(s) = signal {
-            on_signal(s);
+        if matches!(
+            ev.kind,
+            EventKind::Access(_) | EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Metadata(_))
+        ) {
+            return;
+        }
+        if let Some(s) = ev.paths.iter().filter_map(|p| f.classify(p, &ev.kind, &holds_repo)).max() {
+            signal(s);
+        }
+        let added = matches!(
+            ev.kind,
+            EventKind::Create(_)
+                | EventKind::Modify(ModifyKind::Name(RenameMode::To | RenameMode::Both | RenameMode::Any))
+        );
+        if cfg!(target_os = "linux") && added {
+            for p in &ev.paths {
+                if let Some(levels) = f.levels_below(p) {
+                    let _ = new_tx.send((p.clone(), levels));
+                }
+            }
         }
     });
     let mut watcher = match made {
@@ -200,14 +257,42 @@ fn start(
         }
     };
 
-    for root in &roots {
-        if let Err(e) = watch_root(&mut watcher, root, max_depth, cfg) {
-            // Typically the inotify watch limit; the open-time check covers it.
-            eprintln!("watching {} stopped early: {e}", root.display());
-            break;
+    for root in &filter.roots {
+        match watch_root(&mut watcher, root, &filter) {
+            Ok(()) => {}
+            // Out of inotify watches: the rest can't be watched either. The
+            // open-time check covers it.
+            Err(e) if matches!(e.kind, notify::ErrorKind::MaxFilesWatch) => {
+                eprintln!("watching {} stopped early: {e}", root.display());
+                break;
+            }
+            // A missing drive or a typo affects this root only.
+            Err(e) => eprintln!("not watching {}: {e}", root.display()),
         }
     }
-    Some(watcher)
+
+    let inner = Arc::new(Mutex::new(watcher));
+    if cfg!(target_os = "linux") {
+        let weak = Arc::downgrade(&inner);
+        std::thread::spawn(move || {
+            // Ends when the watcher (and with it the sender) is dropped.
+            while let Ok((dir, levels)) = new_rx.recv() {
+                let Some(inner) = weak.upgrade() else { return };
+                let mut marker = false;
+                let res = watch_tree(&mut inner.lock().unwrap(), &dir, levels, &filter, &mut |d| {
+                    marker |= has_marker(d, &filter.discovery);
+                });
+                if let Err(e) = res {
+                    eprintln!("not watching {}: {e}", dir.display());
+                }
+                // A marker written before its folder was watched went unseen.
+                if marker {
+                    on_signal(Signal::Rescan);
+                }
+            }
+        });
+    }
+    Some(RepoWatcher { key: watch_key(cfg), _inner: inner })
 }
 
 /// [`sync`] on its own thread — for callers on the UI thread, since on Linux
@@ -219,7 +304,7 @@ pub fn sync_in_background(app: &AppHandle) {
 
 /// Windows: one recursive watch per root is a single OS handle.
 #[cfg(not(target_os = "linux"))]
-fn watch_root(w: &mut RecommendedWatcher, root: &Path, _max_depth: usize, _cfg: &Config) -> notify::Result<()> {
+fn watch_root(w: &mut RecommendedWatcher, root: &Path, _filter: &Filter) -> notify::Result<()> {
     w.watch(root, RecursiveMode::Recursive)
 }
 
@@ -228,24 +313,50 @@ fn watch_root(w: &mut RecommendedWatcher, root: &Path, _max_depth: usize, _cfg: 
 /// per-user watch limit. So watch only the folders the scan visits, down to
 /// its depth, skipping the same folders it skips.
 #[cfg(target_os = "linux")]
-fn watch_root(w: &mut RecommendedWatcher, root: &Path, max_depth: usize, cfg: &Config) -> notify::Result<()> {
-    let vcs: Vec<String> = config::vcs_markers(cfg).into_iter().map(|(n, _)| n.to_lowercase()).collect();
-    let mut stack = vec![(root.to_path_buf(), 0usize)];
+fn watch_root(w: &mut RecommendedWatcher, root: &Path, filter: &Filter) -> notify::Result<()> {
+    watch_tree(w, root, filter.max_depth, filter, &mut |_| {})
+}
+
+/// Not needed off Linux; never called there.
+#[cfg(not(target_os = "linux"))]
+fn watch_tree(
+    _w: &mut RecommendedWatcher,
+    _top: &Path,
+    _levels: usize,
+    _filter: &Filter,
+    _on_dir: &mut dyn FnMut(&Path),
+) -> notify::Result<()> {
+    Ok(())
+}
+
+/// Watch `top` and its folders `levels` deep, calling `on_dir` for each one
+/// watched. A subfolder that can't be watched (gone already, unreadable) is
+/// skipped; failing on `top` itself, or running out of watches, is an error.
+#[cfg(target_os = "linux")]
+fn watch_tree(
+    w: &mut RecommendedWatcher,
+    top: &Path,
+    levels: usize,
+    filter: &Filter,
+    on_dir: &mut dyn FnMut(&Path),
+) -> notify::Result<()> {
+    let mut stack = vec![(top.to_path_buf(), 0usize)];
     while let Some((dir, depth)) = stack.pop() {
-        w.watch(&dir, RecursiveMode::NonRecursive)?;
-        if depth >= max_depth {
+        if let Err(e) = w.watch(&dir, RecursiveMode::NonRecursive) {
+            if depth == 0 || matches!(e.kind, notify::ErrorKind::MaxFilesWatch) {
+                return Err(e);
+            }
+            continue;
+        }
+        on_dir(&dir);
+        if depth >= levels {
             continue;
         }
         let Ok(rd) = std::fs::read_dir(&dir) else { continue };
         for e in rd.flatten() {
-            if !e.file_type().is_ok_and(|t| t.is_dir()) {
-                continue;
+            if e.file_type().is_ok_and(|t| t.is_dir()) && !filter.is_opaque(&e.file_name().to_string_lossy()) {
+                stack.push((e.path(), depth + 1));
             }
-            let name = e.file_name().to_string_lossy().to_lowercase();
-            if HARD_SKIP.iter().any(|s| name == s.to_lowercase()) || vcs.contains(&name) {
-                continue;
-            }
-            stack.push((e.path(), depth + 1));
         }
     }
     Ok(())
@@ -258,24 +369,18 @@ fn signals(app: &AppHandle) -> &'static Sender<Signal> {
         let (tx, rx) = mpsc::channel::<Signal>();
         let app = app.clone();
         std::thread::spawn(move || loop {
-            let Ok(mut signal) = rx.recv() else { return };
+            let Ok(Signal::Rescan) = rx.recv() else { return };
             let first = Instant::now();
             loop {
                 let wait = QUIET.min(MAX_WAIT.saturating_sub(first.elapsed()));
                 match rx.recv_timeout(wait) {
-                    Ok(s) => signal = signal.max(s),
+                    Ok(_) => {}
                     Err(RecvTimeoutError::Timeout) => break,
                     Err(RecvTimeoutError::Disconnected) => return,
                 }
             }
-            if signal == Signal::Rescan {
-                if let Err(e) = crate::commands::rescan_blocking(&app, false) {
-                    eprintln!("background rescan failed: {e}");
-                }
-            }
-            // New folders need watches of their own on Linux.
-            if cfg!(target_os = "linux") {
-                sync(&app);
+            if let Err(e) = crate::commands::rescan_blocking(&app, false) {
+                eprintln!("background rescan failed: {e}");
             }
         });
         tx
@@ -377,9 +482,10 @@ mod tests {
         cfg.scan.top_level_folders = false;
         let f = Filter::new(&cfg);
         let got = f.classify(&root.join("plain"), &CREATE_DIR, &|_| false);
-        // Linux still needs a watch on it; nothing else does.
-        let want = if cfg!(target_os = "linux") { Some(Signal::Rewatch) } else { None };
-        assert_eq!(got, want);
+        assert_eq!(got, None);
+        // Linux still watches it, and below it down to the scan depth.
+        assert_eq!(f.levels_below(&root.join("plain")), Some(cfg.scan.max_depth - 1));
+        assert_eq!(f.levels_below(&root.join("plain/node_modules")), None);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -432,5 +538,49 @@ mod tests {
         next("a new top-level folder");
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A root that can't be watched (an unplugged drive, a typo) mustn't
+    /// leave the roots after it unwatched.
+    #[test]
+    fn a_missing_root_does_not_stop_the_others() {
+        let root = tmp("after-missing");
+        let mut cfg = config::bundled_defaults();
+        cfg.roots = vec![
+            root.join("not-there").to_string_lossy().into_owned(),
+            root.to_string_lossy().into_owned(),
+        ];
+        let (tx, rx) = mpsc::channel();
+        let _w = start(&cfg, |_| false, move |s| {
+            let _ = tx.send(s);
+        })
+        .expect("a watcher");
+        std::thread::sleep(Duration::from_millis(300));
+        std::fs::create_dir(root.join("notes")).unwrap();
+        assert_eq!(rx.recv_timeout(Duration::from_secs(10)), Ok(Signal::Rescan));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Only what the watcher depends on rebuilds it.
+    #[test]
+    fn the_watch_key_follows_roots_depth_and_markers_only() {
+        let (a, b) = (tmp("key-a"), tmp("key-b"));
+        let mut cfg = config::bundled_defaults();
+        cfg.roots = vec![a.to_string_lossy().into_owned()];
+        let key = watch_key(&cfg);
+        let mut other = cfg.clone();
+        other.terminal = Some("wezterm".into());
+        other.cache_ttl_secs = 60;
+        assert_eq!(watch_key(&other), key);
+        other.scan.max_depth += 1;
+        assert_ne!(watch_key(&other), key);
+        let mut other = cfg.clone();
+        other.roots.push(b.to_string_lossy().into_owned());
+        assert_ne!(watch_key(&other), key);
+        let mut other = cfg.clone();
+        other.scan.top_level_folders = !other.scan.top_level_folders;
+        assert_ne!(watch_key(&other), key);
+        let _ = std::fs::remove_dir_all(&a);
+        let _ = std::fs::remove_dir_all(&b);
     }
 }

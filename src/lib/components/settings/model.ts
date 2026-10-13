@@ -114,7 +114,8 @@ export function addFolders(have: string[], picked: string[]): string[] {
 // One patch per thing a page saves. A number field mid-edit (empty, or not a
 // number yet) sends nothing rather than a bogus value.
 
-export const rootsPatch = (f: Form): ConfigPatch => ({ roots: cleanList(f.roots) });
+/** `roots` are the rows that passed [`sortFolders`]. */
+export const rootsPatch = (roots: string[]): ConfigPatch => ({ roots: cleanList(roots) });
 
 export function ttlPatch(f: Form): ConfigPatch {
   return Number.isFinite(f.ttlMin) && f.ttlMin >= 1
@@ -142,13 +143,58 @@ export const filemanagerPatch = (f: Form): ConfigPatch =>
     ? { filemanager: "", filemanager_template: f.filemanagerTemplate.trim() }
     : { filemanager: f.filemanagerSel, filemanager_template: "" };
 
-export const appsPatch = (f: Form): ConfigPatch => ({
+/** `extraDirs` are the rows that passed [`sortFolders`]. */
+export const appsPatch = (f: Form, extraDirs: string[]): ConfigPatch => ({
   apps: {
     enabled: f.appsEnabled,
-    extra_dirs: cleanList(f.appExtraDirs),
+    extra_dirs: cleanList(extraDirs),
     exclude: cleanList(f.appExclude),
   },
 });
+
+/** Folder rows sorted by whether each typed path exists (`exists`, keyed by
+ *  the trimmed path): the ones to save, the ones that can't be, and each
+ *  row's problem. A row typed since the check is in neither list. */
+export function sortFolders(rows: string[], exists: Map<string, boolean>) {
+  const state = (r: string) => exists.get(r.trim());
+  return {
+    good: cleanList(rows.filter((r) => state(r) === true)),
+    bad: cleanList(rows.filter((r) => state(r) === false)),
+    problems: rows.map((r) => (state(r) === false ? "Folder not found." : null)),
+  };
+}
+
+// --- validation: an invalid value is never saved -----------------------------
+
+export const DEPTH_MAX = 12;
+
+export function depthProblem(n: number): string | null {
+  return Number.isInteger(n) && n >= 1 && n <= DEPTH_MAX ? null : `A whole number from 1 to ${DEPTH_MAX}.`;
+}
+
+export function ttlProblem(n: number): string | null {
+  return Number.isFinite(n) && n >= 1 ? null : "At least 1 minute.";
+}
+
+const PLACEHOLDERS = { terminal: ["dir", "cmd"], filemanager: ["path"] } as const;
+
+/** What's wrong with a custom terminal / file-manager template, or null.
+ *  Placeholders are replaced literally, so `{{ dir }}` (with spaces) wouldn't be. */
+export function templateProblem(kind: "terminal" | "filemanager", template: string): string | null {
+  const t = template.trim();
+  const allowed: readonly string[] = PLACEHOLDERS[kind];
+  const list = allowed.map((a) => `{{${a}}}`).join(" or ");
+  if (!t) return "Type a template, or pick another option.";
+  const opens = t.split("{{").length - 1;
+  const names = [...t.matchAll(/\{\{([^{}]*)\}\}/g)].map((m) => m[1]);
+  if (opens !== names.length || t.split("}}").length - 1 !== names.length) {
+    return "A {{placeholder}} isn't closed.";
+  }
+  const bad = names.find((n) => !allowed.includes(n));
+  if (bad !== undefined) return `{{${bad}}} isn't a placeholder here — use ${list}.`;
+  if (!names.length) return `It needs ${list} somewhere.`;
+  return null;
+}
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 

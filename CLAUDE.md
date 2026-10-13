@@ -91,7 +91,10 @@ surrounding style rather than running `cargo fmt`.
    **`watch.rs`** watches the roots while the app runs and rescans
    (debounced) when a marker or a repo folder comes or goes — it drops
    everything below `.git` / `node_modules` / … so git churn costs nothing.
-   On Linux it holds one inotify watch per folder down to the scan depth.
+   On Linux it holds one inotify watch per folder down to the scan depth,
+   adding watches as folders appear rather than rebuilding. A sync whose
+   roots / depth / markers are unchanged keeps the running watcher (the app
+   watcher likewise keeps its sources), so autosaves cost nothing there.
    **`app_watch.rs`** does the same for the `>` app list: Start Menu /
    `%LOCALAPPDATA%\Programs` / `extra_dirs` folders plus the Uninstall and
    Store registry keys (`RegNotifyChangeKeyValue`), or the XDG application

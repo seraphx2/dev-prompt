@@ -63,7 +63,20 @@
   /** The page Settings opens on; null for the one it showed last. */
   let settingsPage = $state<SettingsPage | null>(null);
 
+  /** What Settings couldn't save as it closed (an invalid value, a failed
+   *  write) — shown in the footer for a while, ahead of the status line. */
+  let notice = $state("");
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  const NOTICE_MS = 10_000;
+
+  function settingsUnsaved(msg: string) {
+    notice = notice ? `${notice} · ${msg}` : msg;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => (notice = ""), NOTICE_MS);
+  }
+
   function openSettings(page: SettingsPage | null = null) {
+    notice = "";
     settingsPage = page;
     mode = "settings";
   }
@@ -1275,6 +1288,7 @@
       }}
       onrescanrepos={rescan}
       onrescanapps={rescanAppsNow}
+      onunsaved={settingsUnsaved}
     />
   {/if}
 
@@ -1356,7 +1370,11 @@
           {@render glyph("app")}{appCount}
         </span>
       {/if}
-      <span class="truncate">{footerStatus}</span>
+      {#if notice}
+        <span class="truncate text-amber-300/90" title={notice}>{notice}</span>
+      {:else}
+        <span class="truncate">{footerStatus}</span>
+      {/if}
       {#if mode === "repo-list"}
         <span class="inline-flex shrink-0 items-center gap-1"
           ><kbd>Ctrl+R</kbd>rescan</span

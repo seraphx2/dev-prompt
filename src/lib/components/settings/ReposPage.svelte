@@ -1,13 +1,15 @@
 <script lang="ts">
-  import { tick } from "svelte";
-  import { pickDirectories } from "../../ipc";
+  import { onDestroy } from "svelte";
+  import FolderList from "./FolderList.svelte";
   import {
+    DEPTH_MAX,
     TYPING_DELAY_MS,
-    addFolders,
     collapsePatch,
     depthPatch,
+    depthProblem,
     rootsPatch,
     ttlPatch,
+    ttlProblem,
     type Form,
     type Note,
     type Save,
@@ -18,94 +20,72 @@
     form,
     save,
     note,
+    report,
     rescan,
   }: {
     form: Form;
     save: Save;
     note: Note;
+    report: (msg: string) => void;
     /** Sends anything waiting, then rescans the roots. */
     rescan: () => void;
   } = $props();
 
-  /** The root row asking "Remove?", if any. */
-  let confirmIdx = $state<number | null>(null);
-  let rows: HTMLInputElement[] = $state([]);
+  // A number saves as you type once it's valid. An invalid one is never
+  // saved, and leaving the field puts the last good value back.
+  // svelte-ignore state_referenced_locally
+  let good = { depth: form.scanDepth, ttl: form.ttlMin };
+  let depthErr = $state("");
+  let ttlErr = $state("");
 
-  // A root saves when you leave its field or press Enter, not per keystroke —
-  // a half-typed path would rescan and re-watch a folder that isn't there.
-  const saveRoots = () => save(rootsPatch(form));
-
-  async function addRoot() {
-    form.roots.push("");
-    await tick();
-    rows[form.roots.length - 1]?.focus();
-  }
-
-  function removeRoot(i: number) {
-    form.roots.splice(i, 1);
-    if (!form.roots.length) form.roots.push("");
-    confirmIdx = null;
-    saveRoots();
-  }
-
-  async function browse() {
-    try {
-      const picked = await pickDirectories();
-      if (!picked.length) return;
-      const next = addFolders(form.roots, picked);
-      form.roots = next.length ? next : [""];
-      saveRoots();
-    } catch (e) {
-      note(`${e}`, true);
+  function depthInput() {
+    depthErr = depthProblem(form.scanDepth) ?? "";
+    if (!depthErr) {
+      good.depth = form.scanDepth;
+      save(depthPatch(form), TYPING_DELAY_MS);
     }
   }
+  function ttlInput() {
+    ttlErr = ttlProblem(form.ttlMin) ?? "";
+    if (!ttlErr) {
+      good.ttl = form.ttlMin;
+      save(ttlPatch(form), TYPING_DELAY_MS);
+    }
+  }
+  function depthBlur() {
+    if (depthErr) {
+      form.scanDepth = good.depth;
+      depthErr = "";
+    }
+  }
+  function ttlBlur() {
+    if (ttlErr) {
+      form.ttlMin = good.ttl;
+      ttlErr = "";
+    }
+  }
+
+  onDestroy(() => {
+    if (depthErr) report(`Didn't save scan depth — ${depthErr}`);
+    if (ttlErr) report(`Didn't save cache lifetime — ${ttlErr}`);
+  });
 </script>
 
 <div class="space-y-1.5">
   <span class={ui.label}
     >Root directories <span class="text-white/25">— scanned recursively for projects</span></span
   >
-  {#each form.roots as _root, i (i)}
-    <div class="flex items-center gap-2">
-      <input
-        bind:this={rows[i]}
-        bind:value={form.roots[i]}
-        onchange={saveRoots}
-        spellcheck="false"
-        placeholder="D:\git"
-        class="min-w-0 flex-1 {ui.mono}"
-      />
-      {#if confirmIdx === i}
-        <button
-          type="button"
-          onclick={() => removeRoot(i)}
-          class="shrink-0 rounded border border-red-400/40 bg-red-500/15 px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/25"
-        >
-          Remove
-        </button>
-        <button
-          type="button"
-          onclick={() => (confirmIdx = null)}
-          class="shrink-0 rounded border border-hair px-2 py-1 text-[11px] text-white/50 hover:bg-white/10"
-        >
-          Cancel
-        </button>
-      {:else}
-        <button
-          type="button"
-          onclick={() => (form.roots[i].trim() ? (confirmIdx = i) : removeRoot(i))}
-          aria-label="Remove from scan list"
-          title="Remove from scan list"
-          class="shrink-0 rounded border border-hair px-2 py-1 text-[11px] text-white/40 hover:bg-white/10 hover:text-white/70"
-        >
-          ×
-        </button>
-      {/if}
-    </div>
-  {/each}
-  <div class="flex gap-2">
-    <button type="button" onclick={addRoot} class={ui.smallBtn}>+ Add root</button>
-    <button type="button" onclick={browse} class={ui.smallBtn}>Browse…</button>
+  <FolderList
+    rows={form.roots}
+    what="root"
+    placeholder="D:\git"
+    addLabel="+ Add root"
+    confirmRemove
+    keepOneRow
+    onsave={(roots) => save(rootsPatch(roots))}
+    {note}
+    {report}
+  >
     <button
       type="button"
       onclick={rescan}
@@ -114,7 +94,7 @@
     >
       Rescan
     </button>
-  </div>
+  </FolderList>
   <p class={ui.help}>
     The list updates on its own when a repo or folder appears or goes away inside a root.
   </p>
@@ -126,12 +106,15 @@
     <input
       type="number"
       min="1"
-      max="12"
+      max={DEPTH_MAX}
       bind:value={form.scanDepth}
-      oninput={() => save(depthPatch(form), TYPING_DELAY_MS)}
+      oninput={depthInput}
+      onblur={depthBlur}
+      aria-invalid={!!depthErr}
       title="How many directory levels deep the scan looks for repos"
-      class="w-24 {ui.input}"
+      class="w-24 {ui.input} {depthErr ? '!border-red-400/60' : ''}"
     />
+    {#if depthErr}<span class="block text-[11px] text-red-300">{depthErr}</span>{/if}
   </label>
   <label class="block space-y-1.5">
     <span class={ui.label}>Cache lifetime (minutes)</span>
@@ -139,10 +122,13 @@
       type="number"
       min="1"
       bind:value={form.ttlMin}
-      oninput={() => save(ttlPatch(form), TYPING_DELAY_MS)}
+      oninput={ttlInput}
+      onblur={ttlBlur}
+      aria-invalid={!!ttlErr}
       title="How old the cached repo list can get before dev-prompt rescans it"
-      class="w-24 {ui.input}"
+      class="w-24 {ui.input} {ttlErr ? '!border-red-400/60' : ''}"
     />
+    {#if ttlErr}<span class="block text-[11px] text-red-300">{ttlErr}</span>{/if}
   </label>
 </div>
 

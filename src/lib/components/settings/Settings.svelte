@@ -28,6 +28,7 @@
     onsaved,
     onrescanrepos,
     onrescanapps,
+    onunsaved,
   }: {
     /** Open on this page instead of the one last shown. */
     initialPage?: Page | null;
@@ -39,6 +40,9 @@
     onsaved: () => void;
     onrescanrepos: () => void;
     onrescanapps: () => void;
+    /** Something couldn't be saved and Settings is already closed — App
+     *  shows it in the footer instead. */
+    onunsaved: (msg: string) => void;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -60,12 +64,15 @@
   // --- autosave -------------------------------------------------------------
   // Every edit saves itself: toggles and dropdowns at once, typing after a
   // pause. Patches that wait together go out as one save, and saves run one at
-  // a time, so a slow one can't land after a newer one.
+  // a time, so a slow one can't land after a newer one. A save that fails goes
+  // back in the queue (under anything newer) for the next one to retry.
   let pending: ConfigPatch = {};
   let waiting = $state(false);
   let inflight = $state(0);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let chain: Promise<AppConfig | null> = Promise.resolve(null);
+  /** False once Settings has closed; anything reported after that goes to App. */
+  let alive = true;
 
   function save(patch: ConfigPatch, delay = 0) {
     if (!Object.keys(patch).length) return;
@@ -77,13 +84,17 @@
   }
 
   /** Sends whatever is waiting now. Resolves to the saved config, or null if
-   *  the save failed (the error is shown in the header). */
+   *  the save failed. */
   function flush(): Promise<AppConfig | null> {
     clearTimeout(timer);
     if (!waiting) return chain;
     waiting = false;
     const patch = pending;
     pending = {};
+    return send(patch, true);
+  }
+
+  function send(patch: ConfigPatch, requeue: boolean): Promise<AppConfig | null> {
     inflight++;
     chain = chain.then(async () => {
       try {
@@ -93,10 +104,14 @@
         onsaved();
         if (need.repos) onrescanrepos();
         if (need.apps) onrescanapps();
-        if (inflight === 1) note("Saved.");
+        if (inflight === 1 && !waiting) note("Saved.");
         return c;
       } catch (e) {
-        note(`${e}`, true);
+        if (requeue) {
+          pending = { ...patch, ...pending };
+          waiting = true;
+        }
+        report(`Couldn't save settings: ${e}`);
         return null;
       } finally {
         inflight--;
@@ -105,16 +120,34 @@
     return chain;
   }
 
-  /** Saves now and waits for the result — for the hotkeys, which only take
-   *  their new value once the OS has accepted it. */
-  function commit(patch: ConfigPatch): Promise<AppConfig | null> {
-    Object.assign(pending, patch);
-    waiting = true;
-    return flush();
+  /** Saves `patch` on its own, now, and waits for the result — for the
+   *  hotkeys, which only take their new value once the OS has accepted it.
+   *  Anything already waiting goes first, separately, so a rejected hotkey
+   *  can't take other edits down with it. */
+  async function commit(patch: ConfigPatch): Promise<AppConfig | null> {
+    void flush();
+    return send(patch, false);
   }
 
-  // Leaving Settings sends anything still waiting on a typing pause.
+  /** Sends anything waiting, then runs `rescan` — unless that save failed. */
+  async function saveThen(rescan: () => void) {
+    const had = waiting;
+    const c = await flush();
+    if (!had || c) rescan();
+  }
+
+  /** A problem the user should see: in the header while Settings is open,
+   *  in App's footer once it has closed. */
+  function report(msg: string) {
+    if (alive) note(msg, true);
+    else onunsaved(msg);
+  }
+
+  // Leaving Settings sends anything still waiting on a typing pause (and
+  // retries a save that failed). Pages send their own unfinished fields as
+  // they close, whichever goes first.
   onDestroy(() => {
+    alive = false;
     void flush();
     clearTimeout(msgTimer);
   });
@@ -280,11 +313,11 @@
     {:else if page === "general"}
       <GeneralPage {form} {save} {commit} {note} />
     {:else if page === "repos"}
-      <ReposPage {form} {save} {note} rescan={() => void flush().then(onrescanrepos)} />
+      <ReposPage {form} {save} {note} {report} rescan={() => void saveThen(onrescanrepos)} />
     {:else if page === "tools"}
-      <ToolsPage {form} {save} />
+      <ToolsPage {form} {save} {report} />
     {:else if page === "apps"}
-      <AppsPage {form} {save} {note} rescan={() => void flush().then(onrescanapps)} />
+      <AppsPage {form} {save} {note} {report} rescan={() => void saveThen(onrescanapps)} />
     {:else if page === "rules"}
       <RulesPage {note} {reload} />
     {/if}

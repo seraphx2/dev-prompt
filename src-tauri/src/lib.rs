@@ -417,6 +417,7 @@ pub fn run() {
             commands::run_command,
             commands::new_repo_options,
             commands::check_new_repo,
+            commands::folders_exist,
             commands::create_repo,
             commands::init_repo,
             commands::assess_removal,

@@ -20,7 +20,10 @@ programs, rules, actions, universal, template variables — see
 Everything below is set from the **Settings** screen and stored in `config.yaml`.
 There's no Save button: each change saves itself (a typed value after a short
 pause, a root folder when you leave its field) and the hotkey re-registers
-live.
+live. Only valid values are saved — a newly typed folder has to exist, a
+custom template needs its placeholders, a number has to be in range. An
+invalid one is marked in red and left unsaved; close Settings with one still
+there and the footer says what wasn't saved.
 
 ---
 

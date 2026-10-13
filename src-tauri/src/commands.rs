@@ -52,7 +52,7 @@ pub struct AppState {
     pub sticky_open: Mutex<bool>,
     /// Watches the roots for repos appearing or going (see `watch.rs`); `None`
     /// when no watcher could be started. Replaced on every config change.
-    pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
+    pub watcher: Mutex<Option<crate::watch::RepoWatcher>>,
     /// Held for the length of a rescan, so the watcher's and the user's never
     /// overlap.
     pub scan_gate: Mutex<()>,
@@ -216,6 +216,13 @@ pub async fn new_repo_options(
         .map_err(|e| AppError::msg(format!("new repository task failed: {e}")))
 }
 
+/// Whether each path (as typed in Settings: `~` and environment variables
+/// allowed) names an existing folder. Settings won't save one that doesn't.
+#[tauri::command]
+pub fn folders_exist(paths: Vec<String>) -> Vec<bool> {
+    paths.iter().map(|p| config::expand_path(p).is_dir()).collect()
+}
+
 /// Why `name` can't be created under `root` (`None` = it can). Called as the
 /// user types, so it only reads the disk.
 #[tauri::command]
@@ -236,16 +243,14 @@ pub async fn create_repo(
     values: HashMap<String, String>,
 ) -> AppResult<Repo> {
     let cfg = state.config.lock().unwrap().clone();
-    let (repo, ctx) = tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || {
         let repo = crate::provision::create(&cfg, &root, &name, &tool, &values)?;
         let ctx = inspect_cold(&repo.path, &cfg);
-        Ok::<_, AppError>((repo, ctx))
+        put_repo(&app, &repo, ctx);
+        Ok::<_, AppError>(repo)
     })
     .await
-    .map_err(|e| AppError::msg(format!("new repository task failed: {e}")))??;
-
-    put_repo(&app, &state, &repo, ctx);
-    Ok(repo)
+    .map_err(|e| AppError::msg(format!("new repository task failed: {e}")))?
 }
 
 /// Run a version-control setup in an existing folder that has none ("Set up
@@ -260,21 +265,23 @@ pub async fn init_repo(
     values: HashMap<String, String>,
 ) -> AppResult<Repo> {
     let cfg = state.config.lock().unwrap().clone();
-    let (repo, ctx) = tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || {
         let repo = crate::provision::init_existing(&cfg, &path, &tool, &values)?;
         let ctx = inspect_cold(&repo.path, &cfg);
-        Ok::<_, AppError>((repo, ctx))
+        put_repo(&app, &repo, ctx);
+        Ok::<_, AppError>(repo)
     })
     .await
-    .map_err(|e| AppError::msg(format!("version-control setup task failed: {e}")))??;
-
-    put_repo(&app, &state, &repo, ctx);
-    Ok(repo)
+    .map_err(|e| AppError::msg(format!("version-control setup task failed: {e}")))?
 }
 
 /// Add `repo` to the list (replacing an entry at the same path), store its
-/// inspection, save the cache and tell the frontend.
-fn put_repo(app: &AppHandle, state: &AppState, repo: &Repo, ctx: RepoContext) {
+/// inspection, save the cache and tell the frontend. Blocking — it waits for
+/// a rescan in progress, whose older list would otherwise overwrite this.
+fn put_repo(app: &AppHandle, repo: &Repo, ctx: RepoContext) {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let _gate = state.scan_gate.lock().unwrap();
     {
         let mut repos = state.repos.lock().unwrap();
         repos.retain(|r| r.path != repo.path);
@@ -282,6 +289,22 @@ fn put_repo(app: &AppHandle, state: &AppState, repo: &Repo, ctx: RepoContext) {
         repos.sort_by_key(|r| r.name.to_lowercase());
     }
     state.contexts.lock().unwrap().insert(repo.path.clone(), ctx);
+    save_list(app, &state);
+}
+
+/// Take `dir` and everything below it out of the list. Blocking, like
+/// [`put_repo`], for the same reason.
+fn drop_from_list(app: &AppHandle, dir: &Path) {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let _gate = state.scan_gate.lock().unwrap();
+    state.repos.lock().unwrap().retain(|r| !Path::new(&r.path).starts_with(dir));
+    state.contexts.lock().unwrap().retain(|p, _| !Path::new(p).starts_with(dir));
+    save_list(app, &state);
+}
+
+/// Save the list to the cache and tell the frontend it changed.
+fn save_list(app: &AppHandle, state: &AppState) {
     let repos = state.repos.lock().unwrap().clone();
     let contexts = state.contexts.lock().unwrap().clone();
     let _ = cache::save(&repos, &contexts);
@@ -325,22 +348,16 @@ pub async fn remove_folder(
     // Windows may ask "permanently delete?" (a folder too big for the bin, a
     // drive without one); that prompt must not open behind the overlay.
     let _ = window.set_always_on_top(false);
-    let target = dir.clone();
-    let item = tauri::async_runtime::spawn_blocking(move || crate::removal::move_to_trash(&target))
-        .await
-        .map_err(|e| AppError::msg(format!("moving the folder failed: {e}")))??;
+    let item = tauri::async_runtime::spawn_blocking(move || {
+        let item = crate::removal::move_to_trash(&dir)?;
+        drop_from_list(&app, &dir);
+        Ok::<_, AppError>(item)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("moving the folder failed: {e}")))??;
 
     let undoable = item.is_some();
     *state.last_removed.lock().unwrap() = item;
-    {
-        let mut repos = state.repos.lock().unwrap();
-        repos.retain(|r| !Path::new(&r.path).starts_with(&dir));
-    }
-    state.contexts.lock().unwrap().retain(|p, _| !Path::new(p).starts_with(&dir));
-    let repos = state.repos.lock().unwrap().clone();
-    let contexts = state.contexts.lock().unwrap().clone();
-    let _ = cache::save(&repos, &contexts);
-    let _ = app.emit("repos:updated", ());
     Ok(undoable)
 }
 
@@ -357,7 +374,11 @@ pub async fn undo_removal(app: AppHandle, state: State<'_, AppState>) -> AppResu
     let kept = item.clone();
     let restored = tauri::async_runtime::spawn_blocking(move || {
         let path = crate::removal::restore(item)?;
-        rescan_blocking(&app, false)?;
+        // It's back either way; a failed rescan mustn't read as a failed
+        // undo. The watcher sees the folder return and lists it then.
+        if let Err(e) = rescan_blocking(&app, false) {
+            eprintln!("rescan after undo failed: {e}");
+        }
         Ok::<_, AppError>(path)
     })
     .await

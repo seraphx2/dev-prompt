@@ -139,6 +139,11 @@ export function newRepoOptions(): Promise<NewRepoOptions> {
   return invoke<NewRepoOptions>("new_repo_options");
 }
 
+/** Whether each path (`~` / environment variables allowed) is an existing folder. */
+export function foldersExist(paths: string[]): Promise<boolean[]> {
+  return invoke<boolean[]>("folders_exist", { paths });
+}
+
 /** Why `name` can't be created under `root`; `null` when it can. */
 export function checkNewRepo(root: string, name: string): Promise<string | null> {
   return invoke<string | null>("check_new_repo", { root, name });

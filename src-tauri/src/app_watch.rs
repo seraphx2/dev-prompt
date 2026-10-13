@@ -34,6 +34,8 @@ const MAX_WAIT: Duration = Duration::from_secs(30);
 
 /// A running set of watches; dropping it stops them all.
 pub struct Watching {
+    /// What this watches, so a sync with the same sources can keep it.
+    sources: String,
     _fs: Option<RecommendedWatcher>,
     #[cfg(windows)]
     _keys: Vec<reg::KeyWatch>,
@@ -82,6 +84,7 @@ pub fn start(sources: &Sources, on_change: impl Fn(Change) + Send + Sync + 'stat
         .collect();
 
     Watching {
+        sources: format!("{sources:?}"),
         _fs: fs,
         #[cfg(windows)]
         _keys: keys,
@@ -99,8 +102,8 @@ fn relevant(path: &Path) -> bool {
 }
 
 /// (Re)start the app watcher for the current config. Called at startup and
-/// after every settings save or config reload; does nothing (and stops any
-/// watcher) while app indexing is off.
+/// after every settings save or config reload; keeps the running one when the
+/// sources haven't changed, and stops it while app indexing is off.
 pub fn sync(app: &AppHandle) {
     let state = app.state::<AppState>();
     let cfg = state.config.lock().unwrap().clone();
@@ -108,8 +111,16 @@ pub fn sync(app: &AppHandle) {
         *state.app_watcher.lock().unwrap() = None;
         return;
     }
+    let sources = Sources::from_config(&cfg);
+    // Settings save often; a save that didn't touch the app sources keeps the
+    // running watches rather than dropping events during a rebuild.
+    if let Some(w) = state.app_watcher.lock().unwrap().as_ref() {
+        if w.sources == format!("{sources:?}") {
+            return;
+        }
+    }
     let tx = changes(app).clone();
-    let watching = start(&Sources::from_config(&cfg), move |c| {
+    let watching = start(&sources, move |c| {
         let _ = tx.send(c);
     });
     *state.app_watcher.lock().unwrap() = Some(watching);

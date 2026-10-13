@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import {
     autoTerminal,
     defaultShell,
@@ -12,13 +12,18 @@
     CUSTOM,
     TYPING_DELAY_MS,
     filemanagerPatch,
+    templateProblem,
     terminalPatch,
     type Form,
     type Save,
   } from "./model";
   import * as ui from "./ui";
 
-  let { form, save }: { form: Form; save: Save } = $props();
+  let {
+    form,
+    save,
+    report,
+  }: { form: Form; save: Save; report: (msg: string) => void } = $props();
 
   let terminals = $state<TerminalOption[]>([]);
   /** What "Auto" opens right now — names the dropdown's Auto option. */
@@ -36,14 +41,37 @@
     void listFileManagers().then((f) => (filemanagers = f), () => {});
   });
 
-  // Picking Custom keeps the current choice until there's a template to save.
-  function pick(which: "terminal" | "filemanager") {
-    if (which === "terminal") {
-      if (form.terminalSel !== CUSTOM || form.terminalTemplate.trim()) save(terminalPatch(form));
-    } else if (form.filemanagerSel !== CUSTOM || form.filemanagerTemplate.trim()) {
-      save(filemanagerPatch(form));
+  type Kind = "terminal" | "filemanager";
+  const LABEL: Record<Kind, string> = { terminal: "terminal", filemanager: "file manager" };
+  const custom = (k: Kind) => (k === "terminal" ? form.terminalSel : form.filemanagerSel) === CUSTOM;
+  const template = (k: Kind) => (k === "terminal" ? form.terminalTemplate : form.filemanagerTemplate);
+  const patch = (k: Kind) => (k === "terminal" ? terminalPatch(form) : filemanagerPatch(form));
+
+  /** Why the custom template isn't saved, per kind ("" = it is, or isn't in use). */
+  let problem = $state<Record<Kind, string>>({ terminal: "", filemanager: "" });
+
+  // Custom saves only a template that works; until then the previous choice
+  // stays in effect. Emptying the box never quietly switches back to Auto.
+  function pick(k: Kind) {
+    if (!custom(k)) {
+      problem[k] = "";
+      save(patch(k));
+    } else if (!templateProblem(k, template(k))) {
+      save(patch(k));
     }
   }
+
+  function typed(k: Kind) {
+    problem[k] = templateProblem(k, template(k)) ?? "";
+    if (!problem[k]) save(patch(k), TYPING_DELAY_MS);
+  }
+
+  onDestroy(() => {
+    for (const k of ["terminal", "filemanager"] as const) {
+      const p = custom(k) && templateProblem(k, template(k));
+      if (p) report(`Didn't save the custom ${LABEL[k]} — ${p}`);
+    }
+  });
 </script>
 
 <label class="block space-y-1.5">
@@ -66,11 +94,15 @@
   {#if form.terminalSel === CUSTOM}
     <input
       bind:value={form.terminalTemplate}
-      oninput={() => save(terminalPatch(form), TYPING_DELAY_MS)}
+      oninput={() => typed("terminal")}
+      aria-invalid={!!problem.terminal}
       spellcheck="false"
       placeholder="wezterm start --cwd {'{{dir}}'} -- {'{{cmd}}'}"
-      class="w-full {ui.mono}"
+      class="w-full {ui.mono} {problem.terminal ? '!border-red-400/60' : ''}"
     />
+    {#if problem.terminal}
+      <span class="block text-[11px] text-red-300">{problem.terminal} It isn't saved.</span>
+    {/if}
     <span class="block {ui.help}">
       <span class="font-mono">{"{{dir}}"}</span> = working directory,
       <span class="font-mono">{"{{cmd}}"}</span> = the command to run.
@@ -116,11 +148,15 @@
   {#if form.filemanagerSel === CUSTOM}
     <input
       bind:value={form.filemanagerTemplate}
-      oninput={() => save(filemanagerPatch(form), TYPING_DELAY_MS)}
+      oninput={() => typed("filemanager")}
+      aria-invalid={!!problem.filemanager}
       spellcheck="false"
       placeholder="dopus /cmd Go {'{{path}}'}"
-      class="w-full {ui.mono}"
+      class="w-full {ui.mono} {problem.filemanager ? '!border-red-400/60' : ''}"
     />
+    {#if problem.filemanager}
+      <span class="block text-[11px] text-red-300">{problem.filemanager} It isn't saved.</span>
+    {/if}
     <span class="block {ui.help}">
       <span class="font-mono">{"{{path}}"}</span> = the folder to open.
     </span>

@@ -460,13 +460,15 @@ pub(crate) fn run_captured(program: &str, args: &[String], cwd: &Path, timeout: 
     // Drain both pipes on their own threads so a chatty command can't fill one
     // and block while we wait on it.
     let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut buf = Vec::new();
             if let Some(mut p) = pipe {
                 let _ = p.read_to_end(&mut buf);
             }
-            buf
-        })
+            let _ = tx.send(buf);
+        });
+        rx
     };
     let out = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
     let err = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
@@ -484,8 +486,20 @@ pub(crate) fn run_captured(program: &str, args: &[String], cwd: &Path, timeout: 
             Err(e) => return Err(format!("couldn't wait for it ({e})")),
         }
     };
-    let stdout = String::from_utf8_lossy(&out.join().unwrap_or_default()).into_owned();
-    let stderr = String::from_utf8_lossy(&err.join().unwrap_or_default()).into_owned();
+    // The pipes close when the last process holding them exits — which can be
+    // a helper the command started and left running. Waiting on that would
+    // ignore the time limit, so the output gets what's left of it (and a
+    // moment more), then counts as a failure.
+    let deadline = started + timeout;
+    let collect = |rx: std::sync::mpsc::Receiver<Vec<u8>>| {
+        let left = deadline.saturating_duration_since(Instant::now()).max(Duration::from_millis(500));
+        rx.recv_timeout(left).ok()
+    };
+    let (Some(out), Some(err)) = (collect(out), collect(err)) else {
+        return Err("it finished, but a process it started kept its output open past the time limit.".into());
+    };
+    let stdout = String::from_utf8_lossy(&out).into_owned();
+    let stderr = String::from_utf8_lossy(&err).into_owned();
     if status.success() {
         return Ok(stdout);
     }
@@ -528,6 +542,20 @@ fn command_for(program: &str, args: &[String], cwd: &Path) -> Command {
 mod tests {
     use super::*;
     use crate::config::ProvisionField;
+
+    /// A helper the command leaves running keeps its output pipes open; the
+    /// time limit must still hold.
+    #[test]
+    fn a_process_left_running_does_not_outlast_the_time_limit() {
+        #[cfg(windows)]
+        let (program, args) = ("cmd", vec!["/c".to_string(), "start /b ping -n 30 127.0.0.1".to_string()]);
+        #[cfg(not(windows))]
+        let (program, args) = ("sh", vec!["-c".to_string(), "sleep 30 &".to_string()]);
+        let started = Instant::now();
+        let got = run_captured(program, &args, &std::env::temp_dir(), Duration::from_secs(2));
+        assert!(got.is_err(), "{got:?}");
+        assert!(started.elapsed() < Duration::from_secs(8), "took {:?}", started.elapsed());
+    }
 
     fn vars(pairs: &[(&'static str, &str)]) -> HashMap<&'static str, String> {
         pairs.iter().map(|(k, v)| (*k, v.to_string())).collect()
