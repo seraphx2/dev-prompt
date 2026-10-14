@@ -18,12 +18,15 @@
   } = $props();
 </script>
 
+<!-- `pointermove`, not `pointerenter`: the latter also fires when a row slides
+     under a resting cursor as the results reshuffle while typing, which would
+     drag the highlight off the top match. Only real pointer movement selects. -->
 <button
   type="button"
   class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors
          {active ? 'bg-white/10' : 'hover:bg-white/4'}"
   onclick={onactivate}
-  onpointerenter={onhover}
+  onpointermove={onhover}
 >
   <div class="min-w-0 flex-1">
     <div class="truncate text-[13px] leading-tight text-white/90">

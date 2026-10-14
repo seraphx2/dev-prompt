@@ -36,7 +36,7 @@
   class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors
          {active ? 'bg-white/10' : 'hover:bg-white/4'}"
   onclick={onactivate}
-  onpointerenter={onhover}
+  onpointermove={onhover}
 >
   {#if app.icon}
     <img src={app.icon} alt="" class="h-5 w-5 shrink-0 rounded-[3px]" />

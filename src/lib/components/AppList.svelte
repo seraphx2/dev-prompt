@@ -25,15 +25,20 @@
   // Auto-scroll follows keyboard navigation only — see the note in ResultList.
   let skipScroll = false;
 
+  // Re-runs on new entries too, pinning a fresh filter to the top — see ResultList.
   $effect(() => {
     const idx = selected;
+    void entries;
     if (skipScroll) {
       skipScroll = false;
       return;
     }
-    container
-      ?.querySelector<HTMLElement>(`[data-idx="${idx}"]`)
-      ?.scrollIntoView({ block: "nearest" });
+    if (!container) return;
+    if (idx === 0) container.scrollTop = 0;
+    else
+      container
+        .querySelector<HTMLElement>(`[data-idx="${idx}"]`)
+        ?.scrollIntoView({ block: "nearest" });
   });
 </script>
 
