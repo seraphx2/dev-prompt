@@ -10,8 +10,12 @@
   import type { FileManagerOption, TerminalOption } from "../../types";
   import {
     CUSTOM,
+    FONT_SIZE_MAX,
+    FONT_SIZE_MIN,
     TYPING_DELAY_MS,
     filemanagerPatch,
+    fontSizeProblem,
+    shellFontPatch,
     templateProblem,
     terminalPatch,
     type Form,
@@ -66,11 +70,32 @@
     if (!problem[k]) save(patch(k), TYPING_DELAY_MS);
   }
 
+  /** Why the font size isn't saved ("" = it is). */
+  let sizeErr = $state("");
+  /** The last size that saved, restored when the box is left invalid. */
+  // svelte-ignore state_referenced_locally
+  let goodSize = form.shellFontSize;
+
+  function fontTyped() {
+    sizeErr = fontSizeProblem(form.shellFontSize) ?? "";
+    if (!sizeErr) {
+      goodSize = form.shellFontSize;
+      save(shellFontPatch(form), TYPING_DELAY_MS);
+    }
+  }
+  function sizeBlur() {
+    if (sizeErr) {
+      form.shellFontSize = goodSize;
+      sizeErr = "";
+    }
+  }
+
   onDestroy(() => {
     for (const k of ["terminal", "filemanager"] as const) {
       const p = custom(k) && templateProblem(k, template(k));
       if (p) report(`Didn't save the custom ${LABEL[k]} — ${p}`);
     }
+    if (sizeErr) report(`Didn't save the shell font size — ${sizeErr}`);
   });
 </script>
 
@@ -115,7 +140,7 @@
   <select
     bind:value={form.shellSel}
     onchange={() => save({ shell: form.shellSel })}
-    title="Shell a one-shot terminal command runs inside"
+    title="Shell that Open shell starts, and that one-shot terminal commands run inside"
     class="w-80 {ui.select}"
   >
     <option value="">Default{defaultShellLabel ? ` (${defaultShellLabel})` : ""}</option>
@@ -126,7 +151,40 @@
       <option value={form.shellSel}>{form.shellSel}</option>
     {/if}
   </select>
+  <span class="block {ui.help}">
+    Open shell runs this right in the overlay. Its header can switch to another.
+  </span>
 </label>
+
+<div class="flex gap-6">
+  <label class="block space-y-1.5">
+    <span class={ui.label}>Shell font</span>
+    <input
+      bind:value={form.shellFont}
+      oninput={fontTyped}
+      spellcheck="false"
+      placeholder="Default (Cascadia, Nerd Font first)"
+      title="Font family for Open shell — a Nerd Font shows prompt icons (oh-my-posh, Starship)"
+      class="w-80 {ui.input}"
+    />
+  </label>
+  <label class="block space-y-1.5">
+    <span class={ui.label}>Size</span>
+    <input
+      type="number"
+      min={FONT_SIZE_MIN}
+      max={FONT_SIZE_MAX}
+      bind:value={form.shellFontSize}
+      oninput={fontTyped}
+      onblur={sizeBlur}
+      aria-invalid={!!sizeErr}
+      placeholder="13"
+      title="Font size for Open shell, in pixels"
+      class="w-20 {ui.input} {sizeErr ? 'border-red-400/60!' : ''}"
+    />
+    {#if sizeErr}<span class="block text-[11px] text-red-300">{sizeErr}</span>{/if}
+  </label>
+</div>
 
 <label class="block space-y-1.5">
   <span class={ui.label}>File manager</span>

@@ -255,6 +255,15 @@ Tracking: [Dependabot alert #1](https://github.com/seraphx2/dev-prompt/security/
   recorder (extracted to `HotkeyRecorder.svelte`, used for both hotkeys).
   Settings: hotkeys side-by-side, Shell inline with Terminal, "Start at login"
   to the top, a zero-height sticky Save, save-first "Rescan" buttons. — 2026-09-01
+- **Built-in shell** — "Run command…" became **Open shell**: the user's shell
+  inside the overlay instead of a one-shot input: `pty.rs` (ConPTY / Unix PTY via `portable-pty`)
+  streamed over a Tauri `Channel` to xterm.js (`lib/shells.svelte.ts`,
+  `Shell.svelte`). One session per folder, kept running across screens and
+  overlay hides (the hotkey returns to it), Shift+Esc to step back, a header
+  shell switcher, Close shell = kill + hang up. The overlay grows while it's open.
+  `prompt: true` now means "open the shell here"; `run:` / `{{input}}`
+  templates are gone along with `RunCommand.svelte` / `run_command`. Settings
+  gained `shell_font` / `shell_font_size`. — 2026-10-14
 
 Remaining, hardest-first: #6 task-targets provider, #16 app-launcher phase 2,
 #15 conditional template expansion, #14 (Cargo-workspace / Xcode / Nx-Turbo-

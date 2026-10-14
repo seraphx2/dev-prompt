@@ -24,6 +24,7 @@ mod inspect;
 mod launch;
 mod maven;
 mod provision;
+mod pty;
 mod removal;
 mod rules;
 mod scan;
@@ -32,7 +33,7 @@ mod watch;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Manager, WebviewWindow, WindowEvent};
+use tauri::{Emitter, Manager, RunEvent, WebviewWindow, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use commands::AppState;
@@ -414,7 +415,13 @@ pub fn run() {
             commands::list_file_managers,
             commands::list_shells,
             commands::default_shell,
-            commands::run_command,
+            commands::shell_open,
+            commands::shell_write,
+            commands::shell_resize,
+            commands::shell_close,
+            commands::shell_close_all,
+            commands::set_overlay_size,
+            commands::open_url,
             commands::new_repo_options,
             commands::check_new_repo,
             commands::folders_exist,
@@ -441,8 +448,18 @@ pub fn run() {
             commands::set_autostart,
             commands::set_autostart_portal,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running dev-prompt");
+        .build(tauri::generate_context!())
+        .expect("error while building dev-prompt")
+        .run(|app, event| {
+            // End the built-in shell's sessions with the app, as a terminal
+            // does when its window closes, rather than leaving them to however
+            // the OS cleans up after a dead parent.
+            if let RunEvent::Exit = event {
+                if let Some(state) = app.try_state::<AppState>() {
+                    state.shells.close_all();
+                }
+            }
+        });
 }
 
 #[cfg(test)]

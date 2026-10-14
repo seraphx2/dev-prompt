@@ -35,8 +35,10 @@ export interface Action {
   hotkey?: string | null;
   /** True when this action is handled purely in the frontend (e.g. copy path). */
   clientSide: boolean;
-  /** Opens the "Run command…" input instead of running; `hint` is the template. */
+  /** Opens the built-in shell at `cwd` (or the repo root) instead of running. */
   prompt?: boolean;
+  /** Working directory, when not the repo root (a sub-project's actions). */
+  cwd?: string | null;
   /** Opens the "Set up version control" form for this folder instead of running. */
   provision?: boolean;
   /** Opens the "Move to Recycle Bin / Trash" confirmation instead of running. */
@@ -81,8 +83,13 @@ export interface AppConfig {
   terminal?: string | null;
   /** Raw `{{dir}}` / `{{cmd}}` invocation for an unknown terminal. */
   terminal_template?: string | null;
-  /** Shell a one-shot terminal command runs inside; absent = pwsh/powershell. */
+  /** Shell the built-in shell starts (and one-shot terminal commands run
+   *  inside); absent = pwsh/powershell, or the login shell on Linux. */
   shell?: string | null;
+  /** Built-in shell font family, tried ahead of the default stack; absent = that stack. */
+  shell_font?: string | null;
+  /** Built-in shell font size (px); absent = 13. */
+  shell_font_size?: number | null;
   /** Pinned file manager (name / path); absent = auto-probe. */
   filemanager?: string | null;
   /** Raw `{{path}}` invocation for a file manager that wants more than a bare path. */
@@ -106,6 +113,9 @@ export interface ConfigPatch {
   terminal?: string;
   terminal_template?: string;
   shell?: string;
+  /** "" / 0 go back to the default font / size. */
+  shell_font?: string;
+  shell_font_size?: number;
   /** "" clears the pin / template back to auto. */
   filemanager?: string;
   filemanager_template?: string;
@@ -237,6 +247,9 @@ export type CtxItem =
       disabled?: boolean;
       /** Destructive: drawn in red. */
       danger?: boolean;
+      /** A choice in a pick-one menu: `true` for the current one. Any item
+       *  setting it (even `false`) gives the whole menu a check column. */
+      checked?: boolean;
       run: () => void;
     }
   | { kind: "separator" }

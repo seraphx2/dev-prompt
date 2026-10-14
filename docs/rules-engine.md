@@ -132,11 +132,9 @@ actions:
     terminal: true
     icon: run                 # glyph for the menu row — see Settings ▸ Icons
 
-  - name: "npm run…"
-    run: "npm run {{input}}"  # prompt: opens the "Run command…" input;
-    prompt: true              #   {{input}} = what you type, the rest is fixed.
-    terminal: true            #   A bare `prompt: true` (no `run:`) takes a
-                              #   whole command line. Blank + a shell = open it.
+  - name: "Shell here"
+    prompt: true              # opens the built-in shell (Open shell) in this
+                              #   action's folder — a sub-project's, in its group
 
   - name: "Open in GoLand"
     program: "{{goland}}"
@@ -158,10 +156,10 @@ or when the action has no program at all (a gated `terminal: true`).
 - `program` + `args`, **or** `run` — not both.
 - `terminal: true` runs it inside the resolved terminal at the working
   directory. Without it, the process is spawned detached with no window.
-- `prompt: true` doesn't run anything — it opens the **Run command…** input in
-  the action menu, seeded with `run:` as a template (`{{input}}` is where the
-  typed text goes). The input has its own shell picker; leave it blank and pick
-  a shell to just open that shell in the repo.
+- `prompt: true` doesn't run anything — it opens the built-in shell
+  (**Open shell**) in the action's working directory: the repo root for a
+  universal action, the sub-project's folder in its own group. `run:` and
+  `program:` are ignored on it.
 - `needs:` gates just this action. `needs:` / `requires:` on the *rule* gate the
   whole rule — and `requires:` is rule-only, taking bare executable names checked
   on `PATH` rather than `programs` keys.

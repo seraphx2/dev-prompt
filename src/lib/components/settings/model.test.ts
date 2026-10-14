@@ -10,8 +10,10 @@ import {
   filemanagerPatch,
   formFromConfig,
   depthProblem,
+  fontSizeProblem,
   rescanNeeds,
   rootsPatch,
+  shellFontPatch,
   sortFolders,
   templateProblem,
   terminalPatch,
@@ -153,6 +155,23 @@ describe("validation", () => {
     expect(depthProblem(NaN)).not.toBeNull();
     expect(ttlProblem(1)).toBeNull();
     expect(ttlProblem(0)).not.toBeNull();
+    expect(fontSizeProblem(13)).toBeNull();
+    expect(fontSizeProblem(0)).toBeNull(); // blank = default
+    expect(fontSizeProblem(NaN)).toBeNull();
+    expect(fontSizeProblem(5)).not.toBeNull();
+    expect(fontSizeProblem(41)).not.toBeNull();
+    expect(fontSizeProblem(12.5)).not.toBeNull();
+  });
+
+  it("saves the shell font, blank meaning the default", () => {
+    const f = formFromConfig(base({ shell_font: "Fira Code", shell_font_size: 15 }));
+    expect(f.shellFont).toBe("Fira Code");
+    expect(f.shellFontSize).toBe(15);
+    expect(shellFontPatch(f)).toEqual({ shell_font: "Fira Code", shell_font_size: 15 });
+    f.shellFont = "  ";
+    f.shellFontSize = NaN; // an emptied number box
+    expect(shellFontPatch(f)).toEqual({ shell_font: "", shell_font_size: 0 });
+    expect(formFromConfig(base()).shellFontSize).toBe(0);
   });
 
   it("accepts a template with its placeholders", () => {
