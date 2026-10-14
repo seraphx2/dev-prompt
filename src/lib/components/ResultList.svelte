@@ -26,15 +26,22 @@
   // shift the list under the mouse and trigger a hover/scroll feedback loop.
   let skipScroll = false;
 
+  // Also re-runs when the entries change: a fresh search lands with the top
+  // match selected, and the list pins to the very top (padding included)
+  // rather than wherever the previous result set had been scrolled to.
   $effect(() => {
     const idx = selected; // track the selection
+    void entries;
     if (skipScroll) {
       skipScroll = false;
       return;
     }
-    container
-      ?.querySelector<HTMLElement>(`[data-idx="${idx}"]`)
-      ?.scrollIntoView({ block: "nearest" });
+    if (!container) return;
+    if (idx === 0) container.scrollTop = 0;
+    else
+      container
+        .querySelector<HTMLElement>(`[data-idx="${idx}"]`)
+        ?.scrollIntoView({ block: "nearest" });
   });
 </script>
 

@@ -53,15 +53,20 @@
   // scrolling a hovered row shifts the list under the mouse and loops.
   let skipScroll = false;
 
+  // Re-runs on new items too, pinning a fresh filter to the top — see ResultList.
   $effect(() => {
     const idx = selected; // track the selection
+    void items;
     if (skipScroll) {
       skipScroll = false;
       return;
     }
-    container
-      ?.querySelector<HTMLElement>(`[data-idx="${idx}"]`)
-      ?.scrollIntoView({ block: "nearest" });
+    if (!container) return;
+    if (idx === 0) container.scrollTop = 0;
+    else
+      container
+        .querySelector<HTMLElement>(`[data-idx="${idx}"]`)
+        ?.scrollIntoView({ block: "nearest" });
   });
 </script>
 
@@ -134,7 +139,9 @@
             : 'hover:bg-white/4'}"
         onclick={() => onrun(i)}
         oncontextmenu={(e) => oncontext?.(i, e)}
-        onpointerenter={() => {
+        onpointermove={() => {
+          // Not `pointerenter` — see ResultRow: rows reshuffling under a
+          // resting cursor mustn't steal the highlight from the top match.
           if (item.kind === "loading") return;
           if (i !== selected) skipScroll = true;
           onselect(i);

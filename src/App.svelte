@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import SearchInput from "./lib/components/SearchInput.svelte";
   import ResultList from "./lib/components/ResultList.svelte";
   import AppList from "./lib/components/AppList.svelte";
@@ -371,6 +371,13 @@
     }
   });
 
+  // A new filter starts on the top match, like the repo search. Detected
+  // actions streaming in don't touch the query, so they leave the pick alone.
+  $effect(() => {
+    void actionQuery;
+    actionSel = 0;
+  });
+
   function activateMenuItem(i: number) {
     const it = menuItems[i];
     if (!it || it.kind === "loading") return;
@@ -502,30 +509,38 @@
 
   let searchSeq = 0;
 
-  async function refresh() {
+  /**
+   * Re-run the repo search for the current query. `keepSelection` is for the
+   * list changing underneath the user (a background rescan after the watcher
+   * saw a repo come or go) — the highlight stays on the same repo. A new query
+   * passes false: search results always start pinned to the top match.
+   */
+  async function refresh(keepSelection = true) {
     // In `>` app scope the list comes from `filteredApps`, not `results`; a repo
     // search here matches nothing and would blank `results` + reset `selected`,
     // yanking the app highlight mid-navigation. Guard here so every caller
     // (the query $effect, loadInitial, rescan, onReposUpdated) is covered.
     if (appScope) return;
     const seq = ++searchSeq;
-    // The list can change underneath the user (a background rescan after the
-    // watcher saw a repo come or go) — keep the highlight on the same repo.
-    const keep = results[selected]?.repo.path;
+    const keep = keepSelection ? results[selected]?.repo.path : undefined;
     const scored = await searchRepos(query);
     if (seq !== searchSeq) return; // a newer query already answered
     results = scored;
     const same = keep ? results.findIndex((r) => r.repo.path === keep) : -1;
     if (same >= 0) selected = same;
+    else if (!keepSelection) selected = 0;
     else if (selected >= results.length) selected = Math.max(0, results.length - 1);
   }
 
-  // Re-run the fuzzy search whenever the query changes (repo scope only; the
-  // app list filters client-side via `filteredApps`).
+  // Re-run the fuzzy search whenever the query changes. The app list filters
+  // client-side via `filteredApps`, so there only the highlight needs pinning
+  // back to the top match. Untracked so moving the selection never re-searches.
   $effect(() => {
     void query;
-    if (appScope) return;
-    refresh();
+    untrack(() => {
+      if (appScope) selected = 0;
+      else void refresh(false);
+    });
   });
 
   // Repositories are the entries under version control; folders are the rest
