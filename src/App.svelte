@@ -4,7 +4,7 @@
   import ResultList from "./lib/components/ResultList.svelte";
   import AppList from "./lib/components/AppList.svelte";
   import ActionMenu from "./lib/components/ActionMenu.svelte";
-  import RunCommand from "./lib/components/RunCommand.svelte";
+  import Shell from "./lib/components/Shell.svelte";
   import NewRepo from "./lib/components/NewRepo.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
   import RemoveFolder from "./lib/components/RemoveFolder.svelte";
@@ -19,6 +19,7 @@
     getConfig,
     hideOverlay,
     listApps,
+    listShells,
     listRepos,
     onAppsUpdated,
     onGotoSettings,
@@ -32,9 +33,10 @@
     rescanRepos,
     runAction,
     runApp,
-    runCommand,
     searchRepos,
     setDismissOnBlur,
+    setOverlaySize,
+    shellCloseAll,
     showFolder,
     undoRemoval,
   } from "./lib/ipc";
@@ -49,6 +51,7 @@
   import { fuzzyScore } from "./lib/fuzzy";
   import { icons } from "./lib/icons";
   import { upd, pollUpdates } from "./lib/updateStore.svelte";
+  import { closeShell, setShellFont, shellFor, shells } from "./lib/shells.svelte";
 
   const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -56,11 +59,11 @@
     | "repo-list"
     | "action-menu"
     | "settings"
-    | "run-command"
+    | "shell"
     | "new-repo"
     | "remove";
 
-  /** The page Settings opens on; null for the one it showed last. */
+  /** The page Settings opens on; null for General. */
   let settingsPage = $state<SettingsPage | null>(null);
 
   /** What Settings couldn't save as it closed (an invalid value, a failed
@@ -148,13 +151,20 @@
   let detectedLoading = $state(false);
   /** When set, the action menu is drilled into this `Detected · <x>` group. */
   let subGroup = $state<string | null>(null);
-  /** `run:` template of the prompt action that opened the "Run command…" mode. */
-  let promptTemplate = $state("");
+  /** The folder of the shell on screen (its session key in `shells`). */
+  let shellCwd = $state<string | null>(null);
+  const activeShell = $derived(shellCwd ? shells.get(shellCwd) : undefined);
+  /** The shell's sub-folder, when it isn't running at the repo root. */
+  const shellCrumb = $derived.by(() => {
+    const root = activeRepo?.repo.path;
+    if (!shellCwd || !root || shellCwd === root) return null;
+    return shellCwd.startsWith(root) ? shellCwd.slice(root.length).replace(/^[\\/]+/, "") : shellCwd;
+  });
   /** Set while the new-repo screen is setting up an existing folder (opened
    *  from the action menu) rather than creating a new one. */
   let setupTarget = $state<ScoredRepo | null>(null);
-  /** The run-command / setup screen was opened from a repo row's right-click
-   *  menu, so Back returns to the list rather than to an action menu. */
+  /** The shell / setup screen was opened from a repo row's right-click menu,
+   *  so Back returns to the list rather than to an action menu. */
   let openedFromList = $state(false);
   /** The folder the "Move to Recycle Bin / Trash" screen is for. */
   let removeTarget = $state<ScoredRepo | null>(null);
@@ -218,8 +228,7 @@
     if (action.provision) {
       openSetup();
     } else if (action.prompt) {
-      promptTemplate = action.hint ?? "";
-      mode = "run-command";
+      if (activeRepo) openShell(activeRepo, action);
     } else if (activeRepo) {
       execute(action, activeRepo.repo.path);
     }
@@ -390,8 +399,7 @@
     } else if (it.action.provision) {
       openSetup();
     } else if (it.action.prompt) {
-      promptTemplate = it.action.hint ?? "";
-      mode = "run-command";
+      if (activeRepo) openShell(activeRepo, it.action);
     } else if (activeRepo) {
       execute(it.action, activeRepo.repo.path);
     }
@@ -410,19 +418,35 @@
   // `dismiss` from config: "always" | "keep_on_blur" | "manual". Loaded on mount
   // and refreshed after a settings save.
   let dismissMode = $state<"always" | "keep_on_blur" | "manual">("always");
-  getConfig().then((c) => (dismissMode = c.dismiss ?? "always"));
+  getConfig().then((c) => {
+    dismissMode = c.dismiss ?? "always";
+    setShellFont(c.shell_font, c.shell_font_size);
+  });
 
-  // Blur only dismisses in "always" mode. Settings, the run-command input and
-  // the new-repository form are forms, so a click-away mustn't nuke them
-  // regardless.
+  // Blur only dismisses in "always" mode. Settings, the new-repository form
+  // and the remove confirmation are forms, so a click-away mustn't nuke them
+  // regardless. A shell does hide on blur: it keeps running, and the hotkey
+  // brings it straight back.
   $effect(() => {
     void setDismissOnBlur(
       dismissMode === "always" &&
         mode !== "settings" &&
-        mode !== "run-command" &&
         mode !== "new-repo" &&
         mode !== "remove",
     );
+  });
+
+  // Roomier while a shell is open; the usual size everywhere else. Derived
+  // first, so moving between the other screens doesn't re-run it (it
+  // re-centres, which would undo a drag).
+  const largeOverlay = $derived(mode === "shell");
+  $effect(() => {
+    void setOverlaySize(largeOverlay).catch(() => {});
+  });
+
+  // A shell that ended itself (a clean `exit`) takes its screen with it.
+  $effect(() => {
+    if (mode === "shell" && !activeShell) untrack(shellBack);
   });
 
   /** Hide after a successful launch — unless the user pinned the overlay open. */
@@ -446,10 +470,10 @@
         ]
       : mode === "settings"
         ? [["Esc", "back"]]
-        : mode === "run-command"
+        : mode === "shell"
           ? [
-              ["Enter", "run"],
-              ["Esc", "back"],
+              ["Ctrl+Click", "open link"],
+              ["Shift+Esc", "back"],
             ]
           : mode === "new-repo"
             ? [
@@ -673,6 +697,67 @@
     }
   }
 
+  /** Open the built-in shell for `entry`, at `action`'s folder (a
+   *  sub-project's) or the repo root. Reopens the running one when there is. */
+  function openShell(entry: ScoredRepo, action: Action) {
+    const cwd = action.cwd || entry.repo.path;
+    shellFor(cwd);
+    shellCwd = cwd;
+    mode = "shell";
+  }
+
+  // Back from the shell (which keeps running): to the list or action menu it
+  // came from.
+  function shellBack() {
+    if (openedFromList) backToList();
+    else mode = "action-menu";
+  }
+
+  /** End the shell on screen and leave it. */
+  function endShell() {
+    if (shellCwd) closeShell(shellCwd);
+  }
+
+  function openShellPicker(e: MouseEvent) {
+    const s = activeShell;
+    if (!s) return;
+    const head: CtxItem = { kind: "header", label: "Restart in…" };
+    const pick = (name: string): CtxItem => ({
+      kind: "item",
+      label: name,
+      checked: name === s.label,
+      icon: "terminal",
+      run: () => {
+        if (name !== s.label || s.state === "exited") void s.restart(name);
+        else s.focus();
+      },
+    });
+    showCtx(
+      e,
+      [head, { kind: "loading", label: "Finding shells…" }],
+      listShells().then((names) => [head, ...names.map(pick)]),
+    );
+  }
+
+  function openShellMenu(e: MouseEvent) {
+    const s = activeShell;
+    if (!s || wantsNative(e)) return;
+    showCtx(e, [
+      {
+        kind: "item",
+        label: "Copy",
+        icon: "copy",
+        disabled: !s.hasSelection(),
+        run: () => s.copySelection(),
+      },
+      { kind: "item", label: "Paste", icon: "copy", run: () => void s.paste() },
+      { kind: "item", label: "Clear", icon: "run", run: () => s.clear() },
+      { kind: "separator" },
+      { kind: "item", label: "Restart shell", icon: "terminal", run: () => void s.restart() },
+      { kind: "item", label: "Close shell", icon: "terminal", danger: true, run: endShell },
+    ]);
+  }
+
   function backToList() {
     mode = "repo-list";
     setupTarget = null;
@@ -682,7 +767,6 @@
     actions = [];
     actionQuery = "";
     subGroup = null;
-    promptTemplate = "";
   }
 
   // Keep the search box focused whenever the repo list is showing, so typing
@@ -716,20 +800,6 @@
       }
     } catch (e) {
       status = `Launch failed: ${e}`;
-    } finally {
-      running = false;
-    }
-  }
-
-  async function runCommandAndHide(path: string, cmd: string, shell: string) {
-    if (running) return;
-    running = true;
-    try {
-      await runCommand(path, cmd, shell);
-      if (dismissMode === "manual") backToList();
-      else await hideOverlay();
-    } catch (e) {
-      status = `Run failed: ${e}`;
     } finally {
       running = false;
     }
@@ -835,11 +905,16 @@
   /** The open right-click menu, if any. */
   let ctx = $state<{ x: number; y: number; items: CtxItem[] } | null>(null);
   let ctxMenu: ContextMenu | undefined = $state();
+  let shellView: Shell | undefined = $state();
+  let newRepoEl: NewRepo | undefined = $state();
+  let removeEl: RemoveFolder | undefined = $state();
   /** Bumped per menu, so a slow fetch can't fill in a menu that's been replaced. */
   let ctxSeq = 0;
 
   function closeCtx() {
     ctx = null;
+    // The keyboard goes back to the shell the menu was opened over.
+    if (mode === "shell") shellView?.focus();
   }
 
   // A screen change takes any open menu with it.
@@ -934,9 +1009,8 @@
       mode = "new-repo";
     } else if (a.prompt) {
       activeRepo = entry;
-      promptTemplate = a.hint ?? "";
       openedFromList = true;
-      mode = "run-command";
+      openShell(entry, a);
     } else {
       void execute(a, entry.repo.path);
     }
@@ -1058,8 +1132,22 @@
     }
     if (mode === "action-menu") {
       onMenuKeydown(e);
-    } else if (mode === "run-command" || mode === "new-repo" || mode === "remove") {
-      // These components own their keys (Enter / Esc).
+    } else if (mode === "shell") {
+      // Every key belongs to the shell — xterm.js has it already — except
+      // Shift+Esc, which it lets through to here (see lib/shellKeys.ts).
+      if (e.key === "Escape" && e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        shellBack();
+      }
+    } else if (mode === "new-repo" || mode === "remove") {
+      // These components own their keys (Enter / Esc) and stop the ones they
+      // handle. An Escape that still reaches the window had focus outside the
+      // component (e.g. after a click on empty space), so step back from here.
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (mode === "new-repo") newRepoEl?.back();
+        else removeEl?.back();
+      }
     } else if (mode === "settings") {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -1082,6 +1170,8 @@
     const back = e.button === 3;
     if (mode === "settings") {
       if (back) backToList();
+    } else if (mode === "shell") {
+      if (back) shellBack();
     } else if (mode === "new-repo") {
       if (back) newRepoBack();
     } else if (mode === "remove") {
@@ -1103,6 +1193,12 @@
     const unlisteners: Array<Promise<() => void>> = [];
     unlisteners.push(
       onOverlayShown((scope) => {
+        // Hidden from a shell: the repo hotkey brings that shell straight back,
+        // like a drop-down terminal. The app hotkey still means the app list.
+        if (mode === "shell" && activeShell && scope !== "apps") {
+          void tick().then(() => shellView?.focus());
+          return;
+        }
         // The app-launcher hotkey opens straight into the ">" scope, caret
         // after the prefix so the first keystroke filters rather than replaces.
         query = scope === "apps" ? ">" : "";
@@ -1115,6 +1211,11 @@
     );
     unlisteners.push(
       onOverlayHidden(() => {
+        // A shell stays on screen while hidden — the next show returns to it.
+        if (mode === "shell" && activeShell) {
+          closeCtx();
+          return;
+        }
         // Reset to the repo list while the window is off-screen. WebView2 keeps
         // running scripts when hidden, so by the next show the home view is
         // already rendered — no flicker from the previous screen on slow
@@ -1163,6 +1264,9 @@
     );
     unlisteners.push(onGotoSettings(() => openSettings()));
 
+    // A reloaded webview has lost track of any shells it started; end them.
+    void shellCloseAll().catch(() => {});
+
     search?.focus();
     void loadInitial();
     void loadApps();
@@ -1200,7 +1304,7 @@
 />
 
 <main
-  class="panel-surface relative mx-auto flex h-[480px] w-[760px] flex-col overflow-hidden
+  class="panel-surface relative flex h-full w-full flex-col overflow-hidden
          rounded-sm border border-hair bg-panel/82 backdrop-blur-xl"
 >
   {#if mode === "repo-list"}
@@ -1267,17 +1371,9 @@
       onback={menuBack}
       oncontext={(i, e) => openActionRowMenu(e, i)}
     />
-  {:else if mode === "run-command" && activeRepo}
-    <RunCommand
-      repoName={activeRepo.repo.name}
-      repoPath={activeRepo.repo.path}
-      template={promptTemplate}
-      onrun={(cmd, sh) =>
-        activeRepo && runCommandAndHide(activeRepo.repo.path, cmd, sh)}
-      onback={() => (openedFromList ? backToList() : (mode = "action-menu"))}
-    />
   {:else if mode === "new-repo"}
     <NewRepo
+      bind:this={newRepoEl}
       existing={setupTarget
         ? { path: setupTarget.repo.path, name: setupTarget.repo.name }
         : null}
@@ -1286,6 +1382,7 @@
     />
   {:else if mode === "remove" && removeTarget}
     <RemoveFolder
+      bind:this={removeEl}
       name={removeTarget.repo.name}
       path={removeTarget.repo.path}
       ondone={(undoable) => removeTarget && removed(removeTarget.repo.name, undoable)}
@@ -1298,6 +1395,7 @@
       onsaved={() => {
         void getConfig().then((c) => {
           dismissMode = c.dismiss ?? "always";
+          setShellFont(c.shell_font, c.shell_font_size);
           appsEnabled = c.apps?.enabled ?? true;
         });
       }}
@@ -1306,6 +1404,19 @@
       onunsaved={settingsUnsaved}
     />
   {/if}
+
+  <!-- Always mounted, so a shell's terminal survives every other screen. -->
+  <Shell
+    bind:this={shellView}
+    session={activeShell}
+    visible={mode === "shell"}
+    repoName={activeRepo?.repo.name ?? ""}
+    crumb={shellCrumb}
+    onback={shellBack}
+    onshellmenu={openShellPicker}
+    oncontext={openShellMenu}
+    onend={endShell}
+  />
 
   {#if undoToast && mode === "repo-list"}
     <div

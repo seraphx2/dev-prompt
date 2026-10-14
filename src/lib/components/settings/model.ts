@@ -26,14 +26,6 @@ export const PAGE_LABEL: Record<Page, string> = {
   about: "About",
 };
 
-/** The page Settings last showed, so reopening it lands there again. Kept for
- *  the session only; a fresh launch starts on General. */
-let lastPage: Page = "general";
-export const getLastPage = (): Page => lastPage;
-export function setLastPage(p: Page) {
-  lastPage = p;
-}
-
 /** How long a text or number field waits after the last keystroke to save. */
 export const TYPING_DELAY_MS = 600;
 
@@ -63,6 +55,10 @@ export interface Form {
   terminalTemplate: string;
   /** "" = default shell (pwsh -> powershell), else a shell name. */
   shellSel: string;
+  /** "" = the default font stack. */
+  shellFont: string;
+  /** 0 = the default size. */
+  shellFontSize: number;
   /** "" = auto, "__custom__" = raw template, else a file manager id. */
   filemanagerSel: string;
   filemanagerTemplate: string;
@@ -93,6 +89,8 @@ export function formFromConfig(c: AppConfig): Form {
     terminalTemplate,
     terminalSel: terminalTemplate ? CUSTOM : (c.terminal ?? ""),
     shellSel: c.shell ?? "",
+    shellFont: c.shell_font ?? "",
+    shellFontSize: c.shell_font_size ?? 0,
     filemanagerTemplate,
     filemanagerSel: filemanagerTemplate ? CUSTOM : (c.filemanager ?? ""),
     appsEnabled: c.apps?.enabled ?? true,
@@ -121,6 +119,12 @@ export function ttlPatch(f: Form): ConfigPatch {
   return Number.isFinite(f.ttlMin) && f.ttlMin >= 1
     ? { cache_ttl_secs: Math.max(60, Math.round(f.ttlMin * 60)) }
     : {};
+}
+
+/** The built-in shell's font. Blank family / size go back to the defaults. */
+export function shellFontPatch(f: Form): ConfigPatch {
+  const size = Number.isFinite(f.shellFontSize) ? Math.round(f.shellFontSize) : 0;
+  return { shell_font: f.shellFont.trim(), shell_font_size: size };
 }
 
 export function depthPatch(f: Form): ConfigPatch {
@@ -174,6 +178,17 @@ export function depthProblem(n: number): string | null {
 
 export function ttlProblem(n: number): string | null {
   return Number.isFinite(n) && n >= 1 ? null : "At least 1 minute.";
+}
+
+export const FONT_SIZE_MIN = 6;
+export const FONT_SIZE_MAX = 40;
+
+/** Blank (0 / NaN from an emptied box) means "the default size". */
+export function fontSizeProblem(n: number): string | null {
+  if (!Number.isFinite(n) || n === 0) return null;
+  return Number.isInteger(n) && n >= FONT_SIZE_MIN && n <= FONT_SIZE_MAX
+    ? null
+    : `A whole number from ${FONT_SIZE_MIN} to ${FONT_SIZE_MAX}.`;
 }
 
 const PLACEHOLDERS = { terminal: ["dir", "cmd"], filemanager: ["path"] } as const;

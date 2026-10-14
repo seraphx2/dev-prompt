@@ -2,6 +2,8 @@
   import type { ScoredRepo } from "../types";
   import { middleTruncate } from "../text";
   import Highlight from "./Highlight.svelte";
+  import { hasShellUnder } from "../shells.svelte";
+  import { icons } from "../icons";
 
   let {
     entry,
@@ -16,6 +18,9 @@
     /** Pointer moved onto the row -> move the selection here. */
     onhover: () => void;
   } = $props();
+
+  /** A shell is still running in this repo (Open shell, left in the background). */
+  const shellLive = $derived(hasShellUnder(entry.repo.path));
 </script>
 
 <!-- `pointermove`, not `pointerenter`: the latter also fires when a row slides
@@ -23,11 +28,34 @@
      drag the highlight off the top match. Only real pointer movement selects. -->
 <button
   type="button"
-  class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors
+  class="flex w-full items-center gap-3 rounded-lg py-2 pl-1 pr-3 text-left transition-colors
          {active ? 'bg-white/10' : 'hover:bg-white/4'}"
   onclick={onactivate}
   onpointermove={onhover}
 >
+  <!-- Live state gets its own column, apart from the badges on the right
+       (which describe what the repo is). Every row reserves it, so names stay
+       lined up and running shells read as one vertical column. The row's
+       slim left padding (pl-1) plus the list's px-2 puts 12px before the icon,
+       matching the 12px gap after it, so it sits centred in that margin. -->
+  <!-- Native tooltip: plain text only, but a newline breaks the line. -->
+  <span
+    class="flex w-3.5 shrink-0 justify-center"
+    title={shellLive ? "A shell is running in this repo\nOpen shell resumes the session" : undefined}
+  >
+    {#if shellLive}
+      <svg
+        class="h-3.5 w-3.5 text-sky-300"
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        fill-rule="evenodd"
+        role="img"
+        aria-label="A shell is running in this repo"
+      >
+        {@html icons.terminal.raw}
+      </svg>
+    {/if}
+  </span>
   <div class="min-w-0 flex-1">
     <div class="truncate text-[13px] leading-tight text-white/90">
       <Highlight text={entry.repo.name} indices={entry.matchIndices} />

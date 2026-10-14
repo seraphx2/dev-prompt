@@ -453,7 +453,7 @@ universal:
     - { id: terminal, name: "Open in terminal", terminal: true, icon: terminal, hotkey: "Ctrl+T" }
     - { id: filemanager, name: "Show in file manager", program: "{{filemanager}}", args: ["{{path}}"], icon: folder, hotkey: "Ctrl+E" }
     - { id: copy-path, name: "Copy path", client: true, icon: copy, hotkey: "Ctrl+C" }
-    - { id: run-command, name: "Run command…", prompt: true, terminal: true, icon: run, hotkey: "Ctrl+R" }
+    - { id: run-command, name: "Open shell", prompt: true, terminal: true, icon: run, hotkey: "Ctrl+R" }
     # Only for a folder with no version control, and only when a `provision:`
     # entry is installed. Unclustered, so it sits at the top of the list.
     - { id: set-up-vcs, name: "Set up version control…", provision: true, icon: branch }

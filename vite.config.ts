@@ -51,5 +51,12 @@ export default defineConfig(async () => ({
     minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,
     // produce sourcemaps for debug builds
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    rollupOptions: {
+      output: {
+        // xterm.js (the built-in shell) is as big as the rest of the app put
+        // together; its own chunk keeps both under Vite's size warning.
+        manualChunks: (id) => (id.includes("node_modules/@xterm/") ? "xterm" : undefined),
+      },
+    },
   },
 }));

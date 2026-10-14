@@ -14,7 +14,7 @@ use crate::inspect::{self, RepoContext};
 use crate::launch;
 use crate::rules::{
     build_actions as build_actions_impl, evaluate_detected, evaluate_universal, find_action,
-    terminal_command, Action, Resolver,
+    Action,
 };
 use crate::scan::{self, Repo};
 
@@ -56,6 +56,8 @@ pub struct AppState {
     /// Held for the length of a rescan, so the watcher's and the user's never
     /// overlap.
     pub scan_gate: Mutex<()>,
+    /// The built-in shell's live sessions (see `pty.rs`).
+    pub shells: std::sync::Arc<crate::pty::Sessions>,
 }
 
 impl AppState {
@@ -73,7 +75,7 @@ impl AppState {
             age_secs: -1,
         });
         // Seed blur-dismiss from the saved preference; the frontend re-asserts it
-        // per screen (off for Settings / run-command) once it mounts.
+        // per screen (off for Settings and the other forms) once it mounts.
         let dismiss_on_blur = config.dismiss == config::DismissMode::Always;
         AppState {
             config: Mutex::new(config),
@@ -91,6 +93,7 @@ impl AppState {
             sticky_open: Mutex::new(first_run),
             watcher: Mutex::new(None),
             scan_gate: Mutex::new(()),
+            shells: Default::default(),
         }
     }
 }
@@ -664,6 +667,9 @@ pub struct ConfigPatch {
     pub terminal: Option<String>,
     pub terminal_template: Option<String>,
     pub shell: Option<String>,
+    /// `Some("")` / `Some(0)` go back to the default font / size.
+    pub shell_font: Option<String>,
+    pub shell_font_size: Option<u16>,
     pub filemanager: Option<String>,
     pub filemanager_template: Option<String>,
     pub apps: Option<config::AppsConfig>,
@@ -734,6 +740,13 @@ pub fn save_config(
     if let Some(s) = patch.shell {
         let s = s.trim();
         user.shell = (!s.is_empty()).then(|| s.to_string());
+    }
+    if let Some(f) = patch.shell_font {
+        let f = f.trim();
+        user.shell_font = (!f.is_empty()).then(|| f.to_string());
+    }
+    if let Some(n) = patch.shell_font_size {
+        user.shell_font_size = (n != 0).then_some(n.clamp(6, 40));
     }
     if let Some(f) = patch.filemanager {
         let f = f.trim();
@@ -917,7 +930,7 @@ pub fn list_file_managers(state: State<'_, AppState>) -> Vec<FileManagerOption> 
 }
 
 /// Shells found on PATH — feeds the Settings "Shell" dropdown and the
-/// "Run command…" picker.
+/// built-in shell's picker.
 #[tauri::command]
 pub fn list_shells() -> Vec<String> {
     let mut out: Vec<String> = ["pwsh", "powershell", "cmd", "bash", "zsh", "fish", "nu"]
@@ -944,65 +957,139 @@ pub fn list_shells() -> Vec<String> {
     out
 }
 
-/// The shell a one-shot command runs in with nothing pinned — names the
-/// Settings dropdown's "Default (…)" option instead of just saying
-/// "PowerShell" (which of the two — `pwsh` or legacy `powershell` — depends
-/// on what's actually installed).
+/// The shell used with nothing pinned — names the Settings dropdown's
+/// "Default (…)" option instead of a vague "PowerShell" (which of the two —
+/// `pwsh` or legacy `powershell` — depends on what's actually installed) or,
+/// on Linux, the login shell.
 #[tauri::command]
 pub fn default_shell() -> String {
     crate::rules::default_shell()
 }
 
-/// Run a free-form command in `path`'s terminal. Blank `command` opens the
-/// chosen shell interactively. Feeds the "Run command…" action.
-/// `async` + `spawn_blocking`: terminal/shell resolution (`which`, globs) and the
-/// spawn — the overlay `await`s this before it dismisses.
+// --- built-in shell ("Open shell") -------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellOpened {
+    pub id: u32,
+    /// Short shell name for the header (`pwsh`, `bash`, …).
+    pub label: String,
+}
+
+/// Start a shell session in `cwd` (see `pty.rs`). `shell` is the picker's
+/// choice, else `config.shell`, else the platform default. Output streams to
+/// `on_data` as raw bytes; `on_exit` fires once, after the last of it, with
+/// the exit code when there is one.
+/// `async` + `spawn_blocking`: resolving the shell walks PATH, and starting a
+/// pseudo-console isn't free either.
 #[tauri::command]
-pub async fn run_command(
+pub async fn shell_open(
     state: State<'_, AppState>,
-    path: String,
-    command: String,
+    cwd: String,
     shell: Option<String>,
-) -> AppResult<()> {
-    let repo = repo_for_path(&state, &path);
-    let cfg = state.config.lock().unwrap().clone();
+    cols: u16,
+    rows: u16,
+    on_data: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
+    on_exit: tauri::ipc::Channel<Option<i32>>,
+) -> AppResult<ShellOpened> {
+    let dir = std::path::PathBuf::from(&cwd);
+    if !dir.is_dir() {
+        return Err(AppError::msg(format!("{cwd} is not a folder")));
+    }
+    let choice = shell
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| state.config.lock().unwrap().shell.clone());
+    let sessions = std::sync::Arc::clone(&state.shells);
     tauri::async_runtime::spawn_blocking(move || {
-        let shell = shell
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| cfg.shell.clone());
-        let resolver = Resolver::new(&cfg.programs)
-            .with_terminal(cfg.terminal.as_deref(), cfg.terminal_template.as_deref())
-            .with_shell(shell.as_deref());
-
-        let command = command.trim();
-        let (program, args, cwd) = if command.is_empty() {
-            let sh = shell.clone().unwrap_or_else(crate::rules::default_shell);
-            terminal_command(&sh, &repo.path, &resolver, false)
-        } else {
-            terminal_command(command, &repo.path, &resolver, true)
-        };
-
-        let action = Action {
-            id: "run-command".into(),
-            label: command.to_string(),
-            hint: command.to_string(),
-            group: String::new(),
-            cluster: String::new(),
-            usage_score: 0.0,
-            icon: None,
-            hotkey: None,
-            program,
-            args,
-            cwd,
-            client_side: false,
-            prompt: false,
-            provision: false,
-            remove: false,
-        };
-        launch::launch(&action, &repo)
+        let spec = crate::pty::shell_spec(choice.as_deref(), &dir);
+        let id = sessions
+            .open(
+                &spec,
+                &dir,
+                cols,
+                rows,
+                move |bytes| {
+                    let _ = on_data.send(tauri::ipc::InvokeResponseBody::Raw(bytes));
+                },
+                move |code| {
+                    let _ = on_exit.send(code);
+                },
+            )
+            .map_err(|e| AppError::msg(format!("couldn't start {}: {e}", spec.label)))?;
+        Ok(ShellOpened { id, label: spec.label })
     })
     .await
-    .map_err(|e| AppError::msg(format!("run command task failed: {e}")))?
+    .map_err(|e| AppError::msg(format!("shell start task failed: {e}")))?
+}
+
+/// Keystrokes / a paste for session `id`. Only queues them, so it never waits
+/// on the shell.
+#[tauri::command]
+pub fn shell_write(state: State<'_, AppState>, id: u32, data: Vec<u8>) -> AppResult<()> {
+    Ok(state.shells.write(id, data)?)
+}
+
+#[tauri::command]
+pub fn shell_resize(state: State<'_, AppState>, id: u32, cols: u16, rows: u16) -> AppResult<()> {
+    Ok(state.shells.resize(id, cols, rows)?)
+}
+
+/// End session `id` — like closing a terminal tab. Its exit still arrives
+/// through `on_exit`.
+#[tauri::command]
+pub fn shell_close(state: State<'_, AppState>, id: u32) {
+    state.shells.close(id);
+}
+
+/// End every session. The frontend calls this as it starts, so sessions a
+/// reloaded webview has lost track of don't linger.
+#[tauri::command]
+pub fn shell_close_all(state: State<'_, AppState>) {
+    state.shells.close_all();
+}
+
+/// The overlay's size: the usual 760×480, or roomier while a shell is open —
+/// clamped to the screen it's on, and re-centred. Already that size: left
+/// alone, so a window the user dragged somewhere stays put.
+#[tauri::command]
+pub fn set_overlay_size(window: tauri::WebviewWindow, large: bool) -> AppResult<()> {
+    let (mut w, mut h) = if large { (1000.0, 640.0) } else { (760.0, 480.0) };
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let area = monitor.work_area().size.to_logical::<f64>(monitor.scale_factor());
+        w = f64::min(w, area.width * 0.94);
+        h = f64::min(h, area.height * 0.9);
+    }
+    if let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor()) {
+        let now = size.to_logical::<f64>(scale);
+        if (now.width - w).abs() < 1.0 && (now.height - h).abs() < 1.0 {
+            return Ok(());
+        }
+    }
+    window
+        .set_size(tauri::LogicalSize::new(w, h))
+        .map_err(|e| AppError::msg(format!("couldn't resize the overlay: {e}")))?;
+    let _ = window.center();
+    Ok(())
+}
+
+/// Open an http(s) link in the default browser — Ctrl+click on a URL in the
+/// built-in shell (a dev server's `http://localhost:5173`, say). Anything else
+/// is refused: the text comes from whatever the shell printed.
+#[tauri::command]
+pub fn open_url(window: tauri::WebviewWindow, url: String) -> AppResult<()> {
+    if !is_web_url(&url) {
+        return Err(AppError::msg(format!("not a web link: {url}")));
+    }
+    open_with_os_handler(&window, std::ffi::OsStr::new(&url))
+}
+
+fn is_web_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    let rest = lower
+        .strip_prefix("https://")
+        .or_else(|| lower.strip_prefix("http://"));
+    matches!(rest, Some(r) if !r.is_empty())
+        && !url.chars().any(|c| c.is_whitespace() || c.is_control() || c == '"')
 }
 
 // --- installed-app launcher ( > scope ) -----------------------------------
@@ -1404,4 +1491,23 @@ pub fn system_paths() -> AppResult<SystemPaths> {
         config_dir: config::config_dir()?.to_string_lossy().into_owned(),
         cache_dir: config::cache_dir()?.to_string_lossy().into_owned(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_plain_web_links_open() {
+        assert!(is_web_url("http://localhost:5173/"));
+        assert!(is_web_url("HTTPS://example.com/a?b=c#d"));
+        assert!(!is_web_url("https://"));
+        assert!(!is_web_url("file:///C:/Windows/System32/calc.exe"));
+        assert!(!is_web_url(r"C:\Windows\System32\calc.exe"));
+        assert!(!is_web_url("javascript:alert(1)"));
+        // Whatever the OS opener does with the rest of an argument, it never
+        // sees more than one clean token.
+        assert!(!is_web_url("https://a.com \"--flag\""));
+        assert!(!is_web_url("https://a.com\n/b"));
+    }
 }

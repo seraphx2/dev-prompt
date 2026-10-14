@@ -102,11 +102,28 @@ nothing — both already agree with dev-prompt's own default.
 
 ### Shell
 
-A one-shot command is wrapped in a shell so the window stays open and keeps a
-real console (ANSI colour, a live TTY — tools like Claude Code need it). The
-shell is `pwsh` (else Windows PowerShell) unless you set **Settings ▸ Tools ▸ Shell** /
-`shell:` — `cmd`, `bash`, `nu`, … are recognised for their "run and hold" flags.
-The **Run command…** action picks a shell per-run, defaulting to that setting.
+**Settings ▸ Tools ▸ Shell** / `shell:` picks the shell **Open shell** runs
+inside the overlay. Unset, it's `pwsh` (else Windows PowerShell) on Windows and
+your login shell (`$SHELL`) on Linux. The shell's name in its header
+switches a single session to another one.
+
+The same shell wraps a one-shot command in an external terminal, so the window
+stays open and keeps a real console (ANSI colour, a live TTY — tools like
+Claude Code need it); `cmd`, `bash`, `nu`, … are recognised for their "run and
+hold" flags.
+
+`shell_font` / `shell_font_size` set its font. The family you give is
+tried first, ahead of the default list (Nerd Font builds of Cascadia, then
+Cascadia, Consolas, DejaVu Sans Mono); the size defaults to 13. Use a
+[Nerd Font](https://www.nerdfonts.com/) if your prompt draws icons (oh-my-posh,
+Starship).
+
+```yaml
+# config.yaml — managed from Settings ▸ Tools
+shell: pwsh
+shell_font: "JetBrainsMono Nerd Font Mono"
+shell_font_size: 14
+```
 
 ### File manager
 

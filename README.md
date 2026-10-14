@@ -45,6 +45,10 @@ WebView.
   first, then detected per-ecosystem actions; multi-project repos collapse into
   drill-in submenus. Actions gracefully disappear when the tool they need isn't
   installed.
+- **Built-in shell** — **Open shell** (`Ctrl+R` in the action menu) opens
+  your own shell (pwsh, bash, nu, …) right in the overlay, at the repo. It
+  keeps running when you hide the overlay, so a dev server stays up and the
+  hotkey brings you straight back to it.
 - **Settings screen** — a sidebar of pages (General, Repos, Tools, Apps, the
   rules viewer / tracer / icon list, About) that saves each change as you make
   it. Reachable from the overlay (`Ctrl+,`) or the tray icon.
@@ -246,13 +250,37 @@ why, and how to add it anyway.
 | `Tab`   | drill into the selected sub-project                  |
 | `Esc`   | step back one level (sub-project → menu → repo list) |
 
+**Open shell** (`Ctrl+R` in the action menu, or a repo's right-click menu)
+opens a shell inside the overlay, in that repo — your own shell, with your
+profile, prompt, history and tab completion. It's a full terminal: colours,
+`vim`, `fzf`, progress bars and Ctrl+C all work. The overlay grows while it's
+open.
+
+| Key                       | Action                                               |
+| ------------------------- | ---------------------------------------------------- |
+| everything, `Esc` too     | goes to the shell                                    |
+| `Shift+Esc` / mouse back  | step back to the action menu (the shell keeps running) |
+| the hotkey                | hide the overlay; press it again to come back to the shell |
+| `Ctrl+C` with a selection | copy (`Ctrl+Shift+C` always copies)                  |
+| `Ctrl+V` / `Ctrl+Shift+V` | paste                                                |
+| `Ctrl`+click a link       | open it in your browser                              |
+
+Each folder gets one shell. Leave it and it keeps running — a blue terminal
+icon to the left of the repo's name says so — and Open shell goes back to it. The shell's name in
+the header switches to another shell (Settings ▸ Tools ▸ Shell sets the
+default); **Close shell** stops it and whatever it's running, like closing a terminal
+tab. Typing `exit` closes it too. If it exits with an error, the output stays
+up: `Enter` starts it again. Settings ▸ Tools also sets its font — pick a
+[Nerd Font](https://www.nerdfonts.com/) if your prompt uses icons.
+
 **Right-click** works where it's useful, styled like the rest of the app:
 
 - a **repo** — open its actions, its quick actions (terminal, file manager,
-  copy path, run command), "Set up version control…" when it has none, the
+  copy path, open shell), "Set up version control…" when it has none, the
   actions you use most in that repo, and "Move to Recycle Bin…" (see below);
 - an **app** in `>` — launch it, show its folder, copy its path;
 - an **action** — run it, or copy the command it would run;
+- the **shell** — copy, paste, clear, restart or close it;
 - a **text field** — cut, copy, paste, select all.
 
 Anywhere else right-click does nothing — the browser's own Back / Reload /

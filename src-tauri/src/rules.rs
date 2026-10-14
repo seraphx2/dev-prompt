@@ -49,12 +49,13 @@ pub struct Action {
     pub program: String,
     #[serde(skip)]
     pub args: Vec<String>,
-    #[serde(skip)]
+    /// Working directory, when not the repo root (a sub-project's actions).
+    /// Sent to the frontend because a `prompt` action's shell opens there.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     /// Handled in the frontend (copy path). No process spawned.
     pub client_side: bool,
-    /// Opens the "Run command…" input rather than spawning. `hint` is the
-    /// template (may contain `{{input}}`).
+    /// Opens the built-in shell at `cwd` rather than spawning.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub prompt: bool,
     /// Opens the "Set up version control" form for this folder rather than
@@ -355,8 +356,6 @@ fn resolve_var(key: &str, t: &Tmpl) -> String {
             .and_then(|f| f.file_stem())
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default(),
-        // Left intact for a `prompt:` action — the frontend fills it in.
-        "input" => "{{input}}".to_string(),
         _ => {
             if let Some(var) = key.strip_prefix("env:") {
                 std::env::var(var).unwrap_or_default()
@@ -614,16 +613,24 @@ pub fn auto_terminal_label(config: &Config) -> String {
     basename(&pick_terminal_binary(&resolver).0)
 }
 
-/// The shell a one-shot command runs in when nothing is pinned (`config.shell`
-/// absent) — `pwsh` if it's installed, else the legacy Windows PowerShell
-/// that's always present. Feeds the Settings dropdown's "Default (…)" label
-/// too, so it names the actual outcome instead of just saying "PowerShell".
+/// The shell used when nothing is pinned (`config.shell` absent) — `pwsh` if
+/// it's installed, else the legacy Windows PowerShell that's always present.
+/// Feeds the Settings dropdown's "Default (…)" label too, so it names the
+/// actual outcome instead of just saying "PowerShell".
+#[cfg(windows)]
 pub fn default_shell() -> String {
     if which("pwsh").is_some() {
         "pwsh".to_string()
     } else {
         "powershell".to_string()
     }
+}
+
+/// The user's login shell (`$SHELL`), by name — see `pty::unix_default_shell`.
+#[cfg(unix)]
+pub fn default_shell() -> String {
+    let path = crate::pty::unix_default_shell(std::env::var("SHELL").ok());
+    path.rsplit('/').next().unwrap_or(&path).to_string()
 }
 
 /// Wrap `argv` in a shell that runs the command and then stays open with a real
@@ -731,15 +738,12 @@ fn pick_terminal_binary(resolver: &Resolver) -> (String, bool) {
     )
 }
 
-/// `(program, args, cwd)` to run `argv` in a terminal at `cwd`. Empty `argv`
-/// means "just open a terminal there". `wrap` = run `argv` inside a shell that
-/// stays open (one-shot commands); `false` = hand `argv` to the emulator raw
-/// (e.g. `argv == ["bash"]` → an interactive bash).
+/// `(program, args, cwd)` to run `argv` in a terminal at `cwd`, inside a shell
+/// that stays open afterwards. Empty `argv` means "just open a terminal there".
 fn terminalize(
     argv: &[String],
     cwd: &str,
     resolver: &Resolver,
-    wrap: bool,
 ) -> (String, Vec<String>, Option<String>) {
     #[cfg(windows)]
     {
@@ -768,10 +772,8 @@ fn terminalize(
         // The command portion, shell-wrapped or raw.
         let run: Vec<String> = if argv.is_empty() {
             Vec::new()
-        } else if wrap {
-            shell_wrap(argv, resolver.shell)
         } else {
-            argv.to_vec()
+            shell_wrap(argv, resolver.shell)
         };
 
         if no_gui_terminal {
@@ -817,7 +819,6 @@ fn terminalize(
     {
         // Per-emulator handling on non-Windows is its own milestone
         // (docs/future-work.md #10); run the command directly in `cwd`.
-        let _ = wrap;
         if argv.is_empty() {
             let (term, _) = pick_terminal_binary(resolver);
             (term, Vec::new(), Some(cwd.to_string()))
@@ -825,18 +826,6 @@ fn terminalize(
             (argv[0].clone(), argv[1..].to_vec(), Some(cwd.to_string()))
         }
     }
-}
-
-/// Build a spawnable `(program, args, cwd)` for a free-form command line — the
-/// seam the "Run command…" backend uses. `wrap: false` opens `command` (a shell
-/// name) interactively.
-pub fn terminal_command(
-    command: &str,
-    cwd: &str,
-    resolver: &Resolver,
-    wrap: bool,
-) -> (String, Vec<String>, Option<String>) {
-    terminalize(&shell_split(command), cwd, resolver, wrap)
 }
 
 // --- action construction ---------------------------------------------
@@ -918,12 +907,11 @@ fn build_action(
     }
 
     if ra.prompt {
-        // No process here — the frontend opens the "Run command…" input. `run:`
-        // (if any) is the template shown, `{{input}}` left intact for it.
+        // No process here — the frontend opens the built-in shell at `cwd`.
         return Some(Action {
             id,
             label: expand(&ra.name, t),
-            hint: ra.run.as_deref().map(|r| expand(r, t)).unwrap_or_default(),
+            hint: String::new(),
             group: group.to_string(),
             cluster: ra.cluster.clone(),
             usage_score: 0.0,
@@ -965,7 +953,7 @@ fn build_action(
         } else {
             std::iter::once(program.clone()).chain(args).collect()
         };
-        terminalize(&argv, cwd, resolver, true)
+        terminalize(&argv, cwd, resolver)
     } else {
         if program.is_empty() {
             return None;
@@ -1012,7 +1000,7 @@ fn provider_actions(
 ) -> Vec<Action> {
     let term_in = |id: String, label: String, argv: Vec<String>, at: &str| -> Action {
         let hint = argv.join(" ");
-        let (p, a, c) = terminalize(&argv, at, resolver, true);
+        let (p, a, c) = terminalize(&argv, at, resolver);
         Action {
             id,
             label,
@@ -1858,7 +1846,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_action_yields_a_no_program_action_keeping_the_template() {
+    fn prompt_action_yields_a_no_program_action_at_its_cwd() {
         let programs = std::collections::BTreeMap::new();
         let r = Resolver::new(&programs);
         let t = Tmpl {
@@ -1870,18 +1858,17 @@ mod tests {
             resolver: &r,
         };
         let ra = crate::config::RuleAction {
-            name: "npm run…".into(),
-            run: Some("npm run {{input}}".into()),
+            name: "Shell in web/".into(),
             prompt: true,
             provision: false,
             remove: false,
             terminal: true,
             ..Default::default()
         };
-        let a = build_action(&ra, "npm-run".into(), "General", "/r", &t, &r).unwrap();
+        let a = build_action(&ra, "web-shell".into(), "General", "/r/web", &t, &r).unwrap();
         assert!(a.prompt);
         assert!(a.program.is_empty());
-        assert_eq!(a.hint, "npm run {{input}}"); // {{input}} survives expand()
+        assert_eq!(a.cwd.as_deref(), Some("/r/web")); // the shell opens here
     }
 
     #[test]
@@ -1924,38 +1911,33 @@ mod tests {
             Resolver::new(&programs).with_terminal(Some(p), t)
         };
 
-        let (p, a, c) = terminalize(&argv, cwd, &pin("C:/x/wt.exe", None), true);
+        let (p, a, c) = terminalize(&argv, cwd, &pin("C:/x/wt.exe", None));
         assert_eq!(p, "C:/x/wt.exe");
         assert_eq!(&a[..2], &["-d", cwd]);
         assert!(a.contains(&"-Command".to_string()));
         assert_eq!(a.last().unwrap(), "& 'cargo' 'test'");
         assert_eq!(c, None);
 
-        let (_, a, _) = terminalize(&argv, cwd, &pin("C:/x/alacritty.exe", None), true);
+        let (_, a, _) = terminalize(&argv, cwd, &pin("C:/x/alacritty.exe", None));
         assert_eq!(&a[..2], &["--working-directory", cwd]);
         assert!(a.contains(&"-e".to_string()));
 
-        let (_, a, _) = terminalize(&argv, cwd, &pin("C:/x/wezterm.exe", None), true);
+        let (_, a, _) = terminalize(&argv, cwd, &pin("C:/x/wezterm.exe", None));
         assert_eq!(&a[..4], &["start", "--cwd", cwd, "--"]);
 
         // Empty argv = "just open a terminal here" — no shell wrap.
-        let (_, a, _) = terminalize(&[], cwd, &pin("C:/x/alacritty.exe", None), true);
+        let (_, a, _) = terminalize(&[], cwd, &pin("C:/x/alacritty.exe", None));
         assert_eq!(a, vec!["--working-directory", cwd]);
-
-        // wrap = false — argv handed to the emulator raw (e.g. an interactive shell).
-        let (_, a, _) =
-            terminalize(&["bash".to_string()], cwd, &pin("C:/x/wt.exe", None), false);
-        assert_eq!(a, vec!["-d", cwd, "bash"]);
 
         // config.shell picks the wrapper.
         let r = Resolver::new(&programs)
             .with_terminal(Some("C:/x/wt.exe"), None)
             .with_shell(Some("cmd"));
-        let (_, a, _) = terminalize(&argv, cwd, &r, true);
+        let (_, a, _) = terminalize(&argv, cwd, &r);
         assert_eq!(&a[2..], &["cmd", "/k", "\"cargo test\""]);
 
         // Unknown emulator, no template -> command handed to the binary + cwd.
-        let (p, a, c) = terminalize(&argv, cwd, &pin("C:/x/kitty.exe", None), true);
+        let (p, a, c) = terminalize(&argv, cwd, &pin("C:/x/kitty.exe", None));
         assert_eq!(p, "C:/x/kitty.exe");
         assert_eq!(a, argv);
         assert_eq!(c, Some(cwd.to_string()));
@@ -1965,7 +1947,6 @@ mod tests {
             &argv,
             cwd,
             &pin("C:/x/kitty.exe", Some("kitty --directory {{dir}} -- {{cmd}}")),
-            true,
         );
         assert_eq!(p, "kitty");
         assert_eq!(a, vec!["--directory", cwd, "--", "cargo", "test"]);
@@ -1977,7 +1958,6 @@ mod tests {
             &spaced,
             "C:\\my repo",
             &pin("C:/x/kitty.exe", Some("kitty --directory {{dir}} -- {{cmd}}")),
-            true,
         );
         assert_eq!(a, vec!["--directory", "C:\\my repo", "--", "my tool", "go"]);
     }

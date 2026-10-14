@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -120,18 +120,66 @@ export function listShells(): Promise<string[]> {
   return invoke<string[]>("list_shells");
 }
 
-/** The shell a one-shot command runs in with nothing pinned. */
+/** The shell used with nothing pinned. */
 export function defaultShell(): Promise<string> {
   return invoke<string>("default_shell");
 }
 
-/** Run a free-form command in `path`'s terminal (blank = open the shell). */
-export function runCommand(
-  path: string,
-  command: string,
-  shell?: string,
-): Promise<void> {
-  return invoke<void>("run_command", { path, command, shell: shell || null });
+/**
+ * Start a built-in shell session in `cwd`. `shell` is a picked shell, or
+ * empty for `config.shell` / the platform default. Output arrives on `onData`
+ * as raw bytes (UTF-8 + escape codes, possibly split mid-character — feed it
+ * straight to xterm.js); `onExit` fires once, after the last of it.
+ */
+export function shellOpen(
+  cwd: string,
+  shell: string | null,
+  cols: number,
+  rows: number,
+  onData: (bytes: Uint8Array) => void,
+  onExit: (code: number | null) => void,
+): Promise<{ id: number; label: string }> {
+  const data = new Channel<ArrayBuffer>();
+  data.onmessage = (buf) => onData(new Uint8Array(buf));
+  const exit = new Channel<number | null>();
+  exit.onmessage = onExit;
+  return invoke("shell_open", {
+    cwd,
+    shell: shell || null,
+    cols,
+    rows,
+    onData: data,
+    onExit: exit,
+  });
+}
+
+/** Keystrokes / a paste for a shell session. */
+export function shellWrite(id: number, data: Uint8Array): Promise<void> {
+  return invoke<void>("shell_write", { id, data: Array.from(data) });
+}
+
+export function shellResize(id: number, cols: number, rows: number): Promise<void> {
+  return invoke<void>("shell_resize", { id, cols, rows });
+}
+
+/** End a shell session — its exit still arrives through `onExit`. */
+export function shellClose(id: number): Promise<void> {
+  return invoke<void>("shell_close", { id });
+}
+
+/** End every shell session (run at startup, for any a reload lost track of). */
+export function shellCloseAll(): Promise<void> {
+  return invoke<void>("shell_close_all");
+}
+
+/** The usual overlay size, or the roomier one while a shell is open. */
+export function setOverlaySize(large: boolean): Promise<void> {
+  return invoke<void>("set_overlay_size", { large });
+}
+
+/** Open an http(s) link in the default browser. */
+export function openUrl(url: string): Promise<void> {
+  return invoke<void>("open_url", { url });
 }
 
 /** Roots + installed version-control setups for the "New repository" screen. */

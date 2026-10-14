@@ -127,6 +127,13 @@ surrounding style rather than running `cargo fmt`.
    pay for a `PATH` walk.
 5. **`commands.rs`** is the `#[tauri::command]` surface and owns `AppState`
    (loaded config, scanned repos, per-repo contexts, installed-apps cache).
+   **`pty.rs`** backs "Open shell": the user's shell in a pseudo-terminal
+   (ConPTY / Unix PTY via `portable-pty`), output streamed over a Tauri
+   `Channel` to xterm.js (`lib/shells.svelte.ts`). Sessions outlive the
+   screen and the overlay hide; ending one kills the shell and hangs up the
+   PTY, like closing a terminal tab. On Windows, ConPTY holds the program
+   until the terminal answers its opening cursor query — xterm.js does that
+   in the app; the tests in `pty.rs` answer it themselves.
 6. The Svelte frontend (`App.svelte` + `lib/ipc.ts` typed wrappers) renders
    repo list → action menu → settings and drives everything through
    `invoke()`

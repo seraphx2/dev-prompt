@@ -47,10 +47,19 @@ pub struct Config {
     /// `{{dir}}` = working directory, `{{cmd}}` = the command to run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal_template: Option<String>,
-    /// Shell a one-shot terminal command runs inside (`pwsh` / `cmd` / `bash`
-    /// / …). `None` = `pwsh`, falling back to Windows PowerShell.
+    /// Shell the built-in shell starts, and that a one-shot terminal command
+    /// runs inside (`pwsh` / `cmd` / `bash` / …). `None` = `pwsh`, falling
+    /// back to Windows PowerShell; on Linux, the login shell (`$SHELL`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell: Option<String>,
+    /// Font family for the built-in shell, tried ahead of the default stack
+    /// (Nerd Font builds of Cascadia, then plain monospace). `None` = that
+    /// stack alone.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell_font: Option<String>,
+    /// Font size (px) for the built-in shell. `None` = 13.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell_font_size: Option<u16>,
     /// File manager to open (`programs.filemanager` key, a bare name, or an
     /// absolute path). `None` = first `programs.filemanager` candidate that
     /// resolves.
@@ -93,6 +102,8 @@ impl Default for Config {
             terminal: None,
             terminal_template: None,
             shell: None,
+            shell_font: None,
+            shell_font_size: None,
             filemanager: None,
             filemanager_template: None,
             apps: AppsConfig::default(),
@@ -358,8 +369,7 @@ pub struct RuleAction {
     pub args: Vec<String>,
     /// Run inside the resolved terminal at the working dir.
     pub terminal: bool,
-    /// Opens the "Run command…" input instead of spawning; `run:` (if any) is
-    /// the template, `{{input}}` the typed value.
+    /// Opens the built-in shell at the working dir instead of spawning.
     pub prompt: bool,
     /// Handled in the frontend (e.g. copy path). No process spawned.
     pub client: bool,
@@ -458,6 +468,10 @@ pub struct UserConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell_font: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell_font_size: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub filemanager: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filemanager_template: Option<String>,
@@ -534,6 +548,12 @@ fn merge_settings(cfg: &mut Config, u: UserConfig) {
     }
     if let Some(s) = u.shell {
         cfg.shell = Some(s);
+    }
+    if let Some(f) = u.shell_font {
+        cfg.shell_font = Some(f);
+    }
+    if let Some(n) = u.shell_font_size {
+        cfg.shell_font_size = Some(n);
     }
     if let Some(f) = u.filemanager {
         cfg.filemanager = Some(f);
@@ -676,6 +696,8 @@ fn first_run_user() -> UserConfig {
         terminal: None,
         terminal_template: None,
         shell: None,
+        shell_font: None,
+        shell_font_size: None,
         filemanager: None,
         filemanager_template: None,
         // Bundled default is already `enabled: true`; leave the key out of the
@@ -973,6 +995,19 @@ mod tests {
         assert_eq!(cfg.terminal.as_deref(), Some("wezterm"));
         assert_eq!(cfg.terminal_template.as_deref(), Some("x --cd {{dir}}"));
         assert_eq!(cfg.shell.as_deref(), Some("bash"));
+    }
+
+    #[test]
+    fn settings_file_carries_shell_font() {
+        let mut cfg = bundled_defaults();
+        assert_eq!(cfg.shell_font, None); // unset = the frontend's default stack
+        assert_eq!(cfg.shell_font_size, None);
+        let user: UserConfig =
+            serde_yaml_ng::from_str("shell_font: \"FiraCode Nerd Font\"\nshell_font_size: 15\n")
+                .unwrap();
+        merge_settings(&mut cfg, user);
+        assert_eq!(cfg.shell_font.as_deref(), Some("FiraCode Nerd Font"));
+        assert_eq!(cfg.shell_font_size, Some(15));
     }
 
     #[test]

@@ -22,6 +22,10 @@
   /** Keyboard highlight: an index into `items`, -1 for none yet. */
   let sel = $state(-1);
 
+  // A pick-one menu (any item with `checked`) reserves a check column on every
+  // row, so the icons and labels line up whichever one is ticked.
+  const checkable = $derived(items.some((it) => it.kind === "item" && it.checked !== undefined));
+
   const selectable = (i: number) => {
     const it = items[i];
     return it?.kind === "item" && !it.disabled;
@@ -116,7 +120,8 @@
       {@const g = item.icon ? icons[item.icon] : undefined}
       <button
         type="button"
-        role="menuitem"
+        role={checkable ? "menuitemradio" : "menuitem"}
+        aria-checked={checkable ? !!item.checked : undefined}
         disabled={item.disabled}
         class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13px]
                {item.disabled
@@ -131,6 +136,16 @@
         onpointerenter={() => (sel = item.disabled ? -1 : i)}
         onclick={() => run(i)}
       >
+        {#if checkable}
+          <span class="-mr-1 flex w-3.5 shrink-0 justify-center">
+            {#if item.checked}
+              <svg class="h-3.5 w-3.5 text-sky-300" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12.5l4.5 4.5L19 7.5" />
+              </svg>
+            {/if}
+          </span>
+        {/if}
         <svg
           class="h-3.5 w-3.5 shrink-0 {item.disabled
             ? 'opacity-40'

@@ -7,9 +7,7 @@
   import {
     PAGE_LABEL,
     formFromConfig,
-    getLastPage,
     rescanNeeds,
-    setLastPage,
     type Form,
     type Page,
   } from "./model";
@@ -30,7 +28,7 @@
     onrescanapps,
     onunsaved,
   }: {
-    /** Open on this page instead of the one last shown. */
+    /** Open on this page instead of General. */
     initialPage?: Page | null;
     onback: () => void;
     /** Fires after every successful save — App.svelte re-syncs the config
@@ -46,8 +44,7 @@
   } = $props();
 
   // svelte-ignore state_referenced_locally
-  let page = $state<Page>(initialPage ?? getLastPage());
-  $effect(() => setLastPage(page));
+  let page = $state<Page>(initialPage ?? "general");
 
   let content: HTMLDivElement | undefined = $state();
   $effect(() => {
