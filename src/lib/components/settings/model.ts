@@ -26,14 +26,6 @@ export const PAGE_LABEL: Record<Page, string> = {
   about: "About",
 };
 
-/** The page Settings last showed, so reopening it lands there again. Kept for
- *  the session only; a fresh launch starts on General. */
-let lastPage: Page = "general";
-export const getLastPage = (): Page => lastPage;
-export function setLastPage(p: Page) {
-  lastPage = p;
-}
-
 /** How long a text or number field waits after the last keystroke to save. */
 export const TYPING_DELAY_MS = 600;
 
