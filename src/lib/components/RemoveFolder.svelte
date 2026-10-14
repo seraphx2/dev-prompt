@@ -54,6 +54,12 @@
     }
   }
 
+  /** Leave the screen, unless the move is in flight. Also App's Escape
+   *  fallback for when focus sits outside the screen. */
+  export function back() {
+    if (!busy) onback();
+  }
+
   function onKey(e: KeyboardEvent) {
     if (e.key === "Enter") {
       e.stopPropagation();
@@ -64,7 +70,7 @@
     } else if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      if (!busy) onback();
+      back();
     }
   }
 </script>
@@ -73,7 +79,7 @@
   <button
     type="button"
     class="shrink-0 rounded-sm px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
-    onclick={() => !busy && onback()}
+    onclick={back}
     aria-label="Back"
   >
     ←

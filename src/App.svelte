@@ -673,6 +673,12 @@
     }
   }
 
+  // Back from the run-command screen: to the list or action menu it came from.
+  function runCommandBack() {
+    if (openedFromList) backToList();
+    else mode = "action-menu";
+  }
+
   function backToList() {
     mode = "repo-list";
     setupTarget = null;
@@ -835,6 +841,8 @@
   /** The open right-click menu, if any. */
   let ctx = $state<{ x: number; y: number; items: CtxItem[] } | null>(null);
   let ctxMenu: ContextMenu | undefined = $state();
+  let newRepoEl: NewRepo | undefined = $state();
+  let removeEl: RemoveFolder | undefined = $state();
   /** Bumped per menu, so a slow fetch can't fill in a menu that's been replaced. */
   let ctxSeq = 0;
 
@@ -1059,7 +1067,15 @@
     if (mode === "action-menu") {
       onMenuKeydown(e);
     } else if (mode === "run-command" || mode === "new-repo" || mode === "remove") {
-      // These components own their keys (Enter / Esc).
+      // These components own their keys (Enter / Esc) and stop the ones they
+      // handle. An Escape that still reaches the window had focus outside the
+      // component (e.g. after a click on empty space), so step back from here.
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (mode === "run-command") runCommandBack();
+        else if (mode === "new-repo") newRepoEl?.back();
+        else removeEl?.back();
+      }
     } else if (mode === "settings") {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -1082,6 +1098,8 @@
     const back = e.button === 3;
     if (mode === "settings") {
       if (back) backToList();
+    } else if (mode === "run-command") {
+      if (back) runCommandBack();
     } else if (mode === "new-repo") {
       if (back) newRepoBack();
     } else if (mode === "remove") {
@@ -1274,10 +1292,11 @@
       template={promptTemplate}
       onrun={(cmd, sh) =>
         activeRepo && runCommandAndHide(activeRepo.repo.path, cmd, sh)}
-      onback={() => (openedFromList ? backToList() : (mode = "action-menu"))}
+      onback={runCommandBack}
     />
   {:else if mode === "new-repo"}
     <NewRepo
+      bind:this={newRepoEl}
       existing={setupTarget
         ? { path: setupTarget.repo.path, name: setupTarget.repo.name }
         : null}
@@ -1286,6 +1305,7 @@
     />
   {:else if mode === "remove" && removeTarget}
     <RemoveFolder
+      bind:this={removeEl}
       name={removeTarget.repo.name}
       path={removeTarget.repo.path}
       ondone={(undoable) => removeTarget && removed(removeTarget.repo.name, undoable)}

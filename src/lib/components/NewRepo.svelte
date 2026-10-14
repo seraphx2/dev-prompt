@@ -195,6 +195,12 @@
     }
   }
 
+  /** Leave the form, unless a create is in flight. Also App's Escape fallback
+   *  for when focus sits outside the form. */
+  export function back() {
+    if (!busy) onback();
+  }
+
   function onKey(e: KeyboardEvent) {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -204,7 +210,7 @@
     } else if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      if (!busy) onback();
+      back();
     }
   }
 
@@ -239,7 +245,7 @@
   <button
     type="button"
     class="shrink-0 rounded-sm px-1.5 py-0.5 text-white/40 hover:bg-white/10 hover:text-white/70"
-    onclick={() => !busy && onback()}
+    onclick={back}
     aria-label="Back"
   >
     ←
