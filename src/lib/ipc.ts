@@ -395,3 +395,8 @@ export function onRepoContextUpdated(
 export function onGotoSettings(cb: () => void): Promise<UnlistenFn> {
   return listen("overlay:goto-settings", () => cb());
 }
+
+/** The tray's "Close all shells" was clicked. */
+export function onCloseAllShells(cb: () => void): Promise<UnlistenFn> {
+  return listen("shells:close-all", () => cb());
+}

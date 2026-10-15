@@ -62,9 +62,33 @@ struct Session {
 pub struct Sessions {
     next: AtomicU32,
     live: Mutex<HashMap<u32, Session>>,
+    /// Told the number of live sessions whenever it changes (the tray's
+    /// "Close all shells" item).
+    listener: Mutex<Option<CountListener>>,
 }
 
+type CountListener = Box<dyn Fn(usize) + Send + Sync>;
+
 impl Sessions {
+    /// Call `f` with the live-session count now and after every change.
+    pub fn on_count_change(&self, f: impl Fn(usize) + Send + Sync + 'static) {
+        f(self.count());
+        *self.listener.lock().unwrap() = Some(Box::new(f));
+    }
+
+    pub fn count(&self) -> usize {
+        self.live.lock().unwrap().len()
+    }
+
+    /// Run outside the `live` lock: the listener may take its time (the tray
+    /// hops to the main thread).
+    fn notify(&self) {
+        let n = self.count();
+        if let Some(f) = self.listener.lock().unwrap().as_ref() {
+            f(n);
+        }
+    }
+
     /// Start `shell` in `cwd` on a `cols`×`rows` PTY. Output goes to
     /// `on_data` as raw bytes (UTF-8 and escape codes, possibly split
     /// mid-character — xterm.js reassembles them); `on_exit` fires once, after
@@ -112,6 +136,7 @@ impl Sessions {
                 closed_at: Arc::clone(&closed_at),
             },
         );
+        self.notify();
 
         std::thread::Builder::new()
             .name(format!("pty-{id}-write"))
@@ -170,7 +195,10 @@ impl Sessions {
                 // stream; it's already over on Linux unless something the
                 // shell started still holds the terminal.
                 let session = sessions.live.lock().unwrap().remove(&id);
-                drop(session);
+                if session.is_some() {
+                    drop(session);
+                    sessions.notify();
+                }
                 let _ = reader_done.recv_timeout(DRAIN_TIMEOUT);
                 on_exit(code);
             })?;
@@ -201,6 +229,7 @@ impl Sessions {
         let _ = session.killer.kill();
         *session.closed_at.lock().unwrap() = Some(Instant::now());
         drop(session);
+        self.notify();
     }
 
     /// End every session — on app exit, and when a reloaded frontend has
@@ -449,6 +478,26 @@ mod tests {
         sessions.close_all();
         wait_until("both exits", || a.exited().is_some() && b.exited().is_some());
         assert!(sessions.live.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_count_listener_follows_opens_and_closes() {
+        let sessions = Arc::new(Sessions::default());
+        let seen = Arc::new(Mutex::new(Vec::<usize>::new()));
+        let s2 = Arc::clone(&seen);
+        sessions.on_count_change(move |n| s2.lock().unwrap().push(n));
+        let (a, _) = open(&sessions, &interactive());
+        let (_, b) = open(&sessions, &hello_exit_3());
+        wait_until("the one-shot's exit", || b.exited().is_some());
+        sessions.close(a);
+        assert_eq!(sessions.count(), 0);
+        // Starts at 0, each open and each end reported once. The one-shot may
+        // exit before or after the second open is counted, so only the
+        // endpoints and the length are fixed.
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.first(), Some(&0));
+        assert_eq!(seen.last(), Some(&0));
+        assert_eq!(seen.len(), 5, "{seen:?}");
     }
 
     #[test]

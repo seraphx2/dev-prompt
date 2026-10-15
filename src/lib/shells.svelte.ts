@@ -20,6 +20,7 @@ import {
   shellWrite,
 } from "./ipc";
 import { classifyShellKey } from "./shellKeys";
+import type { Repo } from "./types";
 
 /** Nerd Font builds first, so icon-heavy prompts (oh-my-posh, Starship)
  *  render when one is installed; then the stock monospace fonts. */
@@ -75,6 +76,8 @@ const encoder = new TextEncoder();
 export class ShellSession {
   /** The folder the shell runs in, and this session's key. */
   readonly cwd: string;
+  /** The repo it was opened from — for the running-shells list and the header. */
+  readonly repo: Repo;
   /** Shell picked for it; "" = `config.shell` / the platform default. */
   shell = $state("");
   /** What the backend actually started (`pwsh`, `bash`, …). */
@@ -97,8 +100,9 @@ export class ShellSession {
   private pending: Uint8Array[] = [];
   private sending = false;
 
-  constructor(cwd: string, shell: string) {
+  constructor(cwd: string, repo: Repo, shell: string) {
     this.cwd = cwd;
+    this.repo = repo;
     this.shell = shell;
     this.el = document.createElement("div");
     this.el.className = "h-full w-full";
@@ -329,11 +333,12 @@ export class ShellSession {
 /** Every session, keyed by folder. */
 export const shells = new SvelteMap<string, ShellSession>();
 
-/** The session for `cwd`, created (not yet started) when there isn't one. */
-export function shellFor(cwd: string, shell = ""): ShellSession {
+/** The session for `cwd` (in `repo`), created (not yet started) when there
+ *  isn't one. */
+export function shellFor(cwd: string, repo: Repo, shell = ""): ShellSession {
   let s = shells.get(cwd);
   if (!s) {
-    s = new ShellSession(cwd, shell);
+    s = new ShellSession(cwd, repo, shell);
     shells.set(cwd, s);
   }
   return s;
@@ -346,12 +351,33 @@ export function closeShell(cwd: string) {
   s.dispose();
 }
 
+/** `cwd` is `root` or a folder inside it. */
+export function isUnder(cwd: string, root: string): boolean {
+  const r = root.replace(/[\\/]+$/, "");
+  return cwd === r || cwd.startsWith(r + "/") || cwd.startsWith(r + "\\");
+}
+
+/** Where `s` runs relative to its repo, or null at the repo root. */
+export function shellCrumb(s: ShellSession): string | null {
+  const root = s.repo.path;
+  if (s.cwd === root) return null;
+  return isUnder(s.cwd, root) ? s.cwd.slice(root.length).replace(/^[\\/]+/, "") : s.cwd;
+}
+
+/** Every shell in `path` or a folder inside it (a repo's root and sub-projects). */
+export function shellsUnder(path: string): ShellSession[] {
+  return [...shells.values()].filter((s) => isUnder(s.cwd, path));
+}
+
 /** Whether a running shell sits in `path` or a folder inside it. */
 export function hasShellUnder(path: string): boolean {
-  const root = path.replace(/[\\/]+$/, "");
-  for (const [cwd, s] of shells) {
-    if (s.state === "exited") continue;
-    if (cwd === root || cwd.startsWith(root + "/") || cwd.startsWith(root + "\\")) return true;
-  }
-  return false;
+  return shellsUnder(path).some((s) => s.state !== "exited");
+}
+
+export function closeShellsUnder(path: string) {
+  for (const s of shellsUnder(path)) closeShell(s.cwd);
+}
+
+export function closeAllShells() {
+  for (const cwd of [...shells.keys()]) closeShell(cwd);
 }

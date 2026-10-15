@@ -277,6 +277,21 @@ pub fn run() {
                 MenuItem::with_id(app, "tray-show", "Show dev-prompt", true, None::<&str>)?;
             let settings_i =
                 MenuItem::with_id(app, "tray-settings", "Settings…", true, None::<&str>)?;
+            // Clears every Open shell session without opening the overlay —
+            // greyed out while none are running.
+            let shells_i =
+                MenuItem::with_id(app, "tray-close-shells", "Close all shells", false, None::<&str>)?;
+            {
+                let item = shells_i.clone();
+                app.state::<AppState>().shells.on_count_change(move |n| {
+                    let _ = item.set_enabled(n > 0);
+                    let _ = item.set_text(if n > 0 {
+                        format!("Close all shells ({n})")
+                    } else {
+                        "Close all shells".to_string()
+                    });
+                });
+            }
             let quit_i =
                 MenuItem::with_id(app, "tray-quit", "Quit dev-prompt", true, None::<&str>)?;
             let menu = Menu::with_items(
@@ -284,6 +299,8 @@ pub fn run() {
                 &[
                     &show_i,
                     &settings_i,
+                    &PredefinedMenuItem::separator(app)?,
+                    &shells_i,
                     &PredefinedMenuItem::separator(app)?,
                     &quit_i,
                 ],
@@ -304,6 +321,13 @@ pub fn run() {
                         if let Some(w) = app.get_webview_window(OVERLAY_LABEL) {
                             show_overlay(&w);
                             let _ = w.emit("overlay:goto-settings", ());
+                        }
+                    }
+                    // The frontend owns the sessions (and their terminals), so
+                    // it does the closing — the same path as Close shell.
+                    "tray-close-shells" => {
+                        if let Some(w) = app.get_webview_window(OVERLAY_LABEL) {
+                            let _ = w.emit("shells:close-all", ());
                         }
                     }
                     "tray-quit" => app.exit(0),

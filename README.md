@@ -52,7 +52,7 @@ WebView.
 - **Settings screen** — a sidebar of pages (General, Repos, Tools, Apps, the
   rules viewer / tracer / icon list, About) that saves each change as you make
   it. Reachable from the overlay (`Ctrl+,`) or the tray icon.
-- **System tray** — Show / Settings / Quit; the overlay otherwise has no taskbar
+- **System tray** — Show / Settings / Close all shells / Quit; the overlay otherwise has no taskbar
   presence.
 - **In-app auto-update** — checks GitHub Releases, downloads and installs signed
   updates, relaunches. See [`docs/releasing.md`](docs/releasing.md).
@@ -273,11 +273,26 @@ tab. Typing `exit` closes it too. If it exits with an error, the output stays
 up: `Enter` starts it again. Settings ▸ Tools also sets its font — pick a
 [Nerd Font](https://www.nerdfonts.com/) if your prompt uses icons.
 
+**Running shells** — while any are open, a terminal icon with a count sits in
+the footer. Click it, or type `$` in the search box, for a list of every shell
+across all your repos:
+
+| Key                  | Action                                     |
+| -------------------- | ------------------------------------------ |
+| type after `$`       | filter by repo name or folder              |
+| `Enter` / click      | go into that shell                         |
+| `Ctrl+W` / its ✕     | close that shell                           |
+| `Ctrl+Shift+W` / **Close all** | close every shell                |
+
+A repo's right-click menu has **Close shell** while one runs there, and the
+tray icon's **Close all shells** clears them without opening the overlay.
+
 **Right-click** works where it's useful, styled like the rest of the app:
 
 - a **repo** — open its actions, its quick actions (terminal, file manager,
   copy path, open shell), "Set up version control…" when it has none, the
-  actions you use most in that repo, and "Move to Recycle Bin…" (see below);
+  actions you use most in that repo, "Close shell" while one runs there, and
+  "Move to Recycle Bin…" (see below);
 - an **app** in `>` — launch it, show its folder, copy its path;
 - an **action** — run it, or copy the command it would run;
 - the **shell** — copy, paste, clear, restart or close it;
