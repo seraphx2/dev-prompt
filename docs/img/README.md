@@ -21,6 +21,10 @@ centred on it, so the panel grows from the middle as it does on screen. The
 storyboard is `demo()` in `capture.mjs`; `gif.mjs` turns the frames into the
 GIF (one shared palette, identical frames merged).
 
+`0_dev-prompt_demo.mp4` is the same demo as a video (played twice), for places
+that take video but not GIFs. It's made from the GIF with ffmpeg when that's
+installed, and skipped otherwise.
+
 ## Screenshots
 
 `scripts/screenshots/capture.mjs` runs the real frontend in headless Chromium

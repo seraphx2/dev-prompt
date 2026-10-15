@@ -14,6 +14,7 @@
 // Fonts come from the machine running it (the app uses the system UI font and
 // a monospace stack), so take them on Linux to match the AppStream shots.
 
+import { execFileSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -137,6 +138,26 @@ const scenes = [
 // --- the demo GIF --------------------------------------------------------------
 
 const GIF_FILE = "0_dev-prompt_demo.gif";
+const MP4_FILE = "0_dev-prompt_demo.mp4";
+
+/** The demo as an MP4 too, for places that take video but not GIFs (some
+ *  subreddits, social posts). Needs ffmpeg; skipped with a note when it isn't
+ *  installed — the GIF itself never needs it. Two passes, since a video
+ *  player won't loop it the way a GIF does. */
+function gifToMp4(gif, mp4) {
+  try {
+    execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
+  } catch {
+    console.log(`${MP4_FILE}  skipped: ffmpeg isn't installed`);
+    return;
+  }
+  execFileSync("ffmpeg", [
+    "-loglevel", "error", "-y", "-stream_loop", "1", "-i", gif,
+    "-movflags", "+faststart", "-pix_fmt", "yuv420p", "-c:v", "libx264",
+    "-crf", "18", "-r", "30", mp4,
+  ]);
+  console.log(`${MP4_FILE}  ${LARGE.width}×${LARGE.height}, two passes`);
+}
 const GIF_BACKGROUND = [14, 14, 17];
 
 /** Type `text` a key at a time, a frame after each, like someone typing. */
@@ -236,6 +257,7 @@ try {
       await demo(page, gif);
       const { frames, seconds } = await gif.save(join(outDir, GIF_FILE));
       console.log(`${GIF_FILE}  ${LARGE.width}×${LARGE.height}, ${frames} frames, ${seconds.toFixed(1)} s`);
+      gifToMp4(join(outDir, GIF_FILE), join(outDir, MP4_FILE));
     } catch (e) {
       failed++;
       console.error(`${GIF_FILE}  FAILED: ${e.message.split("\n")[0]}`);

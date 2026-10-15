@@ -107,6 +107,11 @@ inside the overlay. Unset, it's `pwsh` (else Windows PowerShell) on Windows and
 your login shell (`$SHELL`) on Linux. The shell's name in its header
 switches a single session to another one.
 
+On Windows, `git-bash` is Git for Windows' bash and `wsl` your default WSL
+distro. They're listed apart because the `bash` on a Windows PATH is usually
+WSL's launcher; plain `bash` is offered only for another bash on PATH (MSYS2,
+Cygwin, …). A `shell: bash` set before keeps meaning what it did.
+
 The same shell wraps a one-shot command in an external terminal, so the window
 stays open and keeps a real console (ANSI colour, a live TTY — tools like
 Claude Code need it); `cmd`, `bash`, `nu`, … are recognised for their "run and

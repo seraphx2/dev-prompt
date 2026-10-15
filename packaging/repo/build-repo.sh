@@ -2,11 +2,12 @@
 #
 # Rebuild the apt + rpm + pacman repository trees under <site> from every package
 # currently in the pools plus any new ones in <artifacts>, then sign all metadata
-# with the repo GPG key. Also drops in the landing page, the signing key, and the
-# Flatpak remote descriptors (the OSTree repo under <site>/flatpak is placed by
-# repo.yml, not here).
+# with the repo GPG key. Also drops in the website (packaging/site/build-site.sh:
+# the product page, its images, and the repository setup page under install/),
+# the signing key, and the Flatpak remote descriptors (the OSTree repo under
+# <site>/flatpak is placed by repo.yml, not here).
 #
-#   build-repo.sh <artifacts-dir> <site-dir> <gpg-key-id>
+#   VERSION=<release> build-repo.sh <artifacts-dir> <site-dir> <gpg-key-id>
 #
 # Run from the repo root (needs packaging/repo/dev-prompt-repo.asc and
 # packaging/flatpak/*.flatpakre{f,po}). <site-dir> is a checkout / worktree of
@@ -21,6 +22,7 @@ set -euo pipefail
 ARTIFACTS=${1:?artifacts dir}
 SITE=${2:?site dir}
 KEYID=${3:-E3C07CD21A9A9BA5}   # repo signing key; overridable for local tests
+VERSION=${VERSION:?VERSION (the release, e.g. 2026.1015.1) — the site links its downloads}
 KEEP=${REPO_KEEP:-10}
 
 repo_root=$(pwd)
@@ -136,7 +138,7 @@ cp "$repo_root/packaging/repo/dev-prompt-repo.asc" "$SITE/dev-prompt.asc"
 cp "$repo_root/packaging/flatpak/dev-prompt.flatpakrepo" "$SITE/dev-prompt.flatpakrepo"
 cp "$repo_root/packaging/flatpak/io.github.seraphx2.devprompt.flatpakref" \
    "$SITE/io.github.seraphx2.devprompt.flatpakref"
-KEYID="$KEYID" "$repo_root/packaging/repo/render-index.sh" > "$SITE/index.html"
+KEYID="$KEYID" "$repo_root/packaging/site/build-site.sh" "$SITE" "$VERSION"
 # Pages: don't run the output through Jekyll
 : > "$SITE/.nojekyll"
 

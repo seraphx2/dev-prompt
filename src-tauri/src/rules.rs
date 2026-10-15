@@ -613,6 +613,49 @@ pub fn auto_terminal_label(config: &Config) -> String {
     basename(&pick_terminal_binary(&resolver).0)
 }
 
+/// Git for Windows' install folder. Found next to the `git` on PATH first
+/// (`<root>\cmd\git.exe`), which covers custom and per-user installs, then
+/// in the standard places.
+#[cfg(windows)]
+fn git_root() -> Option<std::path::PathBuf> {
+    use std::path::{Path, PathBuf};
+    let beside_git = which("git")
+        .and_then(|g| Path::new(&g).parent()?.parent().map(Path::to_path_buf));
+    let standard = ["ProgramFiles", "ProgramFiles(x86)"]
+        .into_iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .map(|pf| PathBuf::from(pf).join("Git"))
+        .chain(std::env::var("LOCALAPPDATA").ok().map(|l| PathBuf::from(l).join("Programs\\Git")));
+    beside_git
+        .into_iter()
+        .chain(standard)
+        .find(|root| root.join("bin\\bash.exe").is_file())
+}
+
+/// Git for Windows' bash ("Git Bash"). Its folder usually isn't on PATH —
+/// the `bash` that is, on a machine with WSL, is WSL's launcher.
+#[cfg(windows)]
+pub fn git_bash() -> Option<String> {
+    git_root().map(|root| root.join("bin\\bash.exe").to_string_lossy().into_owned())
+}
+
+/// Whether a `bash` found on PATH is Git for Windows' own.
+#[cfg(windows)]
+pub fn is_git_bash(path: &str) -> bool {
+    git_root().is_some_and(|root| {
+        path.to_lowercase().starts_with(&root.to_string_lossy().to_lowercase())
+    })
+}
+
+/// WSL's `bash.exe` launchers (System32, and the Store copy under
+/// WindowsApps): a `bash` on PATH that opens a Linux distro, not a Windows
+/// bash. Offered as `wsl` instead, so it can't pass for Git Bash.
+#[cfg(windows)]
+pub fn is_wsl_launcher(path: &str) -> bool {
+    let p = path.to_lowercase().replace('/', "\\");
+    p.ends_with("\\system32\\bash.exe") || p.ends_with("\\windowsapps\\bash.exe")
+}
+
 /// The shell used when nothing is pinned (`config.shell` absent) — `pwsh` if
 /// it's installed, else the legacy Windows PowerShell that's always present.
 /// Feeds the Settings dropdown's "Default (…)" label too, so it names the
@@ -681,6 +724,19 @@ fn shell_wrap(argv: &[String], shell: Option<&str>) -> Vec<String> {
             shell.to_string(),
             "-c".to_string(),
             format!("{}; exec {kind}", join_quoted(argv, sh)),
+        ],
+        "git-bash" => vec![
+            git_bash().unwrap_or_else(|| "bash".to_string()),
+            "-c".to_string(),
+            format!("{}; exec bash", join_quoted(argv, sh)),
+        ],
+        // The default distro's bash, in the Windows folder (WSL maps the cwd).
+        "wsl" => vec![
+            "wsl".to_string(),
+            "-e".to_string(),
+            "bash".to_string(),
+            "-c".to_string(),
+            format!("{}; exec bash", join_quoted(argv, sh)),
         ],
         "nu" => vec![
             shell.to_string(),
@@ -1843,6 +1899,30 @@ mod tests {
             shell_wrap(&spaced, Some("cmd")).last().unwrap(),
             "\"\"C:\\a b\\tool.exe\" run\""
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn wsl_launchers_are_told_apart_from_other_bashes() {
+        assert!(is_wsl_launcher(r"C:\WINDOWS\system32\bash.exe"));
+        assert!(is_wsl_launcher(r"C:\Users\me\AppData\Local\Microsoft\WindowsApps\bash.exe"));
+        assert!(!is_wsl_launcher(r"C:\Program Files\Git\bin\bash.exe"));
+        assert!(!is_wsl_launcher(r"C:\msys64\usr\bin\bash.exe"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn git_bash_and_wsl_wrap_a_command_in_their_own_bash() {
+        let argv = vec!["npm".to_string(), "run".to_string(), "dev".to_string()];
+        let w = shell_wrap(&argv, Some("wsl"));
+        assert_eq!(&w[..4], ["wsl", "-e", "bash", "-c"]);
+        assert_eq!(w[4], "'npm' 'run' 'dev'; exec bash");
+        let g = shell_wrap(&argv, Some("git-bash"));
+        assert_eq!(&g[1..], ["-c", "'npm' 'run' 'dev'; exec bash"]);
+        if let Some(path) = git_bash() {
+            assert_eq!(g[0], path);
+            assert!(is_git_bash(&path));
+        }
     }
 
     #[test]

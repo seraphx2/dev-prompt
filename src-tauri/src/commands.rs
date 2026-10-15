@@ -933,28 +933,36 @@ pub fn list_file_managers(state: State<'_, AppState>) -> Vec<FileManagerOption> 
 /// built-in shell's picker.
 #[tauri::command]
 pub fn list_shells() -> Vec<String> {
-    let mut out: Vec<String> = ["pwsh", "powershell", "cmd", "bash", "zsh", "fish", "nu"]
-        .into_iter()
-        .filter(|name| crate::rules::which(name).is_some())
-        .map(String::from)
-        .collect();
+    let found = |names: &[&str]| -> Vec<String> {
+        names
+            .iter()
+            .filter(|name| crate::rules::which(name).is_some())
+            .map(|name| name.to_string())
+            .collect()
+    };
 
-    // Git-for-Windows bash usually isn't on PATH.
+    // Windows has up to three different bashes, and the one on PATH is
+    // usually WSL's launcher — so each gets its own name: `git-bash` (Git
+    // for Windows, rarely on PATH), `wsl` (the default distro), and plain
+    // `bash` only for another bash on PATH (MSYS2, Cygwin, …).
     #[cfg(windows)]
-    if !out.iter().any(|s| s == "bash") {
-        let git_bash = ["ProgramFiles", "ProgramFiles(x86)"]
-            .into_iter()
-            .filter_map(|b| std::env::var(b).ok())
-            .flat_map(|pf| {
-                ["Git\\bin\\bash.exe", "Git\\usr\\bin\\bash.exe"]
-                    .map(|rel| Path::new(&pf).join(rel))
-            })
-            .any(|p| p.is_file());
-        if git_bash {
+    {
+        use crate::rules::{git_bash, is_git_bash, is_wsl_launcher, which};
+        let mut out = found(&["pwsh", "powershell", "cmd"]);
+        if git_bash().is_some() {
+            out.push("git-bash".to_string());
+        }
+        if which("bash").is_some_and(|p| !is_wsl_launcher(&p) && !is_git_bash(&p)) {
             out.push("bash".to_string());
         }
+        if which("wsl").is_some() {
+            out.push("wsl".to_string());
+        }
+        out.extend(found(&["zsh", "fish", "nu"]));
+        out
     }
-    out
+    #[cfg(not(windows))]
+    found(&["bash", "zsh", "fish", "nu", "pwsh"])
 }
 
 /// The shell used with nothing pinned — names the Settings dropdown's
@@ -1510,6 +1518,20 @@ pub fn system_paths() -> AppResult<SystemPaths> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn shells_name_each_bash_for_what_it_is() {
+        let shells = list_shells();
+        // Never WSL's launcher passing as plain `bash`.
+        if let Some(p) = crate::rules::which("bash") {
+            if crate::rules::is_wsl_launcher(&p) {
+                assert!(!shells.iter().any(|s| s == "bash"), "{shells:?}");
+            }
+        }
+        assert_eq!(shells.iter().any(|s| s == "git-bash"), crate::rules::git_bash().is_some());
+        assert_eq!(shells.iter().any(|s| s == "wsl"), crate::rules::which("wsl").is_some());
+    }
 
     #[test]
     fn only_plain_web_links_open() {
