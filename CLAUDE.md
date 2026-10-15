@@ -54,6 +54,7 @@ npm run check                     # svelte-check (types only)
 npm run build                     # svelte-check + vite build (what CI runs)
 npm run test                      # vitest run, whole suite
 npm run check:tauri               # Tauri npm packages ↔ Rust crates on the same major.minor
+npm run screenshots               # regenerate docs/img/ — demo GIF + stills (headless, fake backend — see scripts/screenshots/)
 npx vitest run src/lib/fuzzy.test.ts   # a single test file
 npx vitest run -t "name substring"     # tests matching a name
 
