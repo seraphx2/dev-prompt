@@ -5,12 +5,14 @@
     "category": "DeveloperTool",
     "linux": {
       "deb": {
+        "recommends": ["libgtk-layer-shell0"],
         "desktopTemplate": "../packaging/linux/dev-prompt.desktop",
         "files": {
           "/usr/share/metainfo/io.github.seraphx2.devprompt.metainfo.xml": "../packaging/linux/io.github.seraphx2.devprompt.metainfo.xml"
         }
       },
       "rpm": {
+        "recommends": ["gtk-layer-shell"],
         "desktopTemplate": "../packaging/linux/dev-prompt.desktop",
         "files": {
           "/usr/share/metainfo/io.github.seraphx2.devprompt.metainfo.xml": "../packaging/linux/io.github.seraphx2.devprompt.metainfo.xml"

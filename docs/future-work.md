@@ -264,6 +264,11 @@ Tracking: [Dependabot alert #1](https://github.com/seraphx2/dev-prompt/security/
   `prompt: true` now means "open the shell here"; `run:` / `{{input}}`
   templates are gone along with `RunCommand.svelte` / `run_command`. Settings
   gained `shell_font` / `shell_font_size`. — 2026-10-14
+- **Running-shells list** — a footer count and the `$` search scope
+  (`ShellList.svelte`) list every shell: jump in, close one (`Ctrl+W`) or all
+  (`Ctrl+Shift+W`); "Close shell" on a repo's right-click menu; a tray "Close
+  all shells (N)" item kept current by `pty::Sessions::on_count_change`.
+  — 2026-10-14
 
 Remaining, hardest-first: #6 task-targets provider, #16 app-launcher phase 2,
 #15 conditional template expansion, #14 (Cargo-workspace / Xcode / Nx-Turbo-

@@ -96,6 +96,25 @@ modules:
   # this module chain expects (CMake installs to /app/lib, not lib64).
   - shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json
 
+  # --- Wayland layer shell ------------------------------------------------
+  # gtk-layer-shell (GTK3): dev-prompt dlopens it to make the overlay a
+  # layer surface, so KDE / wlroots compositors keep it centred (layer.rs).
+  # Not in the GNOME runtime. Only the library — no introspection, vapi,
+  # docs, examples or tests.
+  - name: gtk-layer-shell
+    buildsystem: meson
+    config-opts:
+      - -Dintrospection=false
+      - -Dvapi=false
+      - -Ddocs=false
+      - -Dexamples=false
+      - -Dtests=false
+    sources:
+      - type: git
+        url: https://github.com/wmww/gtk-layer-shell.git
+        tag: v0.10.1
+        commit: fd88ba666c18ff65ea786bf7b2e270d840030817
+
   # --- the app ----------------------------------------------------------
   - name: dev-prompt
     buildsystem: simple

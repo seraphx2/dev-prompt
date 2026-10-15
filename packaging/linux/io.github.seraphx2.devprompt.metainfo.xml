@@ -23,10 +23,20 @@
 
   <description>
     <p>
-      dev-prompt is a global-hotkey overlay that finds the git repositories on
-      your machine and opens them in the editor, terminal, or tool of your
-      choice. Press the hotkey, type a few letters, hit Enter.
+      dev-prompt is a global-hotkey overlay that finds the repositories on your
+      machine and opens each one's action menu: press the hotkey, type a few
+      letters, hit Enter. The menu is built by reading the project — its
+      package.json scripts through the right package manager, cargo, Go,
+      Python, .NET, Docker Compose, sub-projects — and only offers tools that
+      are actually installed.
     </p>
+    <ul>
+      <li>Open a repo in your editor, terminal or file manager, or run its scripts</li>
+      <li>A shell right inside the overlay that keeps running in the background</li>
+      <li>Create a repository with Git, Jujutsu, Mercurial, Breezy or Darcs set up</li>
+      <li>Move a repo to the Trash after checking for unpushed or uncommitted work</li>
+      <li>Type &gt; to launch any installed application instead</li>
+    </ul>
     <p>
       It stays out of the way the rest of the time: no window, a single tray
       icon, and a rules file that maps each project to the actions that make
@@ -70,6 +80,22 @@
     <screenshot>
       <image>https://raw.githubusercontent.com/seraphx2/dev-prompt/main/docs/img/3_dev-prompt_apps.png</image>
       <caption>Type &gt; to switch to an installed-application launcher</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/seraphx2/dev-prompt/main/docs/img/4_dev-prompt_shell.png</image>
+      <caption>Your own shell inside the overlay, still running after you hide it</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/seraphx2/dev-prompt/main/docs/img/5_dev-prompt_shells.png</image>
+      <caption>Every running shell in one list, to jump into or close</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/seraphx2/dev-prompt/main/docs/img/6_dev-prompt_new-repo.png</image>
+      <caption>Create a repository with version control already set up</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/seraphx2/dev-prompt/main/docs/img/7_dev-prompt_remove.png</image>
+      <caption>Move a repo to the Trash, after checking for work that exists only there</caption>
     </screenshot>
   </screenshots>
 

@@ -36,6 +36,25 @@ const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 /// ignore; `TerminateProcess` on Windows is already final.
 const KILL_GRACE: Duration = Duration::from_secs(2);
 
+/// What a session's shell is told about its terminal. Windows programs don't
+/// read TERM, and some (Windows ports of Unix tools) misbehave when it's set,
+/// so it's Linux-only — as in Windows Terminal. COLORTERM only advertises
+/// 24-bit colour, harmless anywhere.
+#[cfg(unix)]
+const SESSION_ENV: &[(&str, &str)] = &[
+    ("TERM", "xterm-256color"),
+    ("COLORTERM", "truecolor"),
+    ("TERM_PROGRAM", "dev-prompt"),
+];
+#[cfg(windows)]
+const SESSION_ENV: &[(&str, &str)] = &[("COLORTERM", "truecolor"), ("TERM_PROGRAM", "dev-prompt")];
+
+/// The locale variables a Flatpak session hands its host shell — the ones
+/// that decide the text encoding, without which line editors miscount
+/// anything beyond ASCII.
+#[cfg(unix)]
+const LOCALE_ENV: &[&str] = &["LANG", "LC_ALL", "LC_CTYPE"];
+
 /// How often the waiter checks on the shell.
 const POLL: Duration = Duration::from_millis(50);
 
@@ -46,6 +65,10 @@ pub struct ShellSpec {
     pub program: String,
     pub args: Vec<String>,
     pub label: String,
+    /// `program` only relays to the real shell elsewhere (`flatpak-spawn
+    /// --host`), so it must leave the terminal for that shell to claim — a
+    /// terminal can be the controlling one of only one session.
+    pub relayed: bool,
 }
 
 struct Session {
@@ -62,9 +85,33 @@ struct Session {
 pub struct Sessions {
     next: AtomicU32,
     live: Mutex<HashMap<u32, Session>>,
+    /// Told the number of live sessions whenever it changes (the tray's
+    /// "Close all shells" item).
+    listener: Mutex<Option<CountListener>>,
 }
 
+type CountListener = Box<dyn Fn(usize) + Send + Sync>;
+
 impl Sessions {
+    /// Call `f` with the live-session count now and after every change.
+    pub fn on_count_change(&self, f: impl Fn(usize) + Send + Sync + 'static) {
+        f(self.count());
+        *self.listener.lock().unwrap() = Some(Box::new(f));
+    }
+
+    pub fn count(&self) -> usize {
+        self.live.lock().unwrap().len()
+    }
+
+    /// Run outside the `live` lock: the listener may take its time (the tray
+    /// hops to the main thread).
+    fn notify(&self) {
+        let n = self.count();
+        if let Some(f) = self.listener.lock().unwrap().as_ref() {
+            f(n);
+        }
+    }
+
     /// Start `shell` in `cwd` on a `cols`×`rows` PTY. Output goes to
     /// `on_data` as raw bytes (UTF-8 and escape codes, possibly split
     /// mid-character — xterm.js reassembles them); `on_exit` fires once, after
@@ -83,13 +130,17 @@ impl Sessions {
         let mut cmd = CommandBuilder::new(&shell.program);
         cmd.args(&shell.args);
         cmd.cwd(cwd);
-        // Windows programs don't read TERM, and some (Windows ports of Unix
-        // tools) misbehave when it's set, so it's Linux-only — as in Windows
-        // Terminal. COLORTERM only advertises 24-bit colour, harmless anywhere.
-        #[cfg(unix)]
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
-        cmd.env("TERM_PROGRAM", "dev-prompt");
+        // Normally the shell leads a new session with this PTY as its
+        // controlling terminal. A relay mustn't take it: the host's session
+        // helper starts the real shell in a session of its own and hands it
+        // the terminal, which fails if the relay already holds it — the shell
+        // then has no job control ("No TTY for interactive shell").
+        if shell.relayed {
+            cmd.set_controlling_tty(false);
+        }
+        for (k, v) in SESSION_ENV {
+            cmd.env(k, v);
+        }
 
         let mut child = pair.slave.spawn_command(cmd)?;
         // The child holds its own copy of the slave end. Ours must go, or the
@@ -112,6 +163,7 @@ impl Sessions {
                 closed_at: Arc::clone(&closed_at),
             },
         );
+        self.notify();
 
         std::thread::Builder::new()
             .name(format!("pty-{id}-write"))
@@ -170,7 +222,10 @@ impl Sessions {
                 // stream; it's already over on Linux unless something the
                 // shell started still holds the terminal.
                 let session = sessions.live.lock().unwrap().remove(&id);
-                drop(session);
+                if session.is_some() {
+                    drop(session);
+                    sessions.notify();
+                }
                 let _ = reader_done.recv_timeout(DRAIN_TIMEOUT);
                 on_exit(code);
             })?;
@@ -201,6 +256,7 @@ impl Sessions {
         let _ = session.killer.kill();
         *session.closed_at.lock().unwrap() = Some(Instant::now());
         drop(session);
+        self.notify();
     }
 
     /// End every session — on app exit, and when a reloaded frontend has
@@ -256,6 +312,7 @@ pub fn shell_spec(choice: Option<&str>, _cwd: &Path) -> ShellSpec {
         program,
         args: args.iter().map(|s| s.to_string()).collect(),
         label,
+        relayed: false,
     }
 }
 
@@ -277,23 +334,12 @@ fn git_bash() -> Option<String> {
 pub fn shell_spec(choice: Option<&str>, cwd: &Path) -> ShellSpec {
     let choice = choice.map(str::trim).filter(|s| !s.is_empty());
     if crate::launch::in_flatpak() {
-        // The shells live on the host. `flatpak-spawn --host` runs one there
-        // with the PTY as its stdio; `--directory=` sets the host-side cwd.
-        // With nothing chosen, the host's own login shell, read from its
-        // `$SHELL` on that side.
-        let mut args = vec!["--host".to_string(), format!("--directory={}", cwd.display())];
-        args.push("--".to_string());
-        let label = match choice {
-            Some(name) => {
-                args.push(name.to_string());
-                shell_label(name)
-            }
-            None => {
-                args.extend(["sh", "-c", "exec \"${SHELL:-/bin/sh}\""].map(String::from));
-                "shell".to_string()
-            }
-        };
-        return ShellSpec { program: "flatpak-spawn".to_string(), args, label };
+        let shell = choice.map(str::to_string).or_else(|| host_login_shell().clone());
+        let locale: Vec<(String, String)> = LOCALE_ENV
+            .iter()
+            .filter_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()).map(|v| (k.to_string(), v)))
+            .collect();
+        return flatpak_shell_spec(shell.as_deref(), cwd, &locale);
     }
     let name = choice
         .map(str::to_string)
@@ -302,7 +348,74 @@ pub fn shell_spec(choice: Option<&str>, cwd: &Path) -> ShellSpec {
         program: crate::rules::which(&name).unwrap_or_else(|| name.clone()),
         args: Vec::new(),
         label: shell_label(&name),
+        relayed: false,
     }
+}
+
+/// Inside the Flatpak sandbox the shells live on the host: `flatpak-spawn
+/// --host` runs one there with the PTY as its stdio. `--directory=` sets the
+/// host-side cwd; `--watch-bus` ends the host shell if dev-prompt goes away
+/// (launch.rs leaves it off on purpose — launched apps should outlive us; a
+/// session shouldn't). `shell` is the one to run — `None` only if even the
+/// host's login shell couldn't be found, when the host's `$SHELL` decides.
+///
+/// The host shell doesn't inherit the sandbox's environment, so the terminal
+/// variables (`SESSION_ENV`) and the user's `locale` go across with `--env`.
+/// Without TERM and a UTF-8 locale, zsh's line editor misplaces the cursor and
+/// draws typing over the prompt.
+#[cfg(unix)]
+fn flatpak_shell_spec(shell: Option<&str>, cwd: &Path, locale: &[(String, String)]) -> ShellSpec {
+    let mut args = vec![
+        "--host".to_string(),
+        "--watch-bus".to_string(),
+        format!("--directory={}", cwd.display()),
+    ];
+    args.extend(SESSION_ENV.iter().map(|(k, v)| format!("--env={k}={v}")));
+    args.extend(locale.iter().map(|(k, v)| format!("--env={k}={v}")));
+    args.push("--".to_string());
+    let label = match shell {
+        Some(name) => {
+            args.push(name.to_string());
+            shell_label(name)
+        }
+        None => {
+            args.extend(["sh", "-c", "exec \"${SHELL:-/bin/sh}\""].map(String::from));
+            "sh".to_string()
+        }
+    };
+    ShellSpec { program: "flatpak-spawn".to_string(), args, label, relayed: true }
+}
+
+/// The host user's login shell, asked of the host once per run — the
+/// sandbox's own `$SHELL` describes the runtime, not the user's machine.
+/// `getent` reads the passwd entry (what a terminal starts); the host's
+/// `$SHELL` is the fallback.
+#[cfg(unix)]
+fn host_login_shell() -> &'static Option<String> {
+    static SHELL: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    SHELL.get_or_init(|| {
+        let out = std::process::Command::new("flatpak-spawn")
+            .args([
+                "--host",
+                "sh",
+                "-c",
+                r#"s=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7); printf %s "${s:-$SHELL}""#,
+            ])
+            .output()
+            .ok()?;
+        let shell = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (out.status.success() && !shell.is_empty()).then_some(shell)
+    })
+}
+
+/// Name of the shell used when none is picked — the Settings dropdown's
+/// "Default (…)" and the label a default session gets.
+#[cfg(unix)]
+pub fn default_shell_name() -> String {
+    if crate::launch::in_flatpak() {
+        return host_login_shell().as_deref().map(shell_label).unwrap_or_else(|| "sh".to_string());
+    }
+    shell_label(&unix_default_shell(std::env::var("SHELL").ok()))
 }
 
 /// The user's login shell from `$SHELL`, else bash, else sh.
@@ -382,6 +495,7 @@ mod tests {
             program: program.to_string(),
             args: args.iter().map(|s| s.to_string()).collect(),
             label: shell_label(program),
+            relayed: false,
         }
     }
 
@@ -452,6 +566,26 @@ mod tests {
     }
 
     #[test]
+    fn the_count_listener_follows_opens_and_closes() {
+        let sessions = Arc::new(Sessions::default());
+        let seen = Arc::new(Mutex::new(Vec::<usize>::new()));
+        let s2 = Arc::clone(&seen);
+        sessions.on_count_change(move |n| s2.lock().unwrap().push(n));
+        let (a, _) = open(&sessions, &interactive());
+        let (_, b) = open(&sessions, &hello_exit_3());
+        wait_until("the one-shot's exit", || b.exited().is_some());
+        sessions.close(a);
+        assert_eq!(sessions.count(), 0);
+        // Starts at 0, each open and each end reported once. The one-shot may
+        // exit before or after the second open is counted, so only the
+        // endpoints and the length are fixed.
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.first(), Some(&0));
+        assert_eq!(seen.last(), Some(&0));
+        assert_eq!(seen.len(), 5, "{seen:?}");
+    }
+
+    #[test]
     fn calls_for_an_unknown_session_fail_cleanly() {
         let sessions = Sessions::default();
         assert!(sessions.write(99, b"x".to_vec()).is_err());
@@ -488,6 +622,37 @@ mod tests {
         // Nothing chosen → the same default `rules::default_shell` names.
         assert_eq!(shell_spec(None, &cwd).label, crate::rules::default_shell());
         assert_eq!(shell_spec(Some("  "), &cwd).label, crate::rules::default_shell());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn flatpak_shells_relay_to_the_host_without_taking_the_terminal() {
+        let cwd = Path::new("/home/u/git/hugo");
+        let locale = [("LANG".to_string(), "en_US.UTF-8".to_string())];
+        let s = flatpak_shell_spec(Some("/usr/bin/fish"), cwd, &locale);
+        assert_eq!(s.program, "flatpak-spawn");
+        assert!(s.relayed, "the relay must leave the terminal to the host shell");
+        assert_eq!(
+            s.args,
+            [
+                "--host",
+                "--watch-bus",
+                "--directory=/home/u/git/hugo",
+                // The host shell inherits none of the sandbox's environment.
+                "--env=TERM=xterm-256color",
+                "--env=COLORTERM=truecolor",
+                "--env=TERM_PROGRAM=dev-prompt",
+                "--env=LANG=en_US.UTF-8",
+                "--",
+                "/usr/bin/fish",
+            ]
+        );
+        assert_eq!(s.label, "fish"); // a real name for the picker, never "shell"
+        // Login shell unknown: the host's $SHELL, started through sh.
+        let s = flatpak_shell_spec(None, cwd, &[]);
+        let at = s.args.iter().position(|a| a == "--").unwrap();
+        assert_eq!(&s.args[at + 1..at + 3], ["sh", "-c"]);
+        assert_eq!(s.label, "sh");
     }
 
     #[cfg(unix)]

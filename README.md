@@ -7,7 +7,8 @@ hands you its actual scripts, builds, and sub-packages.**
 
 Press a global shortcut from anywhere and a fuzzy-searchable list of every
 repository under your code folders appears. Type a few letters, hit `Enter`, and
-you're in a terminal at its root.
+that repo's action menu is up: open it in your editor or terminal, run one of
+its scripts, or drop into a shell right inside the overlay.
 
 Most launchers stop at "open the folder." dev-prompt opens the action menu it
 built by _inspecting the project_: the exact `package.json` scripts it defines
@@ -18,8 +19,10 @@ or `pnpm start`.
 
 It adapts to your machine — actions for tools you haven't installed simply don't
 appear — and the entire editor-and-toolchain brain is a YAML file you can extend
-in a few lines. Appears instantly, vanishes the moment it loses focus, never
-touches your taskbar.
+in a few lines. It looks after the repos themselves too: create one with version
+control already set up, put an existing folder under version control, or move
+one to the Recycle Bin after it checks what would be lost. Appears instantly,
+vanishes the moment it loses focus, never touches your taskbar.
 
 Cross-platform, built with **Tauri v2** (Rust) + **Svelte 5** + **Tailwind
 CSS** — a small single binary with no runtime dependencies beyond the system
@@ -31,7 +34,9 @@ WebView.
   `Ctrl/Cmd+Backslash` (rebindable via a click-to-record field in Settings).
 - **Multi-root scan + cache** — walks the directories you list, respects
   `.gitignore`, collapses nested repos, caches the result for instant startup and
-  refreshes in the background when stale.
+  refreshes in the background when stale. A folder watcher keeps the list
+  current while the app runs: a repo you clone or delete appears or goes on its
+  own.
 - **Fuzzy search** — fzf-style ranking over repo name and path, with match
   highlighting.
 - **Context detection** — on selecting a repo it inspects the tree (root plus
@@ -46,13 +51,23 @@ WebView.
   drill-in submenus. Actions gracefully disappear when the tool they need isn't
   installed.
 - **Built-in shell** — **Open shell** (`Ctrl+R` in the action menu) opens
-  your own shell (pwsh, bash, nu, …) right in the overlay, at the repo. It
-  keeps running when you hide the overlay, so a dev server stays up and the
-  hotkey brings you straight back to it.
+  your own shell (pwsh, bash, zsh, fish, nu, …) right in the overlay, at the
+  repo. It keeps running when you hide the overlay, so a dev server stays up and
+  the hotkey brings you straight back to it. Every running shell is one `$` (or
+  a footer click) away, to jump into or close.
+- **Repo management** — **New repository** (`Ctrl+Shift+N`) creates a folder
+  with Git, Jujutsu, Mercurial, Breezy or Darcs set up; **Set up version
+  control…** does the same for a folder that has none; **Move to Recycle Bin**
+  checks for unpushed commits and uncommitted work first, and offers Undo.
+- **App launcher** — type `>` to search your installed applications instead of
+  repos (Start Menu, Store and installed programs on Windows; `.desktop`
+  entries on Linux), most-used first.
+- **Right-click menus** — on repos, apps, actions and the shell: the useful
+  options for each, styled like the rest of the app.
 - **Settings screen** — a sidebar of pages (General, Repos, Tools, Apps, the
   rules viewer / tracer / icon list, About) that saves each change as you make
   it. Reachable from the overlay (`Ctrl+,`) or the tray icon.
-- **System tray** — Show / Settings / Quit; the overlay otherwise has no taskbar
+- **System tray** — Show / Settings / Close all shells / Quit; the overlay otherwise has no taskbar
   presence.
 - **In-app auto-update** — checks GitHub Releases, downloads and installs signed
   updates, relaunches. See [`docs/releasing.md`](docs/releasing.md).
@@ -167,7 +182,7 @@ installed-app list (`>` scope) is cached alongside it at
 |                   | Status                                                                                                                                                                                                                                                                                                                     |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Windows 10/11** | Built, packaged (NSIS installer + portable zip), and tested. Acrylic blur + rounded corners, Windows Terminal integration, Visual Studio / Rider detection.                                                                                                                                                                |
-| **Linux**         | Same codebase, compiles. Built and packaged (`deb` / `rpm` / `AppImage` + a signed apt/dnf/pacman repo and a self-hosted Flatpak) by the release workflow; AppImage installs auto-update, everything else updates through its package manager. Hotkey works on X11; Wayland needs the XDG global-shortcuts portal (tray-click fallback otherwise). The `>` app launcher reads freedesktop `.desktop` entries (theme icons, `gtk-launch`). Terminal-command actions need per-emulator working-dir flags (in progress) — plain "open a terminal" works. Panel is translucent but unblurred (no compositor backing yet), so it paints a little more solid than on Windows. |
+| **Linux**         | Same codebase, compiles. Built and packaged (`deb` / `rpm` / `AppImage` + a signed apt/dnf/pacman repo and a self-hosted Flatpak) by the release workflow; AppImage installs auto-update, everything else updates through its package manager. Hotkey works on X11; Wayland needs the XDG global-shortcuts portal (tray-click fallback otherwise). The `>` app launcher reads freedesktop `.desktop` entries (theme icons, `gtk-launch`). Terminal-command actions need per-emulator working-dir flags (in progress) — plain "open a terminal" works. Panel is translucent but unblurred (no compositor backing yet), so it paints a little more solid than on Windows. On Wayland the overlay is a layer-shell surface, kept centred by the compositor (KDE, Sway, Hyprland, …), when `gtk-layer-shell` is installed (the packages recommend it; the Flatpak bundles it); GNOME, which lacks layer shell, places it as a regular window. |
 
 Windows and Linux are the only supported targets — see [`CLAUDE.md`](CLAUDE.md).
 The architecture is still platform-neutral where it costs nothing — program
@@ -215,16 +230,22 @@ via your desktop's session settings.)
 
 **Repo list**
 
+<img src="docs/img/1_dev-prompt_repos.png" width="760" alt="The repo list: every repository under your code folders, with its version control and project files">
+
 | Key                  | Action                                                |
 | -------------------- | ----------------------------------------------------- |
 | type                 | fuzzy-filter repos                                    |
 | `Up` / `Down`        | move selection                                        |
 | `Enter`              | open the action menu for the selected repo            |
+| `>`                  | search installed apps instead (see below)             |
+| `$`                  | list the running shells (see below)                   |
 | `Ctrl+R`             | force a rescan                                        |
 | `Ctrl+Shift+N`       | create a new repository (see below)                   |
 | `Delete`             | clear the query                                       |
 | `Ctrl+,`             | open Settings                                         |
 | `Esc` / click away   | hide the overlay                                      |
+
+<img src="docs/img/6_dev-prompt_new-repo.png" width="760" alt="The New repository form: a name, the folder it goes in, and the version control to set up">
 
 **New repository** (`Ctrl+Shift+N`) creates a folder in one of your roots and
 sets up version control in it — Git, Jujutsu, Mercurial, Breezy or Darcs,
@@ -243,12 +264,22 @@ why, and how to add it anyway.
 
 **Action menu**
 
-| Key     | Action                                               |
-| ------- | ---------------------------------------------------- |
-| type    | filter actions (reaches into sub-projects)           |
-| `Enter` | run the selected action, or drill into a sub-project |
-| `Tab`   | drill into the selected sub-project                  |
-| `Esc`   | step back one level (sub-project → menu → repo list) |
+<img src="docs/img/2_dev-prompt_actions.png" width="760" alt="A repo's action menu: quick actions along the top, then editors, tools and the project's own scripts">
+
+| Key      | Action                                               |
+| -------- | ---------------------------------------------------- |
+| type     | filter actions (reaches into sub-projects)           |
+| `Enter`  | run the selected action, or drill into a sub-project |
+| `Tab`    | drill into the selected sub-project                  |
+| `Ctrl+T` | open in your terminal app                            |
+| `Ctrl+E` | show in your file manager                            |
+| `Ctrl+C` | copy the path                                        |
+| `Ctrl+R` | open a shell in the overlay (see below)              |
+| `Esc`    | step back one level (sub-project → menu → repo list) |
+
+The four quick actions also sit as buttons along the top of the menu.
+
+<img src="docs/img/4_dev-prompt_shell.png" width="1000" alt="A shell open inside the overlay, running git log and a Hugo dev server">
 
 **Open shell** (`Ctrl+R` in the action menu, or a repo's right-click menu)
 opens a shell inside the overlay, in that repo — your own shell, with your
@@ -273,11 +304,35 @@ tab. Typing `exit` closes it too. If it exits with an error, the output stays
 up: `Enter` starts it again. Settings ▸ Tools also sets its font — pick a
 [Nerd Font](https://www.nerdfonts.com/) if your prompt uses icons.
 
+**Running shells** — while any are open, a terminal icon with a count sits in
+the footer. Click it, or type `$` in the search box, for a list of every shell
+across all your repos:
+
+<img src="docs/img/5_dev-prompt_shells.png" width="760" alt="The running-shells list: three shells in different repos, each with a close button, and Close all">
+
+| Key                  | Action                                     |
+| -------------------- | ------------------------------------------ |
+| type after `$`       | filter by repo name or folder              |
+| `Enter` / click      | go into that shell                         |
+| `Ctrl+W` / its ✕     | close that shell                           |
+| `Ctrl+Shift+W` / **Close all** | close every shell                |
+
+A repo's right-click menu has **Close shell** while one runs there, and the
+tray icon's **Close all shells** clears them without opening the overlay.
+
+<img src="docs/img/3_dev-prompt_apps.png" width="760" alt="The app launcher: installed applications, most-used first">
+
+**Apps** — a leading `>` in the search box swaps the repo list for your
+installed applications: type to filter, `Enter` launches, most-used first. A
+second hotkey (Settings ▸ General) opens straight into it. Settings ▸ Apps adds
+folders to index or turns the whole scope off.
+
 **Right-click** works where it's useful, styled like the rest of the app:
 
 - a **repo** — open its actions, its quick actions (terminal, file manager,
   copy path, open shell), "Set up version control…" when it has none, the
-  actions you use most in that repo, and "Move to Recycle Bin…" (see below);
+  actions you use most in that repo, "Close shell" while one runs there, and
+  "Move to Recycle Bin…" (see below);
 - an **app** in `>` — launch it, show its folder, copy its path;
 - an **action** — run it, or copy the command it would run;
 - the **shell** — copy, paste, clear, restart or close it;
@@ -286,6 +341,8 @@ up: `Enter` starts it again. Settings ▸ Tools also sets its font — pick a
 Anywhere else right-click does nothing — the browser's own Back / Reload /
 Print menu never shows. (In a dev build, Shift+right-click still opens it, for
 Inspect.)
+
+<img src="docs/img/7_dev-prompt_remove.png" width="760" alt="Move to Trash, listing the uncommitted changes, unpushed commits and stash that exist only in this folder">
 
 **Move to Recycle Bin** (Trash on Linux) — from a repo's right-click menu or
 its action menu — never deletes outright: the folder goes to the bin, Undo
@@ -320,28 +377,39 @@ just data in `default_config.yaml` — no Rust. See
 
 ```
 src/                        Svelte frontend (overlay UI)
-  App.svelte                repo list + action menu + settings, window-level keys
+  App.svelte                repo / app / shell lists, action menu, screens, window-level keys
   lib/ipc.ts                typed wrappers over Tauri commands + events
   lib/fuzzy.ts              fzf-style scorer
+  lib/shells.svelte.ts      built-in shell sessions (xterm.js), one per folder
+  lib/shellKeys.ts          which keys go to the shell and which to the app
   lib/updater.ts            auto-update check / install
-  lib/components/           SearchInput, ResultList, ResultRow, ActionMenu,
-                            Highlight, ClearButton, …
+  lib/components/           SearchInput, ResultList, AppList, ShellList, ActionMenu,
+                            Shell, NewRepo, RemoveFolder, ContextMenu, …
   lib/components/settings/  the Settings shell (sidebar + autosave) and one
                             component per page
 src-tauri/                  Rust backend
   src/config.rs             config schema, load/merge, path expansion
   src/default_config.yaml   bundled markers / programs / rules / universal
   src/scan.rs               directory walk -> Vec<Repo>, discovery globset
+  src/watch.rs              folder watcher: rescans when repos come or go
   src/inspect.rs            per-repo context (projects, manifests, compose)
   src/rules.rs              rule engine: program resolver, templates, providers
-  src/cache.rs              repos.json read/write, staleness, merge
+  src/cache.rs              repos.json / apps.json read/write, staleness, merge
   src/index.rs              nucleo fuzzy ranking
+  src/apps.rs               installed-app discovery for the > scope
+  src/app_watch.rs          app watcher: Start Menu / registry / .desktop changes
+  src/provision.rs          New repository / Set up version control
+  src/removal.rs            Move to Recycle Bin: the at-risk check, Undo
+  src/pty.rs                built-in shell: the user's shell in a pseudo-terminal
   src/launch.rs             detached process spawning
+  src/layer.rs              Wayland: the overlay as a centred layer-shell surface
   src/commands.rs           #[tauri::command] surface + shared state
   src/lib.rs                plugin wiring, window setup, hotkey, tray
   src/rules_template.yaml    scaffold written to the user's rules.yaml
 scripts/version.mjs         CalVer generator for releases
-.github/workflows/          release.yml
+packaging/                  Linux packaging: .desktop / AppStream, PKGBUILDs,
+                            Flatpak manifest, the apt/rpm/pacman repo builder
+.github/workflows/          CI, release, the package repo, dev sync
 docs/                       configuration.md, rules-engine.md, releasing.md, future-work.md
 ```
 
@@ -350,7 +418,11 @@ docs/                       configuration.md, rules-engine.md, releasing.md, fut
 ```sh
 cd src-tauri && cargo test    # config merge/expansion, discovery,
                               # nested-repo collapse, cache staleness,
-                              # rule evaluation, fuzzy ranking
+                              # rule evaluation, fuzzy ranking, the watchers
+                              # against real OS events, shell sessions in a
+                              # real pseudo-terminal
+npm run test                  # frontend logic (fuzzy, hotkeys, shell keys,
+                              # settings model)
 npm run check                 # svelte-check (types)
 ```
 

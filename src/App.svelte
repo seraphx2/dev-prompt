@@ -5,6 +5,7 @@
   import AppList from "./lib/components/AppList.svelte";
   import ActionMenu from "./lib/components/ActionMenu.svelte";
   import Shell from "./lib/components/Shell.svelte";
+  import ShellList from "./lib/components/ShellList.svelte";
   import NewRepo from "./lib/components/NewRepo.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
   import RemoveFolder from "./lib/components/RemoveFolder.svelte";
@@ -22,6 +23,7 @@
     listShells,
     listRepos,
     onAppsUpdated,
+    onCloseAllShells,
     onGotoSettings,
     onOverlayHidden,
     onOverlayShown,
@@ -51,7 +53,17 @@
   import { fuzzyScore } from "./lib/fuzzy";
   import { icons } from "./lib/icons";
   import { upd, pollUpdates } from "./lib/updateStore.svelte";
-  import { closeShell, setShellFont, shellFor, shells } from "./lib/shells.svelte";
+  import {
+    closeAllShells,
+    closeShell,
+    closeShellsUnder,
+    setShellFont,
+    shellCrumb as crumbOf,
+    shellFor,
+    shells,
+    shellsUnder,
+    type ShellSession,
+  } from "./lib/shells.svelte";
 
   const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -101,8 +113,11 @@
   let appsEnabled = $state(true);
   getConfig().then((c) => (appsEnabled = c.apps?.enabled ?? true));
   const appScope = $derived(appsEnabled && query.startsWith(">"));
+  // A leading "$" lists the running shells instead (the footer's shell count
+  // opens the same list).
+  const shellScope = $derived(!appScope && query.startsWith("$"));
   const term = $derived(
-    appScope ? query.slice(1).replace(/^\s+/, "") : query.trim(),
+    appScope || shellScope ? query.slice(1).replace(/^\s+/, "") : query.trim(),
   );
 
   type AppHit = { app: AppEntry; positions: number[] };
@@ -133,8 +148,26 @@
     return scored.map(({ app, positions }) => ({ app, positions }));
   });
 
+  type ShellHit = { session: ShellSession; positions: number[] };
+  const filteredShells = $derived.by<ShellHit[]>(() => {
+    if (!shellScope) return [];
+    const all = [...shells.values()].sort((a, b) =>
+      a.repo.name.localeCompare(b.repo.name) || a.cwd.localeCompare(b.cwd),
+    );
+    const q = term;
+    if (!q) return all.map((session) => ({ session, positions: [] }));
+    const scored: (ShellHit & { score: number })[] = [];
+    for (const session of all) {
+      const onName = fuzzyScore(q, session.repo.name);
+      if (onName) scored.push({ session, positions: onName.positions, score: onName.score });
+      else if (fuzzyScore(q, session.cwd)) scored.push({ session, positions: [], score: -1e6 });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored.map(({ session, positions }) => ({ session, positions }));
+  });
+
   const activeCount = $derived(
-    appScope ? filteredApps.length : results.length,
+    appScope ? filteredApps.length : shellScope ? filteredShells.length : results.length,
   );
 
   // Keep the selection inside whichever list is on screen.
@@ -155,11 +188,7 @@
   let shellCwd = $state<string | null>(null);
   const activeShell = $derived(shellCwd ? shells.get(shellCwd) : undefined);
   /** The shell's sub-folder, when it isn't running at the repo root. */
-  const shellCrumb = $derived.by(() => {
-    const root = activeRepo?.repo.path;
-    if (!shellCwd || !root || shellCwd === root) return null;
-    return shellCwd.startsWith(root) ? shellCwd.slice(root.length).replace(/^[\\/]+/, "") : shellCwd;
-  });
+  const shellCrumb = $derived(activeShell ? crumbOf(activeShell) : null);
   /** Set while the new-repo screen is setting up an existing folder (opened
    *  from the action menu) rather than creating a new one. */
   let setupTarget = $state<ScoredRepo | null>(null);
@@ -462,6 +491,12 @@
           ["Enter", "launch"],
           ["Esc", "close"],
         ]
+      : mode === "repo-list" && shellScope
+      ? [
+          ["Enter", "open"],
+          ["Ctrl+W", "close"],
+          ["Ctrl+Shift+W", "close all"],
+        ]
       : mode === "repo-list"
       ? [
           ["Up/Down", "move"],
@@ -526,6 +561,7 @@
   const noRepos = $derived(
     mode === "repo-list" &&
       !appScope &&
+      !shellScope &&
       !scanning &&
       query.trim() === "" &&
       results.length === 0,
@@ -544,7 +580,7 @@
     // search here matches nothing and would blank `results` + reset `selected`,
     // yanking the app highlight mid-navigation. Guard here so every caller
     // (the query $effect, loadInitial, rescan, onReposUpdated) is covered.
-    if (appScope) return;
+    if (appScope || shellScope) return;
     const seq = ++searchSeq;
     const keep = keepSelection ? results[selected]?.repo.path : undefined;
     const scored = await searchRepos(query);
@@ -562,7 +598,7 @@
   $effect(() => {
     void query;
     untrack(() => {
-      if (appScope) selected = 0;
+      if (appScope || shellScope) selected = 0;
       else void refresh(false);
     });
   });
@@ -701,9 +737,37 @@
    *  sub-project's) or the repo root. Reopens the running one when there is. */
   function openShell(entry: ScoredRepo, action: Action) {
     const cwd = action.cwd || entry.repo.path;
-    shellFor(cwd);
+    shellFor(cwd, entry.repo);
     shellCwd = cwd;
     mode = "shell";
+  }
+
+  /** Into a shell from the running-shells list; Back returns to that list. */
+  function resumeShell(s: ShellSession) {
+    activeRepo = { repo: s.repo, score: 0, matchIndices: [] };
+    openedFromList = true;
+    shellCwd = s.cwd;
+    mode = "shell";
+  }
+
+  /** The running-shells list — the `$` scope of the search box. */
+  function openShellList() {
+    closeCtx();
+    backToList();
+    query = "$";
+    selected = 0;
+    void tick().then(() => search?.focus(false));
+  }
+
+  function openShellRowMenu(e: MouseEvent, s: ShellSession) {
+    if (wantsNative(e)) return;
+    showCtx(e, [
+      { kind: "header", label: s.repo.name },
+      { kind: "item", label: "Open shell", icon: "run", run: () => resumeShell(s) },
+      { kind: "item", label: "Restart shell", icon: "terminal", run: () => void s.restart() },
+      { kind: "separator" },
+      { kind: "item", label: "Close shell", icon: "terminal", danger: true, run: () => closeShell(s.cwd) },
+    ]);
   }
 
   // Back from the shell (which keeps running): to the list or action menu it
@@ -819,6 +883,15 @@
   }
 
   function onListKeydown(e: KeyboardEvent) {
+    if (shellScope && e.ctrlKey && !e.altKey && e.key.toLowerCase() === "w") {
+      e.preventDefault();
+      if (e.shiftKey) closeAllShells();
+      else {
+        const hit = filteredShells[selected];
+        if (hit) closeShell(hit.session.cwd);
+      }
+      return;
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       selected = Math.min(selected + 1, activeCount - 1);
@@ -830,6 +903,9 @@
       if (appScope) {
         const hit = filteredApps[selected];
         if (hit) runAppAndHide(hit.app);
+      } else if (shellScope) {
+        const hit = filteredShells[selected];
+        if (hit) resumeShell(hit.session);
       } else if (results[selected]) {
         openActions(results[selected]);
       }
@@ -1025,6 +1101,17 @@
       { kind: "header", label: entry.repo.name },
       { kind: "item", label: "Open actions", icon: "run", run: () => void openActions(entry) },
     ];
+    // A shell left running here (or in a sub-project) — close it from the list.
+    const live = shellsUnder(entry.repo.path).length;
+    if (live) {
+      head.push({
+        kind: "item",
+        label: live === 1 ? "Close shell" : `Close ${live} shells`,
+        icon: "terminal",
+        danger: true,
+        run: () => closeShellsUnder(entry.repo.path),
+      });
+    }
     const item = (a: Action): Extract<CtxItem, { kind: "item" }> => ({
       kind: "item",
       label: a.label,
@@ -1183,6 +1270,9 @@
     } else if (appScope) {
       if (back) hideOverlay();
       else if (filteredApps[selected]) runAppAndHide(filteredApps[selected].app);
+    } else if (shellScope) {
+      if (back) hideOverlay();
+      else if (filteredShells[selected]) resumeShell(filteredShells[selected].session);
     } else {
       if (back) hideOverlay();
       else if (results[selected]) openActions(results[selected]);
@@ -1263,6 +1353,8 @@
       }),
     );
     unlisteners.push(onGotoSettings(() => openSettings()));
+    // The tray's "Close all shells".
+    unlisteners.push(onCloseAllShells(closeAllShells));
 
     // A reloaded webview has lost track of any shells it started; end them.
     void shellCloseAll().catch(() => {});
@@ -1313,11 +1405,36 @@
       bind:value={query}
       placeholder={appScope
         ? "Search apps…"
-        : appsEnabled
-          ? "Search repos…    › for apps"
-          : "Search repos…"}
+        : shellScope
+          ? "Search shells…"
+          : [
+              "Search repos…",
+              appsEnabled ? "› for apps" : "",
+              shells.size ? "$ for shells" : "",
+            ]
+              .filter(Boolean)
+              .join("    ")}
     />
-    {#if appScope}
+    {#if shellScope}
+      <ShellList
+        entries={filteredShells}
+        total={shells.size}
+        {selected}
+        onselect={(i) => (selected = i)}
+        onactivate={(i) => {
+          selected = i;
+          if (filteredShells[i]) resumeShell(filteredShells[i].session);
+        }}
+        onclose={(i) => {
+          if (filteredShells[i]) closeShell(filteredShells[i].session.cwd);
+        }}
+        oncloseall={closeAllShells}
+        oncontext={(i, e) => {
+          selected = i;
+          if (filteredShells[i]) openShellRowMenu(e, filteredShells[i].session);
+        }}
+      />
+    {:else if appScope}
       <AppList
         entries={filteredApps}
         {selected}
@@ -1410,7 +1527,7 @@
     bind:this={shellView}
     session={activeShell}
     visible={mode === "shell"}
-    repoName={activeRepo?.repo.name ?? ""}
+    repoName={activeShell?.repo.name ?? ""}
     crumb={shellCrumb}
     onback={shellBack}
     onshellmenu={openShellPicker}
@@ -1487,6 +1604,19 @@
             {@render glyph("folder")}{counts.folders}
           </span>
         </span>
+      {/if}
+      {#if shells.size}
+        <button
+          type="button"
+          onclick={openShellList}
+          title="Shells left running — click to see and close them ($ in the search box)"
+          class="inline-flex shrink-0 items-center gap-1 rounded-[3px] px-1 tabular-nums text-sky-300/90
+                 hover:bg-white/10 hover:text-sky-200"
+        >
+          <svg class="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
+            {@html icons.terminal.raw}
+          </svg>{shells.size}
+        </button>
       {/if}
       {#if showAppCount}
         <span

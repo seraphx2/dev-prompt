@@ -21,6 +21,8 @@ mod gowork;
 mod gradle;
 mod index;
 mod inspect;
+#[cfg(target_os = "linux")]
+mod layer;
 mod launch;
 mod maven;
 mod provision;
@@ -50,6 +52,15 @@ fn show_overlay_scoped(window: &WebviewWindow, scope: &str) {
     let _ = window.show();
     let _ = window.set_focus();
     let _ = window.emit("overlay:shown", scope);
+}
+
+/// Whether the compositor positions the overlay (a Wayland layer surface —
+/// see layer.rs), so moving it ourselves is pointless.
+pub(crate) fn overlay_is_layer_surface() -> bool {
+    #[cfg(target_os = "linux")]
+    return layer::active();
+    #[cfg(not(target_os = "linux"))]
+    false
 }
 
 fn show_overlay(window: &WebviewWindow) {
@@ -237,6 +248,15 @@ pub fn run() {
                 .get_webview_window(OVERLAY_LABEL)
                 .expect("overlay window is defined in tauri.conf.json");
 
+            // Wayland ignores an app's own window placement; a layer surface is
+            // centred by the compositor instead. Has to happen before the
+            // window is first shown (the first-run show is further down).
+            #[cfg(target_os = "linux")]
+            match layer::init(&window) {
+                Ok(()) => eprintln!("overlay: Wayland layer surface (centred by the compositor)"),
+                Err(why) => eprintln!("overlay: regular window — {why}"),
+            }
+
             apply_overlay_effects(&window);
 
             // Taskbar presence follows the `dismiss` setting (see the fn docs).
@@ -277,6 +297,21 @@ pub fn run() {
                 MenuItem::with_id(app, "tray-show", "Show dev-prompt", true, None::<&str>)?;
             let settings_i =
                 MenuItem::with_id(app, "tray-settings", "Settings…", true, None::<&str>)?;
+            // Clears every Open shell session without opening the overlay —
+            // greyed out while none are running.
+            let shells_i =
+                MenuItem::with_id(app, "tray-close-shells", "Close all shells", false, None::<&str>)?;
+            {
+                let item = shells_i.clone();
+                app.state::<AppState>().shells.on_count_change(move |n| {
+                    let _ = item.set_enabled(n > 0);
+                    let _ = item.set_text(if n > 0 {
+                        format!("Close all shells ({n})")
+                    } else {
+                        "Close all shells".to_string()
+                    });
+                });
+            }
             let quit_i =
                 MenuItem::with_id(app, "tray-quit", "Quit dev-prompt", true, None::<&str>)?;
             let menu = Menu::with_items(
@@ -284,6 +319,8 @@ pub fn run() {
                 &[
                     &show_i,
                     &settings_i,
+                    &PredefinedMenuItem::separator(app)?,
+                    &shells_i,
                     &PredefinedMenuItem::separator(app)?,
                     &quit_i,
                 ],
@@ -304,6 +341,13 @@ pub fn run() {
                         if let Some(w) = app.get_webview_window(OVERLAY_LABEL) {
                             show_overlay(&w);
                             let _ = w.emit("overlay:goto-settings", ());
+                        }
+                    }
+                    // The frontend owns the sessions (and their terminals), so
+                    // it does the closing — the same path as Close shell.
+                    "tray-close-shells" => {
+                        if let Some(w) = app.get_webview_window(OVERLAY_LABEL) {
+                            let _ = w.emit("shells:close-all", ());
                         }
                     }
                     "tray-quit" => app.exit(0),

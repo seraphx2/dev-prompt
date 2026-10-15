@@ -104,13 +104,19 @@ createrepo_c "$SITE/rpm"
     echo "pacman: no packages in the pool yet — skipping"
     exit 0
   fi
+  # The db holds one entry per package name, and `repo-add` lets each package
+  # it's given replace the last — older or not. So give it only the newest, by
+  # version (`sort -V`, as `prune` uses), never by the glob's alphabetical
+  # order: that ranks 2026.918.1 above 2026.1014.2 and once pinned the db there.
+  newest=$(printf '%s\n' "${pkgs[@]}" | sort -V | tail -n 1)
+  echo "pacman: db lists $newest"
   rm -f dev-prompt.db* dev-prompt.files*
   if command -v repo-add >/dev/null; then
-    repo-add dev-prompt.db.tar.gz "${pkgs[@]}"
+    repo-add dev-prompt.db.tar.gz "$newest"
   else
     # `repo-add` ships in the `pacman` package, already present in the image.
     docker run --rm -v "$PWD:/a" -w /a archlinux:latest \
-      repo-add dev-prompt.db.tar.gz "${pkgs[@]}"
+      repo-add dev-prompt.db.tar.gz "$newest"
   fi
   # GitHub Pages doesn't serve symlinks — materialise the names pacman fetches
   # ("$repo.db", "$repo.files") as real files.
