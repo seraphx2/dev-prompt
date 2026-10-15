@@ -215,6 +215,8 @@ jobs:
           tar -xf flatpak-in/flatpak-repo.tar -C site/flatpak
 
       - name: Rebuild repository
+        env:
+          VERSION: ${{ steps.v.outputs.value }}   # the site's download links
         run: packaging/repo/build-repo.sh artifacts site E3C07CD21A9A9BA5
 
       - name: Publish gh-pages

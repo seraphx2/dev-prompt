@@ -26,7 +26,7 @@ vanishes the moment it loses focus, never touches your taskbar.
 
 Cross-platform, built with **Tauri v2** (Rust) + **Svelte 5** + **Tailwind
 CSS** — a small single binary with no runtime dependencies beyond the system
-WebView.
+WebView. Website: **[seraphx2.github.io/dev-prompt](https://seraphx2.github.io/dev-prompt/)**.
 
 ## What it does
 
@@ -408,7 +408,8 @@ src-tauri/                  Rust backend
   src/rules_template.yaml    scaffold written to the user's rules.yaml
 scripts/version.mjs         CalVer generator for releases
 packaging/                  Linux packaging: .desktop / AppStream, PKGBUILDs,
-                            Flatpak manifest, the apt/rpm/pacman repo builder
+                            Flatpak manifest, the apt/rpm/pacman repo builder,
+                            and the website (packaging/site/)
 .github/workflows/          CI, release, the package repo, dev sync
 docs/                       configuration.md, rules-engine.md, releasing.md, future-work.md
 ```

@@ -78,7 +78,7 @@ Jobs:
      not meaningful).
 
 **Built:** `packaging/repo/build-repo.sh` (ingest → prune → apt + rpm + pacman
-metadata → sign → index), `packaging/repo/render-index.sh` (the landing page),
+metadata → sign → index), `packaging/repo/render-index.sh` (the repository setup page — now at `/install/`; the site's front page is `packaging/site/`),
 `.github/workflows/repo.yml`. `build-repo.sh` is runnable locally against a dir
 of downloaded `v*` artifacts (apt-ftparchive / createrepo_c must be installed;
 `repo-add` falls back to `docker run archlinux`).

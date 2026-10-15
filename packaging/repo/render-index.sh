@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Emit the landing page for https://seraphx2.github.io/dev-prompt/ on stdout.
+# Emit the package-repository setup page (served at
+# https://seraphx2.github.io/dev-prompt/install/) on stdout; the site's front
+# page is packaging/site/index.html. Links are absolute — this page lives a
+# folder down from the files it points at.
 # Env: KEYID (long GPG key id, for the pacman-key lsign line).
 set -euo pipefail
 KEYID=${KEYID:-<KEYID>}
@@ -22,9 +25,9 @@ cat <<HTML
 </style>
 
 <h1>dev-prompt package repository</h1>
-<p><a href="https://github.com/seraphx2/dev-prompt">github.com/seraphx2/dev-prompt</a>
+<p><a href="$BASE/">dev-prompt</a>
   — command-palette overlay for launching dev repositories.<br>
-  Signing key: <a href="dev-prompt.asc">dev-prompt.asc</a> (<code>$KEYID</code>).</p>
+  Signing key: <a href="$BASE/dev-prompt.asc">dev-prompt.asc</a> (<code>$KEYID</code>).</p>
 <p style="color:#888">Updates arrive through your normal
 <code>apt</code> / <code>dnf</code> / <code>pacman -Syu</code>.</p>
 
@@ -58,9 +61,9 @@ Server = $BASE/arch
 EOF
 sudo pacman -Sy dev-prompt</pre>
 
-<h2>Flatpak — any distro</h2>
+<h2 id="flatpak">Flatpak — any distro</h2>
 <p>One-click: open
-<a href="io.github.seraphx2.devprompt.flatpakref">io.github.seraphx2.devprompt.flatpakref</a>
+<a href="$BASE/io.github.seraphx2.devprompt.flatpakref">io.github.seraphx2.devprompt.flatpakref</a>
 in your software centre. Or from a terminal:</p>
 <pre>flatpak remote-add --if-not-exists --user dev-prompt $BASE/dev-prompt.flatpakrepo
 flatpak install --user dev-prompt io.github.seraphx2.devprompt
