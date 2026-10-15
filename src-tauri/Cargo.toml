@@ -51,6 +51,11 @@ tauri-plugin-single-instance = "2"
 # tauri-plugin-autostart can't write ~/.config/autostart. Uses the tokio runtime
 # Tauri already runs on. `zbus` is already in the tree via the GTK stack.
 ashpd = { version = "0.13", default-features = false, features = ["tokio", "background"] }
+# Wayland: the overlay as a centred layer-shell surface (layer.rs). gtk-layer-shell
+# is dlopen'd at runtime — an optional dependency, not a link-time one — and the
+# window pointer comes from the same gtk 0.18 Tauri uses.
+gtk = "0.18"
+libloading = "0.8"
 
 [target.'cfg(windows)'.dependencies]
 window-vibrancy = "0.8"

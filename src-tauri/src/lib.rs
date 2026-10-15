@@ -21,6 +21,8 @@ mod gowork;
 mod gradle;
 mod index;
 mod inspect;
+#[cfg(target_os = "linux")]
+mod layer;
 mod launch;
 mod maven;
 mod provision;
@@ -50,6 +52,15 @@ fn show_overlay_scoped(window: &WebviewWindow, scope: &str) {
     let _ = window.show();
     let _ = window.set_focus();
     let _ = window.emit("overlay:shown", scope);
+}
+
+/// Whether the compositor positions the overlay (a Wayland layer surface —
+/// see layer.rs), so moving it ourselves is pointless.
+pub(crate) fn overlay_is_layer_surface() -> bool {
+    #[cfg(target_os = "linux")]
+    return layer::active();
+    #[cfg(not(target_os = "linux"))]
+    false
 }
 
 fn show_overlay(window: &WebviewWindow) {
@@ -236,6 +247,15 @@ pub fn run() {
             let window = app
                 .get_webview_window(OVERLAY_LABEL)
                 .expect("overlay window is defined in tauri.conf.json");
+
+            // Wayland ignores an app's own window placement; a layer surface is
+            // centred by the compositor instead. Has to happen before the
+            // window is first shown (the first-run show is further down).
+            #[cfg(target_os = "linux")]
+            match layer::init(&window) {
+                Ok(()) => eprintln!("overlay: Wayland layer surface (centred by the compositor)"),
+                Err(why) => eprintln!("overlay: regular window — {why}"),
+            }
 
             apply_overlay_effects(&window);
 

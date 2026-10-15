@@ -1068,7 +1068,21 @@ pub fn set_overlay_size(window: tauri::WebviewWindow, large: bool) -> AppResult<
     window
         .set_size(tauri::LogicalSize::new(w, h))
         .map_err(|e| AppError::msg(format!("couldn't resize the overlay: {e}")))?;
-    let _ = window.center();
+    // Centre on the size just asked for, not the window's current one: on X11
+    // the resize lands asynchronously, so `center()` would still read the old
+    // size and leave the top-left corner where it was. A Wayland layer surface
+    // is centred by the compositor; a regular Wayland window can't be placed
+    // by the app at all (this is a no-op there).
+    if !crate::overlay_is_layer_surface() {
+        if let Ok(Some(monitor)) = window.current_monitor() {
+            let scale = monitor.scale_factor();
+            let area = monitor.work_area();
+            let (pw, ph) = ((w * scale).round() as i32, (h * scale).round() as i32);
+            let x = area.position.x + (area.size.width as i32 - pw) / 2;
+            let y = area.position.y + (area.size.height as i32 - ph) / 2;
+            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        }
+    }
     Ok(())
 }
 
