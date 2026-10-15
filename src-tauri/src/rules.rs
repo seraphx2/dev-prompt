@@ -626,11 +626,11 @@ pub fn default_shell() -> String {
     }
 }
 
-/// The user's login shell (`$SHELL`), by name — see `pty::unix_default_shell`.
+/// The user's login shell, by name — the host's under Flatpak. See
+/// `pty::default_shell_name`.
 #[cfg(unix)]
 pub fn default_shell() -> String {
-    let path = crate::pty::unix_default_shell(std::env::var("SHELL").ok());
-    path.rsplit('/').next().unwrap_or(&path).to_string()
+    crate::pty::default_shell_name()
 }
 
 /// Wrap `argv` in a shell that runs the command and then stays open with a real
