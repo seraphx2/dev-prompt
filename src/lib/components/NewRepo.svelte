@@ -392,7 +392,7 @@
       {/if}
 
       {#if tool && (root || existing)}
-        <div class="space-y-0.5 font-mono text-[11px] text-white/35">
+        <div class="space-y-0.5 font-mono text-[11px] text-white/50">
           <div class="truncate" title={target}>
             → {target ? middleTruncate(target, 96) : "pick a name"}
           </div>

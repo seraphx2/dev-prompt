@@ -54,13 +54,13 @@
       <Highlight text={app.name} indices={positions} />
     </div>
     <div
-      class="overflow-hidden whitespace-nowrap font-mono text-[11px] leading-tight text-white/35"
+      class="overflow-hidden whitespace-nowrap font-mono text-[11px] leading-tight text-white/50"
       title={app.exec}
     >
       {sub}
     </div>
   </div>
   {#if app.uses > 0}
-    <span class="shrink-0 font-mono text-[10px] text-white/25">{app.uses}×</span>
+    <span class="shrink-0 font-mono text-[10px] text-white/45">{app.uses}×</span>
   {/if}
 </button>

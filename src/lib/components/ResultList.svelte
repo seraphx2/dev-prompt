@@ -53,7 +53,7 @@
   class="scroll-thin flex-1 overflow-y-auto px-2 py-2"
 >
   {#if entries.length === 0}
-    <div class="px-3 py-8 text-center text-[13px] text-white/30">
+    <div class="px-3 py-8 text-center text-[13px] text-white/45">
       {empty}
     </div>
   {:else}

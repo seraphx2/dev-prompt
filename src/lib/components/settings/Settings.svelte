@@ -253,7 +253,7 @@
     class="ml-auto truncate pl-2 text-[11px] {msgError
       ? 'text-red-300'
       : saving
-        ? 'text-white/35'
+        ? 'text-white/50'
         : 'text-emerald-300'}"
     title={msgError ? msg : ""}
   >
@@ -312,7 +312,7 @@
     {:else if page === "trace"}
       <TracePage {note} />
     {:else if !form}
-      <div class="text-white/30">{msgError ? "" : "Loading…"}</div>
+      <div class="text-white/45">{msgError ? "" : "Loading…"}</div>
     {:else if page === "general"}
       <GeneralPage {form} {save} {commit} {note} {zoom} {onzoom} />
     {:else if page === "repos"}

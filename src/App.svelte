@@ -1802,7 +1802,7 @@
 
   <footer
     class="flex h-9 items-center justify-between border-t border-hair px-4
-           text-[11px] text-white/30"
+           text-[11px] text-white/45"
   >
     <span class="flex min-w-0 items-center gap-3">
       {#if mode !== "settings"}

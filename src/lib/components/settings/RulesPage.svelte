@@ -73,7 +73,7 @@
     </button>
   </div>
   {#if summary?.rulesPath}
-    <div class="truncate font-mono text-[11px] text-white/25" title={summary.rulesPath}>
+    <div class="truncate font-mono text-[11px] text-white/45" title={summary.rulesPath}>
       {summary.rulesPath}
     </div>
   {/if}
@@ -140,9 +140,9 @@
             <span class={r.disabled ? "text-white/40" : r.available ? "text-white/70" : "text-white/30"}
               >{r.id}</span
             >
-            <span class="text-white/30">{r.matches.join(", ")}</span>
+            <span class="text-white/45">{r.matches.join(", ")}</span>
             <span class="text-white/40">→ {r.kind}</span>
-            {#if r.scope === "repo"}<span class="text-white/25">@repo</span>{/if}
+            {#if r.scope === "repo"}<span class="text-white/45">@repo</span>{/if}
             {#if r.disabled}
               <span class="text-red-300/70">disabled</span>
             {:else if !r.available}

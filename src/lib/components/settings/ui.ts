@@ -3,7 +3,7 @@
 /** A section label. */
 export const label = "text-orange-400";
 /** Help text under a field. */
-export const help = "text-[11px] text-white/30";
+export const help = "text-[11px] text-white/45";
 /** A text input. */
 export const input =
   "rounded-sm border border-hair bg-white/4 px-2 py-1.5 text-white/90 focus:border-white/25 focus:outline-hidden";

@@ -266,16 +266,16 @@
   {#if loadError}
     <div class="px-3 py-8 text-center text-[13px] text-red-300/80">{loadError}</div>
   {:else if !list}
-    <div class="px-3 py-8 text-center text-[13px] text-white/30">
+    <div class="px-3 py-8 text-center text-[13px] text-white/45">
       {v?.server ? "Asking the server for branches…" : `Reading ${v?.title.toLowerCase() ?? "branches"}…`}
     </div>
   {:else if rows.length === 0}
-    <div class="px-3 py-8 text-center text-[13px] text-white/30">Nothing matches.</div>
+    <div class="px-3 py-8 text-center text-[13px] text-white/45">Nothing matches.</div>
   {:else}
     {#each rows as row, i (row.kind === "branch" ? `${row.branch.kind}:${row.branch.name}` : row.kind === "worktree" ? `w:${row.wt.path}` : "create")}
       {@const newGroup = i === 0 ? !!row.group : rows[i - 1].group !== row.group}
       {#if newGroup && row.group}
-        <div class="px-3 pt-2 pb-1 text-[10px] font-medium tracking-wide text-white/30 uppercase {i ? 'mt-2' : ''}">
+        <div class="px-3 pt-2 pb-1 text-[10px] font-medium tracking-wide text-white/45 uppercase {i ? 'mt-2' : ''}">
           {row.group}
         </div>
       {/if}
@@ -309,7 +309,7 @@
               <span class="shrink-0 font-mono text-[13px] {b.current ? 'text-sky-200' : 'text-white/90'}">
                 <Highlight text={b.name} indices={row.positions} />
               </span>
-              <span class="truncate text-[12px] text-white/30">{b.subject}</span>
+              <span class="truncate text-[12px] text-white/45">{b.subject}</span>
             </span>
             <span class="flex shrink-0 items-center gap-1.5 font-mono text-[10px] text-white/40">
               {#if b.current}<span class="rounded-sm bg-sky-400/15 px-1 py-0.5 text-sky-200">here</span>{/if}
@@ -321,14 +321,14 @@
               {#if b.gone}<span class="rounded-sm bg-white/6 px-1 py-0.5" title="Its upstream was deleted on the remote">gone</span>{/if}
               {#if b.ahead}<span class="text-sky-200/80" title="Commits its upstream doesn't have">↑{b.ahead}</span>{/if}
               {#if b.behind}<span class="text-sky-200/80" title="Commits on its upstream it doesn't have">↓{b.behind}</span>{/if}
-              <span class="w-20 text-right whitespace-nowrap text-white/30">{b.date ? ago(b.date) : ""}</span>
+              <span class="w-20 text-right whitespace-nowrap text-white/45">{b.date ? ago(b.date) : ""}</span>
             </span>
           {:else}
             <span class="flex min-w-0 flex-1 items-baseline gap-2">
               <span class="shrink-0 font-mono text-[13px] text-white/90">
                 <Highlight text={base(row.wt.path)} indices={row.positions} />
               </span>
-              <span class="truncate font-mono text-[11px] text-white/30" title={row.wt.path}>{row.wt.path}</span>
+              <span class="truncate font-mono text-[11px] text-white/45" title={row.wt.path}>{row.wt.path}</span>
             </span>
             {#if row.wt.head}<span class="shrink-0 font-mono text-[10px] text-white/40">@{row.wt.head}</span>{/if}
           {/if}

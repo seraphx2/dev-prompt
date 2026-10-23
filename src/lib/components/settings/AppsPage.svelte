@@ -40,7 +40,7 @@
       />
       <span class={ui.label}>Index installed apps</span>
     </label>
-    <span class="text-white/25">— type <span class="font-mono">›</span> in the search bar</span>
+    <span class="text-white/45">— type <span class="font-mono">›</span> in the search bar</span>
   </div>
   <p class="pl-6 {ui.help}">
     Unchecking this turns the <span class="font-mono">›</span> scope off entirely — typing it does

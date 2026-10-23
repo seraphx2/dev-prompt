@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import { MENU, glyphColor } from "../glyph";
   import { icons } from "../icons";
   import type { CtxItem } from "../types";
 
@@ -109,7 +110,7 @@
         {item.label}
       </div>
     {:else if item.kind === "loading"}
-      <div class="flex items-center gap-2.5 px-2.5 py-1.5 text-[13px] text-white/35">
+      <div class="flex items-center gap-2.5 px-2.5 py-1.5 text-[13px] text-white/50">
         <svg class="h-3.5 w-3.5 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none"
           stroke="currentColor" stroke-width="2.5">
           <path d="M12 3a9 9 0 1 0 9 9" stroke-linecap="round" />
@@ -118,6 +119,7 @@
       </div>
     {:else}
       {@const g = item.icon ? icons[item.icon] : undefined}
+      {@const color = g ? glyphColor(g, 1, MENU) : null}
       <button
         type="button"
         role={checkable ? "menuitemradio" : "menuitem"}
@@ -156,7 +158,7 @@
           fill="currentColor"
           fill-rule="evenodd"
           aria-hidden="true"
-          style={g?.hex ? `color:${g.hex}` : ""}
+          style={color ? `color:${color}` : ""}
         >
           {#if g?.raw}{@html g.raw}{:else if g?.d}<path d={g.d} />{/if}
         </svg>

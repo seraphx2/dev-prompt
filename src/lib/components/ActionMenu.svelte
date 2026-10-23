@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { Action, MenuItem, RepoStatus } from "../types";
-  import { glyphFor, glyphDim } from "../glyph";
+  import { glyphColor, glyphFor } from "../glyph";
   import { attention, describe, headLabel, vocab } from "../vcsStatus";
   import { icons } from "../icons";
   import { middleTruncate } from "../text";
@@ -128,7 +128,7 @@
       type="button"
       onclick={onremove}
       title={`Move this folder to the ${binWord === "Trash" ? "Trash" : "Recycle Bin"} (Ctrl+Delete)\nChecks first for anything that exists only here, and offers Undo after`}
-      class="inline-flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-0.5 text-[12px] text-white/35
+      class="inline-flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-0.5 text-[12px] text-white/50
              hover:bg-red-400/12 hover:text-red-300"
     >
       <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
@@ -164,7 +164,7 @@
           : 'text-white/40'}">{lines.join(" · ")}</span
     >
     {#if v}
-      <span class="inline-flex shrink-0 items-center gap-1 text-white/30"><kbd>Ctrl+B</kbd>{v.title.toLowerCase()}</span>
+      <span class="inline-flex shrink-0 items-center gap-1 text-white/45"><kbd>Ctrl+B</kbd>{v.title.toLowerCase()}</span>
     {/if}
   </div>
 {/if}
@@ -187,7 +187,7 @@
 
 <div bind:this={container} class="scroll-thin flex-1 overflow-y-auto px-2 py-2">
   {#if items.length === 0}
-    <div class="px-3 py-8 text-center text-[13px] text-white/30">
+    <div class="px-3 py-8 text-center text-[13px] text-white/45">
       No actions match.
     </div>
   {:else}
@@ -241,7 +241,7 @@
           <span class="flex-1 truncate text-[13px] font-medium text-white/90"
             >{item.label}</span
           >
-          <span class="shrink-0 font-mono text-[11px] text-white/30"
+          <span class="shrink-0 font-mono text-[11px] text-white/45"
             >{item.count} action{item.count === 1 ? "" : "s"}</span
           >
           <svg
@@ -257,17 +257,17 @@
           </svg>
         {:else}
           {@const g = glyph(item.action)}
-          {@const dim = glyphDim(g)}
+          {@const color = glyphColor(g, 0.9)}
           <svg
-            class="h-4 w-4 shrink-0 {g.hex && !dim
+            class="h-4 w-4 shrink-0 {color
               ? 'opacity-90'
-              : dim
+              : g.hex
                 ? 'text-white/80'
-                : 'text-white/30'}"
+                : 'text-white/40'}"
             viewBox={g.vb ?? "0 0 24 24"}
             fill="currentColor"
             fill-rule="evenodd"
-            style={g.hex && !dim ? `color:${g.hex}` : ""}
+            style={color ? `color:${color}` : ""}
           >
             {#if g.raw}{@html g.raw}{:else}<path d={g.d} />{/if}
           </svg>
@@ -277,7 +277,7 @@
             <Highlight text={item.action.label} indices={item.positions} />
           </span>
           <span
-            class="shrink-0 overflow-hidden whitespace-nowrap font-mono text-[11px] text-white/35"
+            class="shrink-0 overflow-hidden whitespace-nowrap font-mono text-[11px] text-white/50"
             title={item.action.hint}>{middleTruncate(item.action.hint, 46)}</span
           >
         {/if}

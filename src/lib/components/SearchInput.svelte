@@ -23,7 +23,7 @@
 
 <div class="flex items-center gap-3 border-b border-hair px-4 py-3">
   <svg
-    class="h-4 w-4 shrink-0 text-white/30"
+    class="h-4 w-4 shrink-0 text-white/40"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"

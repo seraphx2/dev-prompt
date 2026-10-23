@@ -6,7 +6,7 @@
   import { statuses } from "../statuses.svelte";
   import { chips, describe, headLabel, type Tone } from "../vcsStatus";
   import { icons } from "../icons";
-  import { glyphDim, glyphFor } from "../glyph";
+  import { glyphColor, glyphFor } from "../glyph";
   import { ecosystems, vcsBadge } from "../ecosystem";
 
   let {
@@ -94,7 +94,7 @@
       {/if}
     </div>
     <div
-      class="overflow-hidden whitespace-nowrap font-mono text-[11px] leading-tight text-white/35"
+      class="overflow-hidden whitespace-nowrap font-mono text-[11px] leading-tight text-white/50"
       title={entry.repo.path}
     >
       {middleTruncate(entry.repo.path, 100)}
@@ -111,14 +111,14 @@
          say so in its tooltip; anything no ecosystem claims stays text. -->
     {#each kinds.icons as k (k.icon + k.name)}
       {@const g = glyphFor(k.icon)}
-      {@const dim = glyphDim(g)}
+      {@const color = glyphColor(g, 0.8)}
       <span class="flex h-[18px] w-[18px] items-center justify-center" title={`${k.name} — ${k.files.join(", ")}`}>
         <svg
-          class="h-3.5 w-3.5 {dim ? 'text-white/60' : g.hex ? 'opacity-80' : 'text-white/45'}"
+          class="h-3.5 w-3.5 {color ? 'opacity-80' : g.hex ? 'text-white/60' : 'text-white/45'}"
           viewBox={g.vb ?? "0 0 24 24"}
           fill="currentColor"
           fill-rule="evenodd"
-          style={g.hex && !dim ? `color:${g.hex}` : ""}
+          style={color ? `color:${color}` : ""}
           role="img"
           aria-label={k.name}
         >

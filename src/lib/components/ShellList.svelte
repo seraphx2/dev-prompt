@@ -70,11 +70,11 @@
 
 <div bind:this={container} class="scroll-thin flex-1 overflow-y-auto px-2 py-2">
   {#if total === 0}
-    <div class="px-3 py-8 text-center text-[13px] leading-relaxed text-white/30">
+    <div class="px-3 py-8 text-center text-[13px] leading-relaxed text-white/45">
       No shells running.<br />Open shell (<kbd class="font-mono">Ctrl+R</kbd> in a repo's actions) starts one.
     </div>
   {:else if entries.length === 0}
-    <div class="px-3 py-8 text-center text-[13px] text-white/30">No shells match.</div>
+    <div class="px-3 py-8 text-center text-[13px] text-white/45">No shells match.</div>
   {:else}
     {#each entries as { session: s, positions }, i (s.cwd)}
       {@const crumb = shellCrumb(s)}
@@ -115,7 +115,7 @@
               {/if}
             </span>
             <span
-              class="block overflow-hidden whitespace-nowrap font-mono text-[11px] leading-tight text-white/35"
+              class="block overflow-hidden whitespace-nowrap font-mono text-[11px] leading-tight text-white/50"
               title={s.cwd}
             >
               {middleTruncate(s.cwd, 100)}
@@ -132,7 +132,7 @@
         </span>
         <button
           type="button"
-          class="shrink-0 rounded-sm p-1 text-white/30 transition-colors hover:bg-red-400/20 hover:text-red-200"
+          class="shrink-0 rounded-sm p-1 text-white/45 transition-colors hover:bg-red-400/20 hover:text-red-200"
           onclick={() => onclose(i)}
           title="Close this shell (Ctrl+W)"
           aria-label="Close shell in {s.repo.name}"
