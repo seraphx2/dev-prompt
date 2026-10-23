@@ -192,6 +192,9 @@ const AUTOSTART_ARG: &str = "--autostart";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Windows: the PATH this process was started with may predate tools
+    // installed since; look them up with Windows' current settings.
+    rules::refresh_path();
     let builder = tauri::Builder::default();
 
     // Single-instance must be registered first: it holds an OS lock so a second

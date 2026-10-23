@@ -87,6 +87,7 @@ fn which_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
 /// Forget every memoized program lookup (call after the config changes or a tool
 /// is installed while the app runs).
 pub fn clear_program_cache() {
+    refresh_path();
     program_cache().lock().unwrap().clear();
     which_cache().lock().unwrap().clear();
     #[cfg(target_os = "linux")]
@@ -241,6 +242,87 @@ pub fn which(program: &str) -> Option<String> {
         .unwrap()
         .insert(program.to_string(), resolved.clone());
     resolved
+}
+
+/// Windows: bring this process's PATH up to date with Windows' own settings.
+/// A process keeps the PATH it started with, so a tool installed since
+/// (winget, an installer, `uv tool update-shell`) is invisible to it — and to
+/// every terminal and shell it starts — until dev-prompt *and* whatever
+/// started it restart, which for an app started at login means signing out.
+/// Called at startup and whenever the program cache is cleared (a rescan,
+/// a config save), so a fresh install shows up on the next Ctrl+R.
+///
+/// The machine's entries come first, then the user's — the order a new
+/// process gets — then whatever the inherited PATH has beyond both (a dev
+/// shell's additions). Linux has no such store: its PATH comes from the
+/// login shell, and is left alone.
+pub fn refresh_path() {
+    #[cfg(windows)]
+    {
+        use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+        use winreg::RegKey;
+
+        let read = |root, key: &str| -> String {
+            RegKey::predef(root)
+                .open_subkey(key)
+                .and_then(|k| k.get_value::<String, _>("Path"))
+                .unwrap_or_default()
+        };
+        let machine = read(HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment");
+        let user = read(HKEY_CURRENT_USER, "Environment");
+        let current = std::env::var("PATH").unwrap_or_default();
+        let merged = merge_paths(&[&expand_env(&machine), &expand_env(&user), &current]);
+        if !merged.is_empty() && merged != current {
+            // Sound on Windows: the OS serialises environment access.
+            std::env::set_var("PATH", merged);
+        }
+    }
+}
+
+/// `%NAME%` references expanded from this process's environment (a `Path`
+/// stored as REG_EXPAND_SZ reads back unexpanded); unknown ones stay as written.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn expand_env(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(a) = rest.find('%') {
+        out.push_str(&rest[..a]);
+        let after = &rest[a + 1..];
+        match after.find('%') {
+            Some(b) => {
+                let name = &after[..b];
+                match std::env::var(name) {
+                    Ok(v) if !name.is_empty() => out.push_str(&v),
+                    _ => out.push_str(&rest[a..a + b + 2]),
+                }
+                rest = &after[b + 1..];
+            }
+            None => {
+                out.push_str(&rest[a..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `;`-separated lists joined in order, each folder once (compared without
+/// case or a trailing slash, as Windows does) and empty entries dropped.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn merge_paths(lists: &[&str]) -> String {
+    let mut seen: Vec<String> = Vec::new();
+    let mut out: Vec<&str> = Vec::new();
+    for entry in lists.iter().flat_map(|l| l.split(';')) {
+        let e = entry.trim();
+        let key = e.trim_end_matches(['\\', '/']).to_lowercase();
+        if key.is_empty() || seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        out.push(e);
+    }
+    out.join(";")
 }
 
 fn which_uncached(program: &str) -> Option<String> {
@@ -1853,6 +1935,39 @@ mod tests {
     use super::*;
     use crate::config::bundled_defaults;
     use crate::inspect::{NodeInfo, PkgManager};
+
+    #[test]
+    fn path_entries_expand_and_merge_in_order() {
+        std::env::set_var("DP_TEST_HOME", r"C:\Users\t");
+        assert_eq!(expand_env(r"%DP_TEST_HOME%\bin;%NOT_SET_ANYWHERE%\x;100%"), r"C:\Users\t\bin;%NOT_SET_ANYWHERE%\x;100%");
+        assert_eq!(expand_env("%%"), "%%");
+        assert_eq!(
+            merge_paths(&[r"C:\Windows;C:\Tools\", r"c:\tools;;C:\Users\t\bin", r"C:\Windows\;D:\dev"]),
+            r"C:\Windows;C:\Tools\;C:\Users\t\bin;D:\dev",
+            "machine first, then user, then what the process had beyond them — each once"
+        );
+    }
+
+    /// A tool installed after dev-prompt started is found once the program
+    /// cache is cleared: the process's PATH is re-read from Windows' settings.
+    #[cfg(windows)]
+    #[test]
+    fn a_refresh_keeps_what_the_process_had_and_adds_the_settings() {
+        let before = std::env::var("PATH").unwrap_or_default();
+        refresh_path();
+        let after = std::env::var("PATH").unwrap_or_default();
+        let has = |p: &str, e: &str| p.split(';').any(|x| x.trim_end_matches('\\').eq_ignore_ascii_case(e.trim_end_matches('\\')));
+        for e in before.split(';').filter(|e| !e.trim().is_empty()) {
+            assert!(has(&after, e.trim()), "{e} was dropped");
+        }
+        let user = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+            .open_subkey("Environment")
+            .and_then(|k| k.get_value::<String, _>("Path"))
+            .unwrap_or_default();
+        for e in expand_env(&user).split(';').filter(|e| !e.trim().is_empty()) {
+            assert!(has(&after, e.trim()), "the user's {e} isn't on PATH after a refresh");
+        }
+    }
 
     fn repo() -> Repo {
         Repo {
