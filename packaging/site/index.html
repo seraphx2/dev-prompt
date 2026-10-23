@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>dev-prompt — every repo you own, one keystroke away</title>
-<meta name="description" content="A command palette for developers on Windows and Linux. Press the hotkey, type a few letters, and pick from what the project can actually do: its scripts, your editors, a shell right in the overlay.">
+<meta name="description" content="A command palette for developers on Windows and Linux. Press the hotkey, type a few letters, and pick from what the project can actually do: its scripts, your editors, a shell right in the overlay — and see where every repo stands: its branch, what's uncommitted or unpushed, what's left half-done.">
 <meta property="og:title" content="dev-prompt">
-<meta property="og:description" content="Every repo you own, one keystroke away. Its scripts, your editors, and a shell, in an overlay that's gone when you're done.">
+<meta property="og:description" content="Every repo you own, one keystroke away. Its scripts, your editors, a shell, and where every branch stands, in an overlay that's gone when you're done.">
 <meta property="og:image" content="https://seraphx2.github.io/dev-prompt/img/4_dev-prompt_shell.png">
 <link rel="icon" type="image/png" href="img/icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -208,7 +208,8 @@
       <div>
         <p class="lede">Press the hotkey from anywhere, type a few letters, and pick from what
           that project can actually do: its scripts through the right package manager, your
-          editors, a shell right in the overlay. It's gone the moment you're done.</p>
+          editors, a shell right in the overlay. Every repo shows its branch and anything you've
+          left uncommitted, unpushed or half-done. It's gone the moment you're done.</p>
         <div class="cta">
           <a class="button" href="https://github.com/seraphx2/dev-prompt/releases/download/v@VERSION@/dev-prompt_@VERSION@_x64-setup.exe">
             Download for Windows <small>v@VERSION@</small></a>
@@ -244,8 +245,48 @@
       <p class="aside">It's all one YAML file, so teaching it a new tool takes a few lines.</p>
     </div>
     <div class="shot">
+      <img src="img/10_dev-prompt_scripts.png" width="760" height="480" loading="lazy"
+           alt="The action menu for prettier, down at the project's own yarn scripts: build, fix, lint, test">
+    </div>
+  </section>
+
+  <section class="wrap feature flip">
+    <div class="copy">
+      <h2>Know where every repo stands</h2>
+      <p>Each repo shows the branch it's on, and flags for anything that exists only on this
+        machine or is left half-done: changed files, commits nobody else has, stashes, a rebase
+        that stopped on a conflict.</p>
+      <p>Type <kbd>!</kbd> for just the repos that need you, worst first — the end-of-day sweep,
+        across everything. Search finds branches too, so a ticket number brings up every repo
+        working on it.</p>
+      <p class="aside">Git, Jujutsu, Mercurial, Subversion, Fossil and Breezy, each in its own
+        terms, kept current in the background as you work.</p>
+    </div>
+    <div class="shot pair">
+      <img src="img/1_dev-prompt_repos.png" width="760" height="480" loading="lazy"
+           alt="The repo list: each repo's branch, with flags such as rebasing, conflicts, changed files, unpushed commits and stashes">
+      <img src="img/8_dev-prompt_attention.png" width="760" height="480" loading="lazy"
+           alt="The ! list: only the repos that need attention, a stopped rebase first">
+    </div>
+  </section>
+
+  <section class="wrap feature">
+    <div class="copy">
+      <h2>Branches, and the next step</h2>
+      <p>A repo's menu spells out where it stands and offers only what's safe in one keystroke
+        right now: a fast-forward pull, a push to its upstream, publishing a new branch, a fetch
+        — and the branch or a new pull request on GitHub, GitLab, Bitbucket or Azure DevOps.</p>
+      <p><kbd>Ctrl</kbd> <kbd>B</kbd> switches branch from a fuzzy list.
+        <kbd>Ctrl</kbd> <kbd>Enter</kbd> opens one in a second working copy beside the repo —
+        a worktree for an AI agent or a long build, without touching the one you're in.</p>
+      <p class="aside">Nothing is ever forced. Staging, commits and conflicts open in your Git
+        client instead — Fork, GitKraken, lazygit and the rest.</p>
+    </div>
+    <div class="shot pair">
       <img src="img/2_dev-prompt_actions.png" width="760" height="480" loading="lazy"
-           alt="The action menu for prettier: copy path, file manager, open shell and terminal along the top, then Claude Code, VS Code, Zed, lazygit, and the project's yarn scripts">
+           alt="The action menu for prettier: its branch and state under the header, editors, then push 2 commits, fetch, and the repo on GitHub">
+      <img src="img/9_dev-prompt_branches.png" width="760" height="480" loading="lazy"
+           alt="The branch switcher: branches by when they were last used, one checked out in another worktree, and branches only on the remote">
     </div>
   </section>
 

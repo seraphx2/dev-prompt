@@ -12,7 +12,8 @@
     "test": "vitest run",
     "check:tauri": "node scripts/check-tauri-versions.mjs",
     "version:calver": "node scripts/version.mjs",
-    "screenshots": "node scripts/screenshots/capture.mjs"
+    "screenshots": "node scripts/screenshots/capture.mjs",
+    "screenshots:wsl": "wsl bash scripts/screenshots/wsl.sh"
   },
   "license": "MIT",
   "engines": {

@@ -7,9 +7,13 @@ import * as si from "simple-icons";
 import type {
   Action,
   AppEntry,
+  Branch,
+  BranchList,
   NewRepoOptions,
   RemovalAssessment,
   Repo,
+  RepoStatus,
+  VcsDetails,
 } from "../../src/lib/types";
 
 export const ROOT = "/home/dev/code";
@@ -173,6 +177,131 @@ export function assessment(path: string): RemovalAssessment {
     ],
     unknown: [],
     needsTyped: true,
+  };
+}
+
+// --- working-copy status and branches -----------------------------------------
+
+/** Ages are counted from the page's clock, so they read the same every run. */
+const NOW = Math.floor(Date.now() / 1000);
+
+const status = (over: Partial<RepoStatus>): RepoStatus => ({
+  vcs: "Git",
+  branch: "master",
+  beyond: 0,
+  unborn: false,
+  upstream: `origin/${over.branch ?? "master"}`,
+  upstreamGone: false,
+  ahead: 0,
+  behind: 0,
+  changed: 0,
+  untracked: 0,
+  conflicted: 0,
+  conflictedChanges: 0,
+  divergent: 0,
+  stashes: 0,
+  unpushed: 0,
+  noRemote: false,
+  fetchedAt: NOW - 2 * 3600,
+  checkedAt: NOW,
+  unknown: [],
+  ...over,
+});
+
+/** A spread of states: clean, behind, stashed, unpushed work on an
+ *  unpublished branch (the one the Trash shot assesses), a rebase stopped on
+ *  a conflict, and work in progress on a tracked branch. */
+export const statuses: Record<string, RepoStatus> = {
+  [`${ROOT}/alacritty`]: status({}),
+  [`${ROOT}/django`]: status({ branch: "main", behind: 6 }),
+  [`${ROOT}/helix`]: status({}),
+  [`${ROOT}/httpie`]: status({ stashes: 2 }),
+  [`${ROOT}/hugo`]: status({}),
+  [`${ROOT}/lazygit`]: status({
+    branch: "feature/split-view",
+    upstream: null,
+    changed: 2,
+    unpushed: 3,
+    stashes: 1,
+  }),
+  [`${ROOT}/neovim`]: status({
+    branch: "fix/lsp-hover",
+    upstream: "origin/fix/lsp-hover",
+    detached: "5f3a9c1",
+    operation: "rebase",
+    conflicted: 1,
+    changed: 2,
+  }),
+  [`${ROOT}/prettier`]: status({ branch: "main", ahead: 2, unpushed: 2, changed: 1, untracked: 1 }),
+  [`${ROOT}/ripgrep`]: status({}),
+  [`${ROOT}/starship`]: status({ branch: "feat/jj-module", upstream: null, unpushed: 4 }),
+};
+
+const OWNER: Record<string, string> = {
+  alacritty: "alacritty",
+  django: "django",
+  helix: "helix-editor",
+  httpie: "httpie",
+  hugo: "gohugoio",
+  lazygit: "jesseduffield",
+  neovim: "neovim",
+  prettier: "prettier",
+  ripgrep: "BurntSushi",
+  starship: "starship",
+};
+
+export function gitDetails(path: string): VcsDetails {
+  const name = path.split("/").pop() ?? "";
+  const s = statuses[path];
+  const base = `https://github.com/${OWNER[name] ?? "dev"}/${name}`;
+  const def = s?.branch === "main" ? "main" : "master";
+  const links: VcsDetails["links"] = [{ kind: "repo", label: "Open on GitHub", url: base }];
+  const pushed = s?.upstream && !s.upstreamGone ? s.upstream.replace(/^origin\//, "") : null;
+  if (pushed) {
+    links.push({ kind: "branch", label: `Open ${pushed} on GitHub`, url: `${base}/tree/${pushed}` });
+    if (pushed !== def) {
+      links.push({ kind: "pr", label: "Create pull request on GitHub", url: `${base}/compare/${def}...${pushed}?expand=1` });
+    }
+  }
+  return { remotes: ["origin"], defaultBranch: def, links };
+}
+
+const branch = (name: string, daysAgo: number, subject: string, over: Partial<Branch> = {}): Branch => ({
+  name,
+  kind: over.remote ? "remote" : "branch",
+  remote: null,
+  current: false,
+  upstream: `origin/${name}`,
+  ahead: 0,
+  behind: 0,
+  gone: false,
+  worktree: null,
+  date: NOW - daysAgo * 86400,
+  subject,
+  ...over,
+});
+
+export function branches(path: string): BranchList {
+  const s = statuses[path];
+  const current = s?.branch ?? "master";
+  const list: Branch[] = [
+    branch(current, 0.2, "Keep the split ratio when the terminal resizes", { current: true, upstream: s?.upstream ?? null, ahead: s?.ahead ?? 0, behind: s?.behind ?? 0 }),
+    branch("master", 1, "Bump go-git to v5.16", { behind: 12 }),
+    branch("fix/staging-hunks", 3, "Stage a hunk from the diff view", {
+      worktree: `${ROOT}/lazygit-fix-staging-hunks`,
+    }),
+    branch("perf/commit-graph", 9, "Draw the commit graph incrementally", { ahead: 2 }),
+    branch("old/rebase-ui", 64, "WIP interactive rebase todo editor", { upstream: "origin/old/rebase-ui", gone: true }),
+    branch("origin/feature/custom-pagers", 5, "Let each repo pick its own pager", { remote: "origin", upstream: null }),
+    branch("origin/release/v0.52", 21, "Release notes for v0.52", { remote: "origin", upstream: null }),
+  ].filter((b, i) => i === 0 || b.name !== current);
+  return {
+    branches: list,
+    worktrees: [
+      { path, branch: current, head: "a1b2c3d", current: true, prunable: false },
+      { path: `${ROOT}/lazygit-fix-staging-hunks`, branch: "fix/staging-hunks", head: "9e8d7c6", current: false, prunable: false },
+    ],
+    remotes: ["origin"],
   };
 }
 

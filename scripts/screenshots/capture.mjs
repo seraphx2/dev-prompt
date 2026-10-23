@@ -12,7 +12,8 @@
 // through — the panel sits on a transparent background.
 //
 // Fonts come from the machine running it (the app uses the system UI font and
-// a monospace stack), so take them on Linux to match the AppStream shots.
+// a monospace stack), so take them on Linux to match the AppStream shots —
+// from Windows, `npm run screenshots:wsl` does that through WSL (wsl.sh).
 
 import { execFileSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
@@ -131,6 +132,37 @@ const scenes = [
       await page.keyboard.type("trash");
       await page.keyboard.press("Enter");
       await page.getByText("uncommitted").first().waitFor();
+    },
+  },
+  {
+    n: 8,
+    file: "8_dev-prompt_attention.png",
+    // The `!` scope: only repos with work left only here or half-done.
+    async run(page) {
+      await page.keyboard.type("!");
+      await page.getByText("rebasing").first().waitFor();
+    },
+  },
+  {
+    n: 10,
+    file: "10_dev-prompt_scripts.png",
+    // The same menu scrolled down to what the project itself offers — the
+    // way you'd find the scripts by moving down to them.
+    async run(page) {
+      await openRepo(page, "prettier");
+      const first = page.getByText("yarn test").first();
+      await first.waitFor();
+      await first.scrollIntoViewIfNeeded();
+      await first.hover();
+    },
+  },
+  {
+    n: 9,
+    file: "9_dev-prompt_branches.png",
+    async run(page) {
+      await openRepo(page, "lazygit");
+      await page.keyboard.press("Control+B");
+      await page.getByText("perf/commit-graph").first().waitFor();
     },
   },
 ];

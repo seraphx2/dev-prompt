@@ -55,6 +55,7 @@ npm run build                     # svelte-check + vite build (what CI runs)
 npm run test                      # vitest run, whole suite
 npm run check:tauri               # Tauri npm packages ↔ Rust crates on the same major.minor
 npm run screenshots               # regenerate docs/img/ — demo GIF + stills (headless, fake backend — see scripts/screenshots/)
+npm run screenshots:wsl           # the same from Windows, under Linux in WSL (fonts match the AppStream shots)
 npx vitest run src/lib/fuzzy.test.ts   # a single test file
 npx vitest run -t "name substring"     # tests matching a name
 
@@ -112,6 +113,28 @@ surrounding style rather than running `cargo fmt`.
    the backend (listed, strictly inside a root, not a link), and an
    assessment per VCS of what exists only locally — anything it can't check
    counts as at risk, never as clean.
+   **`vcs_state.rs`** is that per-VCS reading (`RepoStatus`: branch, upstream,
+   ahead/behind, changed/untracked/conflicted, stashes, unpushed, an operation
+   in progress, jj's conflicted/divergent changes), offline, for Git, jj,
+   Mercurial, Subversion, Fossil, Breezy and Darcs; shared by removal and the
+   repo list's status flags. Reads must never write a file the watcher
+   follows (Git's set `GIT_OPTIONAL_LOCKS=0`). `limits` holds what a system
+   can't tell offline — removal counts it as unknown, the row doesn't flag it.
+   **`status.rs`** keeps every repo's status current on 3 background threads
+   — asked for by the watcher (a working-tree file or one of the VCS state
+   files `watch.rs`'s `vcs_state_file` allows, debounced per repo), by the
+   overlay opening (anything older than `SWEEP_AGE`), and by a menu opening —
+   and persists it to `status.json`. **`vcs_ops.rs`** dispatches the branch
+   switcher, second working copies (worktree / workspace / share / checkout)
+   and remote steps to `git_ops.rs`, `jj_ops.rs`, `hg_ops.rs`, `svn_ops.rs`,
+   `fossil_ops.rs`, `brz_ops.rs`, and refuses a switch while something's
+   half-done or where it would merge uncommitted changes. The line it holds:
+   one keystroke, fully described by its label, never forced — anything
+   needing review (staging, commits, conflicts) hands off to a GUI. Breezy on
+   Windows resolves relative file arguments against the drive root: pass it
+   absolute paths. See `docs/vcs-status.md`; `scripts/vcs-scenarios.sh <root>
+   [systems]` builds a test repo per state (`--remove` deletes them), and `DP_SCENARIO_ROOT=<root> cargo
+   test scenario_report -- --ignored --nocapture` prints what each reads as.
 3. On selecting a repo, **`inspect.rs`** walks its tree once into a
    `RepoContext` — root plus side-by-side / `packages/*`-style sub-projects,
    each with its manifest details (npm scripts + package manager, Cargo.toml,
