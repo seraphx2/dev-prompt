@@ -240,7 +240,7 @@ via your desktop's session settings.)
 
 **Repo list**
 
-<img src="docs/img/1_dev-prompt_repos.png" width="760" alt="The repo list: every repository under your code folders, its branch, status flags such as rebasing, changed files and unpushed commits, its version control and project files">
+<img src="docs/img/1_dev-prompt_repos.png" width="760" alt="The repo list: every repository under your code folders, its branch, status flags such as rebasing, changed files and unpushed commits, and icons for the kind of project — Rust, Node, Python, Docker">
 
 | Key                  | Action                                                |
 | -------------------- | ----------------------------------------------------- |
@@ -257,6 +257,11 @@ via your desktop's session settings.)
 | `Ctrl+,`             | open Settings                                         |
 | `Esc` / click away   | hide the overlay                                      |
 
+Small icons on each row say what kind of project it is — Rust, Node, Python,
+Docker, .NET, … (hover one for the files that say so). A repo that isn't Git
+also shows its version control by command name: `jj`, `hg`, `svn`, `fossil`,
+`brz`, `darcs`.
+
 <img src="docs/img/6_dev-prompt_new-repo.png" width="760" alt="The New repository form: a name, the folder it goes in, and the version control to set up">
 
 **New repository** (`Ctrl+Shift+N`) creates a folder in one of your roots and
@@ -267,7 +272,7 @@ creates, `Esc` goes back. If setup fails, the error is shown and the folder is
 removed again. No remotes are set up; do that from your terminal or editor.
 
 A folder that isn't under version control yet (notes, documents, a project you
-haven't set up) shows up without a badge, and its action menu offers **Set up
+haven't set up) shows up without a branch, and its action menu offers **Set up
 version control…** — the same form, for that folder. If setup fails, only what
 it added is removed; nothing already in the folder is touched.
 Subversion isn't offered — see

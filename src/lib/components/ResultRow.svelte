@@ -6,6 +6,8 @@
   import { statuses } from "../statuses.svelte";
   import { chips, describe, headLabel, type Tone } from "../vcsStatus";
   import { icons } from "../icons";
+  import { glyphDim, glyphFor } from "../glyph";
+  import { ecosystems, vcsBadge } from "../ecosystem";
 
   let {
     entry,
@@ -30,6 +32,9 @@
   const head = $derived(headLabel(status));
   const flags = $derived(chips(status));
   const sentences = $derived(describe(status).join("\n"));
+  /** What kind of project, and which version control (none shown for Git). */
+  const kinds = $derived(ecosystems(entry.repo.sentinels));
+  const badge = $derived(vcsBadge(entry.repo.vcs));
 
   const TONE: Record<Tone, string> = {
     red: "border-red-400/35 bg-red-400/12 text-red-200",
@@ -102,17 +107,35 @@
         title={f.title}>{f.text}</span
       >
     {/each}
-    {#if entry.repo.vcs}
+    <!-- What kind of project: one small icon per ecosystem, the files that
+         say so in its tooltip; anything no ecosystem claims stays text. -->
+    {#each kinds.icons as k (k.icon + k.name)}
+      {@const g = glyphFor(k.icon)}
+      {@const dim = glyphDim(g)}
+      <span class="flex h-[18px] w-[18px] items-center justify-center" title={`${k.name} — ${k.files.join(", ")}`}>
+        <svg
+          class="h-3.5 w-3.5 {dim ? 'text-white/60' : g.hex ? 'opacity-80' : 'text-white/45'}"
+          viewBox={g.vb ?? "0 0 24 24"}
+          fill="currentColor"
+          fill-rule="evenodd"
+          style={g.hex && !dim ? `color:${g.hex}` : ""}
+          role="img"
+          aria-label={k.name}
+        >
+          {#if g.raw}{@html g.raw}{:else}<path d={g.d} />{/if}
+        </svg>
+      </span>
+    {/each}
+    {#each kinds.others as s (s)}
+      <span class="rounded-sm bg-white/6 px-1.5 py-0.5 font-mono text-[10px] text-white/40">{s}</span>
+    {/each}
+    <!-- Its version control, by command name — not for Git, which nearly
+         every repo is; the branch beside the name says it's versioned. -->
+    {#if badge}
       <span
-        class="rounded-sm border border-emerald-400/25 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-200/90"
-        >{entry.repo.vcs}</span
+        class="rounded-sm border border-emerald-400/25 bg-emerald-400/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-emerald-200/90"
+        title={entry.repo.vcs}>{badge}</span
       >
     {/if}
-    {#each entry.repo.sentinels.slice(0, flags.length ? 2 : 5) as s}
-      <span
-        class="rounded-sm bg-white/6 px-1.5 py-0.5 font-mono text-[10px] text-white/40"
-        >{s}</span
-      >
-    {/each}
   </div>
 </button>
