@@ -300,6 +300,20 @@ fn parse_porcelain_v2(out: &str, s: &mut RepoStatus) {
     s.upstream_gone = s.upstream.is_some() && !ab_seen;
 }
 
+/// Why `git status` failed, for the row's tooltip. Git refusing a repo another
+/// account owns is said plainly, with the fix, instead of git's eight lines —
+/// and never bypassed: that check stops a planted repo running commands
+/// through its config.
+fn git_status_failure(e: &str) -> String {
+    if e.contains("dubious ownership") {
+        "Git won't read this repo: its folder belongs to another account (often one from an earlier Windows \
+         install). Take ownership of the folder, or add it to git's safe.directory."
+            .into()
+    } else {
+        format!("Couldn't check for uncommitted changes: {e}")
+    }
+}
+
 /// "3 changed, 2 new" from a status listing where lines starting with
 /// `untracked` are new files.
 fn count_changes(status: &str, untracked: &str) -> (u32, u32) {
@@ -352,8 +366,12 @@ impl Checker<'_> {
             self.s.operation = git_operation(&d.git_dir);
             self.s.fetched_at = mtime_secs(&d.common_dir.join("FETCH_HEAD"));
         }
-        let Some(out) = self.run("for uncommitted changes", "git", &["status", "--porcelain=v2", "--branch"]) else {
-            return;
+        let out = match self.run_raw("git", &["status", "--porcelain=v2", "--branch"]) {
+            Ok(out) => out,
+            Err(e) => {
+                self.s.unknown.push(git_status_failure(&e));
+                return;
+            }
         };
         parse_porcelain_v2(&out, self.s);
         if self.s.operation.as_deref() == Some("rebase") {
@@ -849,6 +867,15 @@ pub(crate) mod tests {
         std::fs::write(dir.join(file), text).unwrap();
         git(dir, &["add", file]);
         git(dir, &["commit", "-q", "-m", file]);
+    }
+
+    #[test]
+    fn a_repo_git_refuses_says_why_plainly() {
+        let refused = "exit code 128.\nfatal: detected dubious ownership in repository at 'D:/git/x'\n'D:/git/x' is owned by:";
+        let said = git_status_failure(refused);
+        assert!(said.contains("belongs to another account") && said.contains("safe.directory"), "{said}");
+        assert!(!said.contains("fatal"), "{said}");
+        assert_eq!(git_status_failure("exit code 1.\nboom"), "Couldn't check for uncommitted changes: exit code 1.\nboom");
     }
 
     #[test]
