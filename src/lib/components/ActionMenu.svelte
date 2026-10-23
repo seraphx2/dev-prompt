@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { Action, MenuItem } from "../types";
+  import type { Action, MenuItem, RepoStatus } from "../types";
   import { glyphFor, glyphDim } from "../glyph";
+  import { attention, describe, headLabel, vocab } from "../vcsStatus";
+  import { icons } from "../icons";
   import { middleTruncate } from "../text";
   import Highlight from "./Highlight.svelte";
   import ClearButton from "./ClearButton.svelte";
@@ -20,6 +22,10 @@
     onquickaction,
     onback,
     oncontext,
+    status = null,
+    onbranches,
+    onremove,
+    binWord = "Recycle",
   }: {
     repoName: string;
     /** Sub-project name when drilled into one, else null. */
@@ -36,7 +42,22 @@
     onback: () => void;
     /** Row right-clicked -> its context menu. */
     oncontext?: (i: number, e: MouseEvent) => void;
+    /** The repo's working-copy state, for the line under the header. */
+    status?: RepoStatus | null;
+    /** Open the branch switcher (systems that have one). */
+    onbranches?: () => void;
+    /** Open "Move to Recycle Bin / Trash" — absent where it isn't offered
+     *  (a root folder). */
+    onremove?: () => void;
+    /** "Recycle" (Windows) or "Trash" (Linux), for the header button. */
+    binWord?: string;
   } = $props();
+
+  const head = $derived(headLabel(status));
+  const lines = $derived(describe(status));
+  const level = $derived(attention(status));
+  /** How this repo's system talks about branches; null: no switcher. */
+  const v = $derived(vocab(status?.vcs));
 
   let container: HTMLDivElement | undefined = $state();
   let filterEl: HTMLInputElement | undefined = $state();
@@ -100,7 +121,53 @@
       filterEl?.focus();
     }}
   />
+  {#if onremove}
+    <!-- Out of the list, where it sat among the apps; here it's on every
+         repo but nowhere you'd land by accident. It only opens the check. -->
+    <button
+      type="button"
+      onclick={onremove}
+      title={`Move this folder to the ${binWord === "Trash" ? "Trash" : "Recycle Bin"} (Ctrl+Delete)\nChecks first for anything that exists only here, and offers Undo after`}
+      class="inline-flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-0.5 text-[12px] text-white/35
+             hover:bg-red-400/12 hover:text-red-300"
+    >
+      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
+        {#if icons.trash.raw}{@html icons.trash.raw}{:else}<path d={icons.trash.d} />{/if}
+      </svg>
+      {binWord}
+    </button>
+  {/if}
 </div>
+
+{#if status && (head || lines.length)}
+  <div class="flex items-center gap-2 border-b border-hair px-3 py-1.5 text-[11px]" title={lines.join("\n")}>
+    {#if head}
+      <button
+        type="button"
+        disabled={!v}
+        onclick={() => onbranches?.()}
+        class="inline-flex max-w-[40%] shrink-0 items-center gap-1 rounded-sm px-1 py-0.5 font-mono text-white/75
+               enabled:hover:bg-white/10 enabled:hover:text-white"
+        title={v ? `Switch ${v.noun} (Ctrl+B)` : undefined}
+      >
+        <svg class="h-3 w-3 shrink-0 text-white/40" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
+          {#if icons.branch.raw}{@html icons.branch.raw}{:else}<path d={icons.branch.d} />{/if}
+        </svg>
+        <span class="truncate">{head}</span>
+      </button>
+    {/if}
+    <span
+      class="min-w-0 flex-1 truncate {level >= 3
+        ? 'text-red-300'
+        : level === 2
+          ? 'text-amber-200/80'
+          : 'text-white/40'}">{lines.join(" · ")}</span
+    >
+    {#if v}
+      <span class="inline-flex shrink-0 items-center gap-1 text-white/30"><kbd>Ctrl+B</kbd>{v.title.toLowerCase()}</span>
+    {/if}
+  </div>
+{/if}
 
 {#if quickActions.length}
   <div class="grid grid-cols-4 gap-1 border-b border-hair px-2 py-2">

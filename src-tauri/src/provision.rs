@@ -453,7 +453,18 @@ fn display_command(argv: &[String]) -> String {
 /// it after `timeout`. `Ok` is its stdout; `Err` explains the failure using
 /// the tail of what it printed.
 pub(crate) fn run_captured(program: &str, args: &[String], cwd: &Path, timeout: Duration) -> Result<String, String> {
-    let mut cmd = command_for(program, args, cwd);
+    run_captured_env(program, args, cwd, timeout, &[])
+}
+
+/// [`run_captured`] with extra environment variables set for the command.
+pub(crate) fn run_captured_env(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    timeout: Duration,
+    env: &[(&str, &str)],
+) -> Result<String, String> {
+    let mut cmd = command_for(program, args, cwd, env);
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| format!("couldn't start it ({e})"))?;
 
@@ -512,29 +523,30 @@ pub(crate) fn run_captured(program: &str, args: &[String], cwd: &Path, timeout: 
 }
 
 #[cfg(windows)]
-fn command_for(program: &str, args: &[String], cwd: &Path) -> Command {
+fn command_for(program: &str, args: &[String], cwd: &Path, env: &[(&str, &str)]) -> Command {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let mut c = Command::new(program);
-    c.args(args).current_dir(cwd).creation_flags(CREATE_NO_WINDOW);
+    c.args(args).current_dir(cwd).envs(env.iter().copied()).creation_flags(CREATE_NO_WINDOW);
     c
 }
 
 #[cfg(not(windows))]
-fn command_for(program: &str, args: &[String], cwd: &Path) -> Command {
+fn command_for(program: &str, args: &[String], cwd: &Path, env: &[(&str, &str)]) -> Command {
     // Inside Flatpak the version-control tools live on the host — same route
-    // `launch.rs` takes, but waited on rather than detached.
+    // `launch.rs` takes, but waited on rather than detached. The sandbox's own
+    // environment doesn't reach the host, so the variables go as flags.
     if crate::launch::in_flatpak() {
         let mut c = Command::new("flatpak-spawn");
-        c.arg("--host")
-            .arg(format!("--directory={}", cwd.display()))
-            .arg("--")
-            .arg(program)
-            .args(args);
+        c.arg("--host").arg(format!("--directory={}", cwd.display()));
+        for (k, v) in env {
+            c.arg(format!("--env={k}={v}"));
+        }
+        c.arg("--").arg(program).args(args);
         return c;
     }
     let mut c = Command::new(program);
-    c.args(args).current_dir(cwd);
+    c.args(args).current_dir(cwd).envs(env.iter().copied());
     c
 }
 

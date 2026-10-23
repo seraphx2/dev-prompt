@@ -65,9 +65,11 @@ markers:
   - { name: .hg, kind: vcs, label: Mercurial }
   - { name: .jj, kind: vcs, label: Jujutsu }
   - { name: .svn, kind: vcs, label: Subversion }
-  - { name: .bzr, kind: vcs, label: Bazaar }
+  - { name: .bzr, kind: vcs, label: Breezy }
   - { name: _darcs, kind: vcs, label: Darcs }
   - { name: .fslckout, kind: vcs, label: Fossil }
+  # What Fossil calls its checkout file on Windows.
+  - { name: _FOSSIL_, kind: vcs, label: Fossil }
   - "*.sln"
   - package.json
   - pnpm-workspace.yaml
@@ -198,6 +200,26 @@ programs:
       - "%ProgramFiles%/Sublime Merge/smerge.exe"
   lazygit:
     any: [lazygit]
+  gitui:
+    any: [gitui]
+  tig:
+    any: [tig]
+  gitextensions:
+    any: [gitex]
+    windows:
+      - "%ProgramFiles%/GitExtensions/GitExtensions.exe"
+      - "%LOCALAPPDATA%/Programs/GitExtensions/GitExtensions.exe"
+  # GitHub Desktop's own command-line helper opens a repo by path; the app
+  # itself doesn't take one.
+  githubdesktop:
+    any: [github]
+    windows:
+      - "%LOCALAPPDATA%/GitHubDesktop/bin/github.bat"
+  tortoisegit:
+    windows:
+      - "%ProgramFiles%/TortoiseGit/bin/TortoiseGitProc.exe"
+  gitg:
+    linux: [gitg]
 
   # Eclipse-family IDEs — ship as zips, so install paths vary wildly.
   # Expect users to pin an absolute path in config.yaml.
@@ -412,6 +434,15 @@ rules:
     actions:
       - { name: "nix-shell", run: "nix-shell", terminal: true, icon: nix }
 
+  # Every Fossil repository is a website too — timeline, tickets, wiki,
+  # forum — served from the checkout until the terminal is closed.
+  - id: fossil-ui
+    match: [_FOSSIL_, .fslckout]
+    scope: repo
+    requires: [fossil]
+    actions:
+      - { name: "Open Fossil's web UI", run: "fossil ui", terminal: true, icon: fossil }
+
   - id: docker-image
     match: Dockerfile
     scope: repo
@@ -497,6 +528,12 @@ universal:
     - { id: gitkraken, name: "Open in GitKraken", program: "{{gitkraken}}", args: ["-p", "{{path}}"], needs: [gitkraken], icon: gitkraken, cluster: git }
     - { id: sublime-merge, name: "Open in Sublime Merge", program: "{{smerge}}", args: ["{{path}}"], needs: [smerge], icon: git, cluster: git }
     - { id: lazygit, name: "lazygit", run: "lazygit", terminal: true, needs: [lazygit], icon: git, cluster: git }
+    - { id: gitui, name: "gitui", run: "gitui", terminal: true, needs: [gitui], icon: git, cluster: git }
+    - { id: tig, name: "tig", run: "tig", terminal: true, needs: [tig], icon: git, cluster: git }
+    - { id: gitextensions, name: "Open in Git Extensions", program: "{{gitextensions}}", args: ["browse", "{{path}}"], needs: [gitextensions], icon: git, cluster: git }
+    - { id: github-desktop, name: "Open in GitHub Desktop", program: "{{githubdesktop}}", args: ["{{path}}"], needs: [githubdesktop], icon: github, cluster: git }
+    - { id: tortoisegit, name: "TortoiseGit log", program: "{{tortoisegit}}", args: ["/command:log", "/path:{{path}}"], needs: [tortoisegit], icon: git, cluster: git }
+    - { id: gitg, name: "Open in gitg", program: "{{gitg}}", args: ["{{path}}"], needs: [gitg], icon: git, cluster: git }
 
     # Last of all: move the folder to the Recycle Bin / Trash (the label names
     # this OS's bin). Never offered for a root. Its own cluster keeps it at
@@ -526,5 +563,5 @@ provision:
   # Colocated with Git or not per the user's own `git.colocate` jj setting.
   - { id: jj, label: Jujutsu, requires: [jj], run: [[jj, git, init]] }
   - { id: hg, label: Mercurial, requires: [hg], run: [[hg, init]] }
-  - { id: brz, label: Breezy (Bazaar), requires: [brz], run: [[brz, init]] }
+  - { id: brz, label: Breezy, requires: [brz], run: [[brz, init]] }
   - { id: darcs, label: Darcs, requires: [darcs], run: [[darcs, init]] }

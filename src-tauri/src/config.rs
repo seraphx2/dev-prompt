@@ -862,7 +862,7 @@ mod tests {
         let has_rule = |id: &str| cfg.rules.iter().any(|r| r.id.as_deref() == Some(id));
         for id in [
             "maven", "gradle", "cmake", "composer", "mix", "deno", "nix-flake",
-            "docker-image", "csproj-editors", "eclipse-project",
+            "docker-image", "csproj-editors", "eclipse-project", "fossil-ui",
         ] {
             assert!(has_rule(id), "missing bundled rule `{id}`");
         }
@@ -873,6 +873,13 @@ mod tests {
 
         let has_universal = |id: &str| cfg.universal.actions.iter().any(|a| a.action_id() == id);
         assert!(has_universal("cursor") && has_universal("gitkraken") && has_universal("lazygit"));
+        // Git GUIs to hand a repo's status off to (see git_ops.rs).
+        for id in ["gitextensions", "github-desktop", "tortoisegit", "gitui", "tig", "gitg"] {
+            assert!(has_universal(id), "missing bundled git GUI `{id}`");
+        }
+        for key in ["gitextensions", "githubdesktop", "tortoisegit", "gitui", "tig", "gitg"] {
+            assert!(cfg.programs.contains_key(key), "missing bundled program `{key}`");
+        }
 
         // A rule's `match` doubles as a discovery marker.
         let globs = discovery_globs(&cfg);

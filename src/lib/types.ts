@@ -15,6 +15,122 @@ export interface ScoredRepo {
   score: number;
   /** Character indices in the matched haystack that the query hit. */
   matchIndices: number[];
+  /** Character indices into the repo's branch, when the branch is what matched. */
+  branchIndices?: number[];
+}
+
+/** A repository's working-copy state — `vcs_state.rs`'s `RepoStatus`. Counts
+ *  are 0 and optionals null when they don't apply or couldn't be read. */
+export interface RepoStatus {
+  vcs?: string | null;
+  /** The branch checked out (during a rebase: the one being rebased). */
+  branch?: string | null;
+  /** Short commit id when HEAD isn't on a branch (Jujutsu: the working-copy
+   *  change's id, when no bookmark is below it). */
+  detached?: string | null;
+  /** Jujutsu: changes with content between the nearest bookmark and the
+   *  working copy ("main +2"). */
+  beyond: number;
+  /** No commits yet. */
+  unborn: boolean;
+  upstream?: string | null;
+  /** The upstream is configured but its remote branch is gone. */
+  upstreamGone: boolean;
+  /** Relative to the upstream, as of the last fetch. */
+  ahead: number;
+  behind: number;
+  changed: number;
+  untracked: number;
+  conflicted: number;
+  /** Jujutsu: other changes that hold a conflict. */
+  conflictedChanges: number;
+  /** Jujutsu: changes that have become divergent. */
+  divergent: number;
+  /** Stashes / shelved changes. */
+  stashes: number;
+  /** Commits on no remote across every local branch; null = can't tell. */
+  unpushed?: number | null;
+  /** Has commits but no remote at all. */
+  noRemote: boolean;
+  /** An operation left half-done: "rebase", "merge", "cherry-pick", "revert",
+   *  "bisect", "am", "graft", "histedit", "unshelve", "transplant", "update",
+   *  "backout"; "cleanup" (a locked Subversion working copy); "stale" (a
+   *  Jujutsu workspace another one moved on from). */
+  operation?: string | null;
+  /** Unix seconds of the last fetch. */
+  fetchedAt?: number | null;
+  /** Unix seconds when this was read. */
+  checkedAt: number;
+  /** What couldn't be checked, and why. */
+  unknown: string[];
+  /** What this system can never tell offline (Breezy, Darcs: whether every
+   *  commit was pushed) — not flagged on the row. */
+  limits?: string[];
+}
+
+/** A branch (bookmark) in the branch switcher. */
+export interface Branch {
+  /** `feature/x`; for a remote one nothing local tracks, `origin/feature/x`
+   *  (Git) or `feature/x@origin` (Jujutsu). */
+  name: string;
+  kind: "branch" | "bookmark" | "remote";
+  /** The remote it's on, for a remote branch. */
+  remote?: string | null;
+  current: boolean;
+  upstream?: string | null;
+  ahead: number;
+  behind: number;
+  gone: boolean;
+  /** Where it's checked out, when that's another working copy. */
+  worktree?: string | null;
+  /** Unix seconds of its last commit. */
+  date: number;
+  subject: string;
+}
+
+/** Another working copy of the repository: a worktree, workspace, checkout. */
+export interface Worktree {
+  path: string;
+  branch?: string | null;
+  head: string;
+  current: boolean;
+  prunable: boolean;
+}
+
+export interface BranchList {
+  branches: Branch[];
+  worktrees: Worktree[];
+  remotes: string[];
+}
+
+export interface WebLink {
+  kind: "repo" | "branch" | "pr";
+  label: string;
+  url: string;
+}
+
+export interface VcsDetails {
+  /** Remote names, or locations (Subversion's repository, Fossil's remote,
+   *  Breezy's parent). */
+  remotes: string[];
+  defaultBranch?: string | null;
+  links: WebLink[];
+  /** Breezy: where a pull comes from / a push goes. */
+  pullFrom?: string | null;
+  pushTo?: string | null;
+}
+
+/** What to check out (or put in a new worktree). */
+export type SwitchTarget =
+  | { kind: "local"; name: string }
+  | { kind: "remote"; remote: string; name: string }
+  | { kind: "new"; name: string };
+
+export type SyncOp = "fetch" | "pull" | "push" | "publish" | "update" | "sync";
+
+export interface VcsOutcome {
+  message: string;
+  status?: RepoStatus | null;
 }
 
 export interface Action {

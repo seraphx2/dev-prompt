@@ -7,6 +7,7 @@ import type {
   AppConfig,
   AppEntry,
   AppListPayload,
+  BranchList,
   ConfigPatch,
   ConfigSummary,
   FileManagerOption,
@@ -14,10 +15,15 @@ import type {
   RemovalAssessment,
   Repo,
   RepoListPayload,
+  RepoStatus,
   RepoTrace,
   ScoredRepo,
+  SwitchTarget,
+  SyncOp,
   SystemPaths,
   TerminalOption,
+  VcsDetails,
+  VcsOutcome,
 } from "./types";
 
 /** Cache-first repo list; returns instantly from the on-disk cache when present. */
@@ -220,6 +226,52 @@ export function initRepo(
   values: Record<string, string>,
 ): Promise<Repo> {
   return invoke<Repo>("init_repo", { path, tool, values });
+}
+
+/** Every repo's last-read working-copy status, by path. */
+export function listStatuses(): Promise<Record<string, RepoStatus>> {
+  return invoke<Record<string, RepoStatus>>("list_statuses");
+}
+
+/** Re-read `paths` now, or (none given) every repo not read in the last few
+ *  minutes. Results arrive through `onStatusUpdated`. */
+export function refreshStatuses(paths?: string[]): Promise<void> {
+  return invoke<void>("refresh_statuses", { paths: paths ?? null });
+}
+
+/** One repo's status changed (`status` null: it has none any more). */
+export function onStatusUpdated(
+  cb: (path: string, status: RepoStatus | null) => void,
+): Promise<UnlistenFn> {
+  return listen<{ path: string; status: RepoStatus | null }>("status:updated", (e) =>
+    cb(e.payload.path, e.payload.status),
+  );
+}
+
+/** Branches or bookmarks, remote ones nothing local tracks, and other
+ *  working copies, for the branch switcher (Subversion's from the server). */
+export function vcsBranches(path: string): Promise<BranchList> {
+  return invoke<BranchList>("vcs_branches", { path });
+}
+
+/** Remotes, the default branch, web links, pull / push locations — local reads only. */
+export function vcsDetails(path: string): Promise<VcsDetails> {
+  return invoke<VcsDetails>("vcs_details", { path });
+}
+
+/** Check out a branch (bookmark); rejects with the reason when it can't. */
+export function vcsSwitch(path: string, target: SwitchTarget): Promise<VcsOutcome> {
+  return invoke<VcsOutcome>("vcs_switch", { path, target });
+}
+
+/** Fetch, pull, push, publish (to `remote`), update or sync. */
+export function vcsSync(path: string, op: SyncOp, remote?: string): Promise<VcsOutcome> {
+  return invoke<VcsOutcome>("vcs_sync", { path, op, remote: remote ?? null });
+}
+
+/** Check a branch out in a second working copy beside the repo; resolves to it. */
+export function vcsAddCopy(path: string, target: SwitchTarget): Promise<Repo> {
+  return invoke<Repo>("vcs_add_copy", { path, target });
 }
 
 /** What moving the folder at `path` to the bin would lose. */

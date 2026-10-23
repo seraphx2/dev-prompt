@@ -58,6 +58,9 @@ pub struct AppState {
     pub scan_gate: Mutex<()>,
     /// The built-in shell's live sessions (see `pty.rs`).
     pub shells: std::sync::Arc<crate::pty::Sessions>,
+    /// Each repo's working-copy state — branch, uncommitted work, unpushed
+    /// commits — kept current in the background (see `status.rs`).
+    pub statuses: crate::status::Statuses,
 }
 
 impl AppState {
@@ -94,6 +97,7 @@ impl AppState {
             watcher: Mutex::new(None),
             scan_gate: Mutex::new(()),
             shells: Default::default(),
+            statuses: crate::status::Statuses::load(),
         }
     }
 }
@@ -191,6 +195,9 @@ pub fn rescan_blocking(app: &AppHandle, reload: bool) -> AppResult<RepoListPaylo
 
     let out = payload(&state);
     let _ = app.emit("repos:updated", ());
+    // New repos have no status yet; gone ones lose theirs.
+    crate::status::sweep(app, crate::status::SWEEP_AGE);
+    crate::watch::track_vcs_dirs(app);
     Ok(out)
 }
 
@@ -200,8 +207,9 @@ pub fn search_repos(
     query: String,
     limit: Option<usize>,
 ) -> Vec<ScoredRepo> {
+    let branches = state.statuses.branches();
     let repos = state.repos.lock().unwrap();
-    index::search(&query, &repos, limit.unwrap_or(200))
+    index::search(&query, &repos, &branches, limit.unwrap_or(200))
 }
 
 // --- new repository (Ctrl+Shift+N) -----------------------------------------
@@ -293,6 +301,7 @@ fn put_repo(app: &AppHandle, repo: &Repo, ctx: RepoContext) {
     }
     state.contexts.lock().unwrap().insert(repo.path.clone(), ctx);
     save_list(app, &state);
+    state.statuses.request(app, [repo.path.clone()], false);
 }
 
 /// Take `dir` and everything below it out of the list. Blocking, like
@@ -312,6 +321,165 @@ fn save_list(app: &AppHandle, state: &AppState) {
     let contexts = state.contexts.lock().unwrap().clone();
     let _ = cache::save(&repos, &contexts);
     let _ = app.emit("repos:updated", ());
+}
+
+// --- working-copy status and version control (status.rs, vcs_ops.rs) --------
+
+/// Every repo's last-read status, by path.
+#[tauri::command]
+pub fn list_statuses(state: State<'_, AppState>) -> HashMap<String, crate::vcs_state::RepoStatus> {
+    state.statuses.snapshot()
+}
+
+/// Read `paths` again now, or with none given, every repo not read in the
+/// last few minutes (the overlay opening). Results arrive as `status:updated`.
+#[tauri::command]
+pub fn refresh_statuses(app: AppHandle, state: State<'_, AppState>, paths: Option<Vec<String>>) {
+    match paths {
+        Some(p) => state.statuses.request(&app, p, false),
+        None => crate::status::sweep(&app, crate::status::SWEEP_AGE),
+    }
+}
+
+/// A repo's folder, or an error — the frontend's word isn't enough for
+/// anything that changes it. Accepted: a listed repo; a working copy inside a
+/// root that isn't listed yet (a worktree, workspace, share or checkout made
+/// a moment ago, before the watcher's rescan); a Git worktree anywhere whose
+/// repository is a listed one.
+fn vcs_dir_for(state: &AppState, path: &str) -> AppResult<std::path::PathBuf> {
+    let dir = std::path::PathBuf::from(path);
+    if state.repos.lock().unwrap().iter().any(|r| r.path == path) {
+        return Ok(dir);
+    }
+    let in_root = resolved_roots(&state.config.lock().unwrap()).iter().any(|r| dir.starts_with(r) && dir != *r);
+    if in_root && crate::vcs_state::detect(&dir).is_some() {
+        return Ok(dir);
+    }
+    let common = crate::vcs_state::git_dirs(&dir).map(|d| d.common_dir);
+    let belongs = common.is_some_and(|c| {
+        state.repos.lock().unwrap().iter().any(|r| {
+            crate::vcs_state::git_dirs(Path::new(&r.path)).is_some_and(|d| same_file(&d.common_dir, &c))
+        })
+    });
+    if belongs {
+        Ok(dir)
+    } else {
+        Err(AppError::msg("That folder isn't in the list any more."))
+    }
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// Branches or bookmarks (current first), remote ones nothing local tracks,
+/// and other working copies — for the branch switcher. Subversion's list
+/// comes from the server.
+#[tauri::command]
+pub async fn vcs_branches(state: State<'_, AppState>, path: String) -> AppResult<crate::vcs_ops::BranchList> {
+    let dir = vcs_dir_for(&state, &path)?;
+    tauri::async_runtime::spawn_blocking(move || crate::vcs_ops::branches(&dir))
+        .await
+        .map_err(|e| AppError::msg(format!("branch list task failed: {e}")))?
+        .map_err(AppError::msg)
+}
+
+/// What the action menu shows beyond the status: remotes, the default branch,
+/// web links, pull and push locations. Local reads only.
+#[tauri::command]
+pub async fn vcs_details(state: State<'_, AppState>, path: String) -> AppResult<crate::vcs_ops::Details> {
+    let dir = vcs_dir_for(&state, &path)?;
+    let known = state.statuses.get(&path);
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = known.unwrap_or_else(|| crate::vcs_state::read(&dir));
+        crate::vcs_ops::details(&dir, &s)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("details task failed: {e}")))?
+    .map_err(AppError::msg)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VcsOutcome {
+    pub message: String,
+    pub status: Option<crate::vcs_state::RepoStatus>,
+}
+
+/// Check out a branch (bookmark). Never forced: refused while something's
+/// half-done, and — where switching would merge them — with uncommitted
+/// changes. Returns what happened and the repo's new status.
+#[tauri::command]
+pub async fn vcs_switch(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    target: crate::vcs_ops::Target,
+) -> AppResult<VcsOutcome> {
+    let dir = vcs_dir_for(&state, &path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = crate::vcs_ops::switch(&dir, &target);
+        let status = crate::status::refresh_now(&app, &path);
+        result.map(|message| VcsOutcome { message, status }).map_err(AppError::msg)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("switch task failed: {e}")))?
+}
+
+/// Fetch, pull, push, publish, update or sync — what the label said and
+/// nothing more. Returns what happened and the repo's new status.
+#[tauri::command]
+pub async fn vcs_sync(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    op: crate::vcs_ops::SyncOp,
+    remote: Option<String>,
+) -> AppResult<VcsOutcome> {
+    let dir = vcs_dir_for(&state, &path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = crate::vcs_ops::sync(&dir, op, remote.as_deref());
+        let status = crate::status::refresh_now(&app, &path);
+        result.map(|message| VcsOutcome { message, status }).map_err(AppError::msg)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("version-control task failed: {e}")))?
+}
+
+/// Check a branch out in a second working copy beside the repo (a worktree,
+/// workspace, share or checkout). Returns it as a repo — listed straight away
+/// when it's inside a root, as the scan would.
+#[tauri::command]
+pub async fn vcs_add_copy(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    target: crate::vcs_ops::Target,
+) -> AppResult<Repo> {
+    let dir = vcs_dir_for(&state, &path)?;
+    let cfg = state.config.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let wt = crate::vcs_ops::add_copy(&dir, &target).map_err(AppError::msg)?;
+        let inside_root = resolved_roots(&cfg).iter().any(|r| wt.starts_with(r));
+        match scan::probe(&wt, &cfg) {
+            Some(repo) if inside_root => {
+                put_repo(&app, &repo, inspect_cold(&repo.path, &cfg));
+                Ok(repo)
+            }
+            probed => Ok(probed.unwrap_or_else(|| Repo {
+                name: wt.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                path: wt.to_string_lossy().into_owned(),
+                vcs: crate::vcs_state::detect(&wt).map(String::from),
+                sentinels: Vec::new(),
+                last_seen: 0,
+            })),
+        }
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("working-copy task failed: {e}")))?
 }
 
 // --- move to Recycle Bin / Trash -------------------------------------------

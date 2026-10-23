@@ -9,6 +9,7 @@
   import NewRepo from "./lib/components/NewRepo.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
   import RemoveFolder from "./lib/components/RemoveFolder.svelte";
+  import BranchSwitcher from "./lib/components/BranchSwitcher.svelte";
   import Settings from "./lib/components/settings/Settings.svelte";
   import type { Page as SettingsPage } from "./lib/components/settings/model";
   import {
@@ -29,8 +30,10 @@
     onOverlayShown,
     onReposUpdated,
     onRepoContextUpdated,
+    openUrl,
     readClipboard,
     refreshRepoContext,
+    refreshStatuses,
     rescanApps,
     rescanRepos,
     runAction,
@@ -41,6 +44,8 @@
     shellCloseAll,
     showFolder,
     undoRemoval,
+    vcsDetails,
+    vcsSync,
   } from "./lib/ipc";
   import type {
     Action,
@@ -49,8 +54,13 @@
     MenuItem,
     Repo,
     ScoredRepo,
+    SyncOp,
+    VcsDetails,
+    VcsOutcome,
   } from "./lib/types";
   import { fuzzyScore } from "./lib/fuzzy";
+  import { attention, VCS_ACTION, vcsActions, vocab } from "./lib/vcsStatus";
+  import { followStatuses, loadStatuses, setStatus, statuses } from "./lib/statuses.svelte";
   import { icons } from "./lib/icons";
   import { upd, pollUpdates } from "./lib/updateStore.svelte";
   import {
@@ -73,7 +83,8 @@
     | "settings"
     | "shell"
     | "new-repo"
-    | "remove";
+    | "remove"
+    | "branches";
 
   /** The page Settings opens on; null for General. */
   let settingsPage = $state<SettingsPage | null>(null);
@@ -116,9 +127,26 @@
   // A leading "$" lists the running shells instead (the footer's shell count
   // opens the same list).
   const shellScope = $derived(!appScope && query.startsWith("$"));
+  // A leading "!" narrows the repo list to the ones that need attention —
+  // uncommitted or unpushed work, a rebase left half-done, … (the footer's
+  // attention count opens the same list).
+  const attentionScope = $derived(!appScope && !shellScope && query.startsWith("!"));
   const term = $derived(
-    appScope || shellScope ? query.slice(1).replace(/^\s+/, "") : query.trim(),
+    appScope || shellScope || attentionScope ? query.slice(1).replace(/^\s+/, "") : query.trim(),
   );
+
+  /** The repo rows on screen: the search results, or in "!" scope the ones
+   *  needing attention, most urgent first (the search order within that). */
+  const listed = $derived.by<ScoredRepo[]>(() => {
+    if (!attentionScope) return results;
+    return results
+      .map((r, i) => ({ r, i, level: attention(statuses.get(r.repo.path)) }))
+      .filter((x) => x.level > 0)
+      .sort((a, b) => b.level - a.level || a.i - b.i)
+      .map((x) => x.r);
+  });
+  /** How many listed repos need attention — the footer's count. */
+  const attentionCount = $derived([...statuses.values()].filter((s) => attention(s) > 0).length);
 
   type AppHit = { app: AppEntry; positions: number[] };
   const filteredApps = $derived.by<AppHit[]>(() => {
@@ -167,7 +195,7 @@
   });
 
   const activeCount = $derived(
-    appScope ? filteredApps.length : shellScope ? filteredShells.length : results.length,
+    appScope ? filteredApps.length : shellScope ? filteredShells.length : listed.length,
   );
 
   // Keep the selection inside whichever list is on screen.
@@ -184,6 +212,16 @@
   let detectedLoading = $state(false);
   /** When set, the action menu is drilled into this `Detected · <x>` group. */
   let subGroup = $state<string | null>(null);
+  /** Remotes, default branch, web links and pull / push locations of the
+   *  repo whose menu is open (null until loaded, or with no version control). */
+  let vcsInfo = $state<VcsDetails | null>(null);
+  const activeStatus = $derived(activeRepo ? statuses.get(activeRepo.repo.path) : undefined);
+  /** Move to Recycle Bin / Trash, when this folder offers it (not a root). */
+  const removeAction = $derived(actions.find((a) => a.remove));
+  /** The action menu's version-control section — see `vcsActions`. */
+  const vcsItems = $derived(vcsActions(activeStatus, vcsInfo));
+  /** How the open repo's system talks about branches; null: no switcher. */
+  const activeVocab = $derived(vocab(activeStatus?.vcs ?? activeRepo?.repo.vcs));
   /** The folder of the shell on screen (its session key in `shells`). */
   let shellCwd = $state<string | null>(null);
   const activeShell = $derived(shellCwd ? shells.get(shellCwd) : undefined);
@@ -203,6 +241,8 @@
   const UNDO_MS = 20_000;
   const bin =
     document.documentElement.dataset.os === "windows" ? "Recycle Bin" : "Trash";
+  /** The header button's word for it. */
+  const binWord = bin === "Recycle Bin" ? "Recycle" : "Trash";
 
   function openRemove(entry: ScoredRepo, fromList: boolean) {
     removeTarget = entry;
@@ -334,7 +374,7 @@
       const onLabel = fuzzyScore(q, action.label);
       if (onLabel) {
         out.push({ kind: "action", group: grp(action), action, positions: onLabel.positions });
-      } else if (fuzzyScore(q, `${action.group} ${action.hint}`)) {
+      } else if (fuzzyScore(q, `${action.group} ${action.hint}${action.remove ? " delete trash remove" : ""}`)) {
         out.push({ kind: "action", group: grp(action), action, positions: [] });
       }
     }
@@ -357,17 +397,24 @@
       );
     }
     const rest = actions.filter((a) => !a.hotkey);
-    if (q) return fuzzyItems(rest, q);
+    if (q) return fuzzyItems([...rest, ...vcsItems], q);
 
     // Universal-tier ("General") actions are cluster-sorted as a block up
     // front — this is also what re-slots a `pin: true` rule action into place
     // once it streams in from the (slower) detected pass. Everything else
     // (plain "Detected" root actions, sub-project drill-ins) keeps the
     // original array order, unaffected.
+    // Two universal actions sit elsewhere: the version-control GUIs join the
+    // Version control section, and Move to Recycle Bin lives in the header
+    // (and Ctrl+Delete) — it only shows here once the filter asks for it.
     const generalActions: Action[] = [];
+    const vcsGuis: Action[] = [];
     const others: Action[] = [];
     for (const a of rest) {
-      (a.group === "General" ? generalActions : others).push(a);
+      if (a.remove) continue;
+      if (a.group !== "General") others.push(a);
+      else if (a.cluster === "git") vcsGuis.push(a);
+      else generalActions.push(a);
     }
 
     const items: MenuItem[] = orderGeneral(generalActions).map((action) => ({
@@ -376,6 +423,12 @@
       action,
       positions: [],
     }));
+    // The version-control section sits after the everyday launchers, so Enter
+    // on a fresh menu still opens the favourite; its state is on the line
+    // above anyway. The GUIs to hand off to close it, most used first.
+    for (const action of [...vcsItems, ...orderGeneral(vcsGuis)]) {
+      items.push({ kind: "action", group: "Version control", action, positions: [] });
+    }
 
     const seen = new Set<string>();
     for (const a of others) {
@@ -423,6 +476,8 @@
       subGroup = it.target;
       actionQuery = "";
       actionSel = 0;
+    } else if (it.action.id.startsWith(VCS_ACTION)) {
+      void runVcs(it.action);
     } else if (it.action.remove) {
       if (activeRepo) openRemove(activeRepo, false);
     } else if (it.action.provision) {
@@ -432,6 +487,83 @@
     } else if (activeRepo) {
       execute(it.action, activeRepo.repo.path);
     }
+  }
+
+  /** Load the open repo's remotes and links (its status comes from the store). */
+  function loadVcsInfo(path: string) {
+    vcsInfo = null;
+    if (!statuses.get(path)?.vcs && !activeRepo?.repo.vcs) return;
+    void vcsDetails(path)
+      .then((d) => {
+        if (activeRepo?.repo.path === path) vcsInfo = d;
+      })
+      .catch(() => {});
+  }
+
+  const SYNC_VERB: Record<SyncOp, string> = {
+    fetch: "Fetching",
+    pull: "Pulling",
+    push: "Pushing",
+    publish: "Publishing",
+    update: "Updating",
+    sync: "Syncing",
+  };
+
+  /** One of the action menu's version-control entries. */
+  async function runVcs(action: Action) {
+    const entry = activeRepo;
+    if (!entry || running) return;
+    const what = action.id.slice(VCS_ACTION.length);
+    if (what === "switch") return openBranches(entry, false);
+    if (what.startsWith("link:")) {
+      try {
+        await openUrl(action.hint);
+        await dismissAfterLaunch();
+      } catch (e) {
+        status = `Couldn't open the link: ${e}`;
+      }
+      return;
+    }
+    const [op, remote] = what.split(":") as [SyncOp, string | undefined];
+    running = true;
+    status = `${SYNC_VERB[op] ?? "Working"}…`;
+    try {
+      vcsDone(entry.repo.path, await vcsSync(entry.repo.path, op, remote));
+    } catch (e) {
+      status = `${SYNC_VERB[op] ?? "That"} failed: ${e}`;
+    } finally {
+      running = false;
+    }
+  }
+
+  /** An operation went through: its new status, its message, fresh links. */
+  function vcsDone(path: string, outcome: VcsOutcome) {
+    setStatus(path, outcome.status);
+    status = outcome.message;
+    loadVcsInfo(path);
+  }
+
+  /** The branch switcher for `entry`; Back returns to its action menu, or to
+   *  the list when opened from a row's right-click menu. */
+  function openBranches(entry: ScoredRepo, fromList: boolean) {
+    activeRepo = entry;
+    openedFromList = fromList;
+    mode = "branches";
+  }
+
+  function branchesBack() {
+    if (openedFromList) backToList();
+    else mode = "action-menu";
+  }
+
+  function branchSwitched(outcome: VcsOutcome) {
+    const entry = activeRepo;
+    if (!entry) return;
+    vcsDone(entry.repo.path, outcome);
+    // Another branch may have other manifests (scripts, projects).
+    void refreshRepoContext(entry.repo.path);
+    if (openedFromList) backToList();
+    else void openActions(entry);
   }
 
   function menuBack() {
@@ -521,9 +653,16 @@
                 ["Enter", "move"],
                 ["Esc", "back"],
               ]
+          : mode === "branches"
+            ? [
+                ["Enter", "switch"],
+                ["Ctrl+Enter", `new ${activeVocab?.copy ?? "working copy"}`],
+                ["Esc", "back"],
+              ]
           : [
               ["Up/Down", "move"],
               ["Enter", "run"],
+              ...(removeAction ? [["Ctrl+Del", binWord.toLowerCase()] as [string, string]] : []),
               ["Esc", "back"],
             ],
   );
@@ -582,14 +721,16 @@
     // (the query $effect, loadInitial, rescan, onReposUpdated) is covered.
     if (appScope || shellScope) return;
     const seq = ++searchSeq;
-    const keep = keepSelection ? results[selected]?.repo.path : undefined;
-    const scored = await searchRepos(query);
+    const keep = keepSelection ? listed[selected]?.repo.path : undefined;
+    // "!" scope: search what follows it, over every repo — the attention
+    // filter then picks from all of them, not from a first page.
+    const scored = await searchRepos(attentionScope ? term : query, attentionScope ? 100_000 : 200);
     if (seq !== searchSeq) return; // a newer query already answered
     results = scored;
-    const same = keep ? results.findIndex((r) => r.repo.path === keep) : -1;
+    const same = keep ? listed.findIndex((r) => r.repo.path === keep) : -1;
     if (same >= 0) selected = same;
     else if (!keepSelection) selected = 0;
-    else if (selected >= results.length) selected = Math.max(0, results.length - 1);
+    else if (selected >= listed.length) selected = Math.max(0, listed.length - 1);
   }
 
   // Re-run the fuzzy search whenever the query changes. The app list filters
@@ -612,6 +753,8 @@
   }
 
   async function loadInitial() {
+    // Re-read whatever repo status is a few minutes old, in the background.
+    void refreshStatuses().catch(() => {});
     const payload = await listRepos();
     if (payload.ageSecs < 0) status = "No cache — press Ctrl+R to scan";
     else setCounts(payload.repos);
@@ -683,6 +826,9 @@
   async function openActions(entry: ScoredRepo) {
     activeRepo = entry;
     openedFromList = false;
+    // Its flags are from the last read; get a fresh one alongside the menu.
+    void refreshStatuses([entry.repo.path]).catch(() => {});
+    loadVcsInfo(entry.repo.path);
     // Universal actions only — no `requires:` PATH walk, so this is fast even
     // on a cold cache. The menu opens on this alone; detected actions (npm /
     // cargo / docker / …) stream in afterward instead of blocking the open.
@@ -759,6 +905,15 @@
     void tick().then(() => search?.focus(false));
   }
 
+  /** The repos needing attention — the `!` scope of the search box. */
+  function openAttention() {
+    closeCtx();
+    backToList();
+    query = "!";
+    selected = 0;
+    void tick().then(() => search?.focus(false));
+  }
+
   function openShellRowMenu(e: MouseEvent, s: ShellSession) {
     if (wantsNative(e)) return;
     showCtx(e, [
@@ -831,6 +986,7 @@
     actions = [];
     actionQuery = "";
     subGroup = null;
+    vcsInfo = null;
   }
 
   // Keep the search box focused whenever the repo list is showing, so typing
@@ -906,9 +1062,14 @@
       } else if (shellScope) {
         const hit = filteredShells[selected];
         if (hit) resumeShell(hit.session);
-      } else if (results[selected]) {
-        openActions(results[selected]);
+      } else if (listed[selected]) {
+        openActions(listed[selected]);
       }
+    } else if (e.key === "Delete" && e.ctrlKey && !appScope && !shellScope) {
+      // Ctrl+Delete: Move to Recycle Bin for the selected repo (the check
+      // comes first; a root folder is refused there).
+      e.preventDefault();
+      if (listed[selected]) openRemove(listed[selected], true);
     } else if (e.key === "Delete") {
       e.preventDefault();
       query = "";
@@ -942,6 +1103,11 @@
   }
 
   function onMenuKeydown(e: KeyboardEvent) {
+    if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "b" && activeVocab) {
+      e.preventDefault();
+      if (activeRepo) openBranches(activeRepo, false);
+      return;
+    }
     if (e.ctrlKey && !e.altKey && !e.shiftKey) {
       const hit = quickActions.find(
         (q) => q.key.toLowerCase() === `ctrl+${e.key.toLowerCase()}`,
@@ -965,6 +1131,9 @@
       // Tab goes "forward" — into a sub-project, if one is selected.
       e.preventDefault();
       if (menuItems[actionSel]?.kind === "submenu") activateMenuItem(actionSel);
+    } else if (e.key === "Delete" && e.ctrlKey) {
+      e.preventDefault();
+      if (removeAction && activeRepo) openRemove(activeRepo, false);
     } else if (e.key === "Delete") {
       e.preventDefault();
       actionQuery = "";
@@ -984,6 +1153,7 @@
   let shellView: Shell | undefined = $state();
   let newRepoEl: NewRepo | undefined = $state();
   let removeEl: RemoveFolder | undefined = $state();
+  let branchEl: BranchSwitcher | undefined = $state();
   /** Bumped per menu, so a slow fetch can't fill in a menu that's been replaced. */
   let ctxSeq = 0;
 
@@ -1101,6 +1271,10 @@
       { kind: "header", label: entry.repo.name },
       { kind: "item", label: "Open actions", icon: "run", run: () => void openActions(entry) },
     ];
+    const v = vocab(statuses.get(entry.repo.path)?.vcs ?? entry.repo.vcs);
+    if (v) {
+      head.push({ kind: "item", label: `Switch ${v.noun}…`, icon: "branch", run: () => openBranches(entry, true) });
+    }
     // A shell left running here (or in a sub-project) — close it from the list.
     const live = shellsUnder(entry.repo.path).length;
     if (live) {
@@ -1186,6 +1360,13 @@
       return;
     }
     const a = it.action;
+    if (a.id.startsWith(`${VCS_ACTION}link:`)) {
+      showCtx(e, [
+        { kind: "item", label: "Open", icon: "run", run: () => activateMenuItem(i) },
+        { kind: "item", label: "Copy link", icon: "copy", run: () => void copyText(a.hint) },
+      ]);
+      return;
+    }
     const items: CtxItem[] = [
       {
         kind: "item",
@@ -1219,6 +1400,8 @@
     }
     if (mode === "action-menu") {
       onMenuKeydown(e);
+    } else if (mode === "branches") {
+      branchEl?.keydown(e);
     } else if (mode === "shell") {
       // Every key belongs to the shell — xterm.js has it already — except
       // Shift+Esc, which it lets through to here (see lib/shellKeys.ts).
@@ -1263,6 +1446,8 @@
       if (back) newRepoBack();
     } else if (mode === "remove") {
       if (back) removeBack();
+    } else if (mode === "branches") {
+      if (back) branchesBack();
     } else if (mode === "action-menu") {
       if (back) menuBack();
       else if (menuItems[actionSel]?.kind === "submenu")
@@ -1275,7 +1460,7 @@
       else if (filteredShells[selected]) resumeShell(filteredShells[selected].session);
     } else {
       if (back) hideOverlay();
-      else if (results[selected]) openActions(results[selected]);
+      else if (listed[selected]) openActions(listed[selected]);
     }
   }
 
@@ -1318,8 +1503,11 @@
         backToList();
       }),
     );
+    unlisteners.push(followStatuses());
+    void loadStatuses();
     unlisteners.push(
       onReposUpdated(() => {
+        void loadStatuses();
         void refresh();
         // Background rescans (the folder watcher) don't go through `rescan()`,
         // so keep the count in the footer honest here.
@@ -1407,10 +1595,13 @@
         ? "Search apps…"
         : shellScope
           ? "Search shells…"
-          : [
+          : attentionScope
+            ? "Repos that need attention — filter…"
+            : [
               "Search repos…",
               appsEnabled ? "› for apps" : "",
               shells.size ? "$ for shells" : "",
+              attentionCount ? "! needs attention" : "",
             ]
               .filter(Boolean)
               .join("    ")}
@@ -1461,22 +1652,36 @@
       </div>
     {:else}
       <ResultList
-        entries={results}
+        entries={listed}
+        empty={attentionScope ? "Nothing needs attention." : undefined}
         {selected}
         onselect={(i) => (selected = i)}
         onactivate={(i) => {
           selected = i;
-          if (results[i]) openActions(results[i]);
+          if (listed[i]) openActions(listed[i]);
         }}
         oncontext={(i, e) => {
           selected = i;
-          if (results[i]) openRepoMenu(e, results[i]);
+          if (listed[i]) openRepoMenu(e, listed[i]);
         }}
       />
     {/if}
+  {:else if mode === "branches" && activeRepo}
+    <BranchSwitcher
+      bind:this={branchEl}
+      repo={activeRepo.repo}
+      status={activeStatus}
+      onback={branchesBack}
+      onswitched={branchSwitched}
+      onopen={(repo) => void openActions({ repo, score: 0, matchIndices: [] })}
+    />
   {:else if mode === "action-menu" && activeRepo}
     <ActionMenu
       repoName={activeRepo.repo.name}
+      status={activeStatus}
+      onbranches={() => activeRepo && openBranches(activeRepo, false)}
+      onremove={removeAction ? () => activeRepo && openRemove(activeRepo, false) : undefined}
+      {binWord}
       crumb={subGroup ? subGroup.slice(SUB_PREFIX.length) : null}
       items={menuItems}
       {quickActions}
@@ -1616,6 +1821,17 @@
           <svg class="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
             {@html icons.terminal.raw}
           </svg>{shells.size}
+        </button>
+      {/if}
+      {#if attentionCount && mode === "repo-list" && !appScope}
+        <button
+          type="button"
+          onclick={openAttention}
+          title="Repos with work only here or left half-done — click to list them (! in the search box)"
+          class="inline-flex shrink-0 items-center gap-1 rounded-[3px] px-1 tabular-nums text-amber-300/90
+                 hover:bg-white/10 hover:text-amber-200"
+        >
+          <span aria-hidden="true">⚑</span>{attentionCount}
         </button>
       {/if}
       {#if showAppCount}

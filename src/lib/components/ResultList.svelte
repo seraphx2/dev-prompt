@@ -8,6 +8,7 @@
     onselect,
     onactivate,
     oncontext,
+    empty = "No repositories match.",
   }: {
     entries: ScoredRepo[];
     selected: number;
@@ -17,6 +18,8 @@
     onactivate: (i: number) => void;
     /** Row right-clicked -> its context menu. */
     oncontext?: (i: number, e: MouseEvent) => void;
+    /** What an empty list says. */
+    empty?: string;
   } = $props();
 
   let container: HTMLDivElement | undefined = $state();
@@ -51,7 +54,7 @@
 >
   {#if entries.length === 0}
     <div class="px-3 py-8 text-center text-[13px] text-white/30">
-      No repositories match.
+      {empty}
     </div>
   {:else}
     {#each entries as entry, i (entry.repo.path)}
