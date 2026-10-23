@@ -271,10 +271,12 @@ pub fn run() {
 
             apply_overlay_effects(&window);
 
-            // Taskbar presence follows the `dismiss` setting (see the fn docs).
+            // Taskbar presence follows the `dismiss` setting (see the fn docs),
+            // and the overlay is drawn at the saved zoom.
             {
                 let cfg = app.state::<AppState>().config.lock().unwrap().clone();
                 commands::sync_taskbar_visibility(app.handle(), &cfg);
+                commands::apply_zoom(app.handle(), &cfg);
             }
 
             // Keep the repo list current while the app runs (watch.rs).

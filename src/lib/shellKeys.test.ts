@@ -32,6 +32,13 @@ describe("classifyShellKey", () => {
     expect(classifyShellKey(k("V", { ctrlKey: true, shiftKey: true }), false)).toBe("paste");
   });
 
+  it("leaves the overlay's zoom keys to the overlay, but not readline's undo", () => {
+    expect(classifyShellKey(k("=", { ctrlKey: true }), false)).toBe("zoom");
+    expect(classifyShellKey(k("-", { ctrlKey: true }), false)).toBe("zoom");
+    expect(classifyShellKey(k("0", { ctrlKey: true }), false)).toBe("zoom");
+    expect(classifyShellKey(k("_", { ctrlKey: true, shiftKey: true }), false)).toBe("shell");
+  });
+
   it("hands everything else to the shell", () => {
     for (const key of ["a", "r", "l", "d", "z", "ArrowUp", "Tab", "Enter"]) {
       expect(classifyShellKey(k(key, { ctrlKey: true }), true)).toBe("shell");

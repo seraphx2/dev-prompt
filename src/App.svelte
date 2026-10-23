@@ -38,6 +38,7 @@
     rescanRepos,
     runAction,
     runApp,
+    saveConfig,
     searchRepos,
     setDismissOnBlur,
     setOverlaySize,
@@ -61,6 +62,7 @@
   import { fuzzyScore } from "./lib/fuzzy";
   import { attention, VCS_ACTION, vcsActions, vocab } from "./lib/vcsStatus";
   import { followStatuses, loadStatuses, setStatus, statuses } from "./lib/statuses.svelte";
+  import { stepZoom, zoomKey, zoomLabel } from "./lib/zoom";
   import { icons } from "./lib/icons";
   import { upd, pollUpdates } from "./lib/updateStore.svelte";
   import {
@@ -582,7 +584,36 @@
   getConfig().then((c) => {
     dismissMode = c.dismiss ?? "always";
     setShellFont(c.shell_font, c.shell_font_size);
+    zoom = c.zoom ?? 1;
   });
+
+  /** The overlay's zoom (Settings ▸ General, or Ctrl + / − / 0 anywhere).
+   *  The backend applies a saved one — see `zoom.ts`. */
+  let zoom = $state(1);
+  let zoomTimer: ReturnType<typeof setTimeout> | undefined;
+
+  async function changeZoom(direction: -1 | 0 | 1) {
+    await setZoom(stepZoom(zoom, direction));
+  }
+
+  async function setZoom(next: number) {
+    const shown = `Zoom ${zoomLabel(next)}`;
+    if (next !== zoom) {
+      zoom = next;
+      try {
+        await saveConfig({ zoom: next });
+      } catch (e) {
+        status = `Couldn't zoom: ${e}`;
+        return;
+      }
+    }
+    // Say where it landed — briefly, then back to the usual footer.
+    status = shown;
+    clearTimeout(zoomTimer);
+    zoomTimer = setTimeout(() => {
+      if (status === shown) status = "";
+    }, 2000);
+  }
 
   // Blur only dismisses in "always" mode. Settings, the new-repository form
   // and the remove confirmation are forms, so a click-away mustn't nuke them
@@ -1393,6 +1424,14 @@
   // returning from the action menu). Character keys fall through to the focused
   // search input untouched.
   function onWindowKeydown(e: KeyboardEvent) {
+    // Zoom works on every screen, the built-in shell included (it lets these
+    // keys through — see shellKeys.ts).
+    const z = zoomKey(e);
+    if (z !== null) {
+      e.preventDefault();
+      void changeZoom(z);
+      return;
+    }
     // An open menu takes every key until it closes.
     if (ctx) {
       ctxMenu?.keydown(e);
@@ -1719,11 +1758,14 @@
           dismissMode = c.dismiss ?? "always";
           setShellFont(c.shell_font, c.shell_font_size);
           appsEnabled = c.apps?.enabled ?? true;
+          zoom = c.zoom ?? 1;
         });
       }}
       onrescanrepos={rescan}
       onrescanapps={rescanAppsNow}
       onunsaved={settingsUnsaved}
+      {zoom}
+      onzoom={(z) => void setZoom(z)}
     />
   {/if}
 

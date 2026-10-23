@@ -206,6 +206,8 @@ export interface AppConfig {
   shell_font?: string | null;
   /** Built-in shell font size (px); absent = 13. */
   shell_font_size?: number | null;
+  /** How much bigger the whole overlay is drawn (1.25 = 125%); absent = 100%. */
+  zoom?: number | null;
   /** Pinned file manager (name / path); absent = auto-probe. */
   filemanager?: string | null;
   /** Raw `{{path}}` invocation for a file manager that wants more than a bare path. */
@@ -232,6 +234,8 @@ export interface ConfigPatch {
   /** "" / 0 go back to the default font / size. */
   shell_font?: string;
   shell_font_size?: number;
+  /** 1 goes back to normal size. */
+  zoom?: number;
   /** "" clears the pin / template back to auto. */
   filemanager?: string;
   filemanager_template?: string;

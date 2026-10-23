@@ -70,6 +70,21 @@ already running to catch the hotkey. The OS is the source of truth: the checkbox
 
 ---
 
+## Zoom
+
+The overlay follows your display scaling (Windows' Scale setting, your Linux
+desktop's) on its own. **Settings ▸ General ▸ Zoom** makes it bigger or smaller
+on top of that — text, icons and the window together, so nothing gets cropped.
+From anywhere in the overlay, the built-in shell included, <kbd>Ctrl</kbd>
+<kbd>+</kbd> and <kbd>Ctrl</kbd> <kbd>−</kbd> step through 80 % to 200 %, and
+<kbd>Ctrl</kbd> <kbd>0</kbd> goes back to 100 %. It's saved as:
+
+```yaml
+zoom: 1.25        # 125 %; left out at 100 %
+```
+
+---
+
 ## Terminal
 
 Which terminal emulator "Open in terminal" and every `terminal: true` action

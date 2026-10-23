@@ -61,6 +61,9 @@ pub struct AppState {
     /// Each repo's working-copy state — branch, uncommitted work, unpushed
     /// commits — kept current in the background (see `status.rs`).
     pub statuses: crate::status::Statuses,
+    /// The overlay is at its roomier size (a shell is open), for re-sizing
+    /// it when the zoom changes.
+    pub overlay_large: Mutex<bool>,
 }
 
 impl AppState {
@@ -98,6 +101,7 @@ impl AppState {
             scan_gate: Mutex::new(()),
             shells: Default::default(),
             statuses: crate::status::Statuses::load(),
+            overlay_large: Mutex::new(false),
         }
     }
 }
@@ -838,6 +842,8 @@ pub struct ConfigPatch {
     /// `Some("")` / `Some(0)` go back to the default font / size.
     pub shell_font: Option<String>,
     pub shell_font_size: Option<u16>,
+    /// `Some(1.0)` goes back to normal size; stored only when it isn't.
+    pub zoom: Option<f64>,
     pub filemanager: Option<String>,
     pub filemanager_template: Option<String>,
     pub apps: Option<config::AppsConfig>,
@@ -915,6 +921,11 @@ pub fn save_config(
     }
     if let Some(n) = patch.shell_font_size {
         user.shell_font_size = (n != 0).then_some(n.clamp(6, 40));
+    }
+    if let Some(z) = patch.zoom.filter(|z| z.is_finite()) {
+        let (lo, hi) = (config::ZOOM_STEPS[0], config::ZOOM_STEPS[config::ZOOM_STEPS.len() - 1]);
+        let z = (z.clamp(lo, hi) * 100.0).round() / 100.0;
+        user.zoom = ((z - 1.0).abs() > f64::EPSILON).then_some(z);
     }
     if let Some(f) = patch.filemanager {
         let f = f.trim();
@@ -1045,6 +1056,7 @@ pub fn save_config(
     let merged = config::load()?;
     *state.config.lock().unwrap() = merged.clone();
     sync_taskbar_visibility(&app, &merged);
+    apply_zoom(&app, &merged);
     crate::watch::sync_in_background(&app);
     crate::app_watch::sync_in_background(&app);
     Ok(merged)
@@ -1224,12 +1236,33 @@ pub fn shell_close_all(state: State<'_, AppState>) {
     state.shells.close_all();
 }
 
+/// Draw the overlay at `cfg`'s zoom: the web view zoomed, and the window grown
+/// (or shrunk) to match, so the layout keeps its proportions rather than
+/// spilling out of a window still sized for 100%.
+pub fn apply_zoom(app: &AppHandle, cfg: &Config) {
+    use tauri::Manager;
+    let Some(window) = app.get_webview_window("overlay") else { return };
+    let zoom = config::zoom_factor(cfg);
+    if let Err(e) = window.set_zoom(zoom) {
+        eprintln!("couldn't zoom the overlay: {e}");
+    }
+    let large = *app.state::<AppState>().overlay_large.lock().unwrap();
+    let _ = size_overlay(&window, large, zoom);
+}
+
 /// The overlay's size: the usual 760×480, or roomier while a shell is open —
-/// clamped to the screen it's on, and re-centred. Already that size: left
-/// alone, so a window the user dragged somewhere stays put.
+/// times the zoom, clamped to the screen it's on, and re-centred. Already
+/// that size: left alone, so a window the user dragged somewhere stays put.
 #[tauri::command]
-pub fn set_overlay_size(window: tauri::WebviewWindow, large: bool) -> AppResult<()> {
+pub fn set_overlay_size(window: tauri::WebviewWindow, state: State<'_, AppState>, large: bool) -> AppResult<()> {
+    *state.overlay_large.lock().unwrap() = large;
+    let zoom = config::zoom_factor(&state.config.lock().unwrap());
+    size_overlay(&window, large, zoom)
+}
+
+fn size_overlay(window: &tauri::WebviewWindow, large: bool, zoom: f64) -> AppResult<()> {
     let (mut w, mut h) = if large { (1000.0, 640.0) } else { (760.0, 480.0) };
+    (w, h) = (w * zoom, h * zoom);
     if let Ok(Some(monitor)) = window.current_monitor() {
         let area = monitor.work_area().size.to_logical::<f64>(monitor.scale_factor());
         w = f64::min(w, area.width * 0.94);

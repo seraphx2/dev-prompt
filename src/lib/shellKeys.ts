@@ -1,3 +1,5 @@
+import { zoomKey } from "./zoom";
+
 /**
  * Who handles a keystroke in the built-in shell. Almost everything belongs to
  * the shell — Esc included, since vim, fzf and PSReadLine all use it. The few
@@ -10,11 +12,14 @@
  * - **Paste**: Ctrl+V or Ctrl+Shift+V. Ctrl+V on its own means "insert the
  *   next key literally" to a few Unix shells; terminals on both platforms
  *   trade that away for paste, and so does this one.
+ * - **Zoom**: Ctrl + / Ctrl − / Ctrl 0, the overlay's zoom — the same keys
+ *   Windows Terminal uses for its own (see `zoom.ts`).
  */
-export type ShellKey = "back" | "copy" | "paste" | "shell";
+export type ShellKey = "back" | "copy" | "paste" | "zoom" | "shell";
 
 export interface KeyLike {
   key: string;
+  code?: string;
   ctrlKey: boolean;
   shiftKey: boolean;
   altKey: boolean;
@@ -25,6 +30,7 @@ export function classifyShellKey(e: KeyLike, hasSelection: boolean): ShellKey {
   if (e.altKey || e.metaKey) return "shell";
   if (e.key === "Escape" && e.shiftKey && !e.ctrlKey) return "back";
   if (!e.ctrlKey) return "shell";
+  if (zoomKey(e) !== null) return "zoom";
   const k = e.key.toLowerCase();
   if (k === "c" && (e.shiftKey || hasSelection)) return "copy";
   if (k === "v") return "paste";
