@@ -1287,6 +1287,9 @@ fn provider_actions(
         "dotnet" => "dotnet",
         "maven-modules" => "java",
         "gradle-modules" | "flutter-android" => "gradle",
+        "make" => "make",
+        "just" => "just",
+        "task" => "task",
         _ => "run",
     };
 

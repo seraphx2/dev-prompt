@@ -779,9 +779,21 @@ mod tests {
         let got = run_captured(program, &args, &dir, Duration::from_secs(1));
         assert!(got.unwrap_err().contains("stopped"));
 
-        // Windows: a process left behind would keep the folder from going.
+        // Windows: a process left behind (the ping, for its 37 s) would keep
+        // the folder from going. A virus scanner looking at the new folder
+        // holds it for a moment too, so this gives it a few seconds — far
+        // short of the ping's.
         #[cfg(windows)]
-        assert!(std::fs::remove_dir_all(&dir).is_ok(), "something still holds {}", dir.display());
+        {
+            let started = Instant::now();
+            while std::fs::remove_dir_all(&dir).is_err() {
+                assert!(started.elapsed() < Duration::from_secs(5), "something still holds {}", dir.display());
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            if started.elapsed() > Duration::from_millis(50) {
+                eprintln!("held for {:?}", started.elapsed());
+            }
+        }
         // Linux: the folder could go regardless — look for the process.
         #[cfg(not(windows))]
         {

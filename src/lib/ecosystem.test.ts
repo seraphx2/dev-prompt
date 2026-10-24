@@ -3,6 +3,20 @@ import { ecosystems, vcsBadge } from "./ecosystem";
 import { icons } from "./icons";
 
 describe("ecosystems", () => {
+  it("shows a task runner as its icon, both Makefiles as one", () => {
+    const { icons: found, others } = ecosystems(["Makefile", "makefile", "justfile", "Taskfile.yml"]);
+    expect(found.map((e) => [e.icon, e.files])).toEqual([
+      ["make", ["Makefile", "makefile"]],
+      ["just", ["justfile"]],
+      ["task", ["Taskfile.yml"]],
+    ]);
+    expect(others).toEqual([]);
+  });
+
+  it("folds a marker no ecosystem claims into one chip whatever its case", () => {
+    expect(ecosystems(["Notes.md", "notes.md"]).others).toEqual(["Notes.md"]);
+  });
+
   it("groups a repo's project files into one icon per ecosystem", () => {
     const { icons: found, others } = ecosystems(["Dockerfile", "docker-compose.yml", "package.json", "sln", "slnx"]);
     expect(found.map((e) => [e.icon, e.files])).toEqual([
@@ -14,9 +28,9 @@ describe("ecosystems", () => {
   });
 
   it("keeps a file no ecosystem claims as text", () => {
-    expect(ecosystems(["Makefile", "Cargo.toml"])).toEqual({
+    expect(ecosystems(["BUILD.bazel", "Cargo.toml"])).toEqual({
       icons: [{ icon: "rust", name: "Rust", files: ["Cargo.toml"] }],
-      others: ["Makefile"],
+      others: ["BUILD.bazel"],
     });
     expect(ecosystems([])).toEqual({ icons: [], others: [] });
   });

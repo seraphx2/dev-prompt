@@ -84,13 +84,20 @@ true
 # must happen before createrepo_c reads the checksums. Re-signing an already
 # signed package just replaces the header sig, so signing all of them every run
 # is fine (KEEP caps this at a handful of ~4 MB files).
-# Override %__gpg_sign_cmd with an absolute gpg path (rpm doesn't PATH-search it)
-# and loopback/batch flags so it never tries to prompt on a passphrase-less key.
-rpm_sign_cmd="$(command -v gpg) --no-verbose --no-armor --batch --pinentry-mode loopback -u \"%{_gpg_name}\" -sbo %{__signature_filename} --digest-algo sha256 %{__plaintext_filename}"
+# rpm builds the gpg command itself; only its settings are given here, never
+# the command: rpm 4.x fills in %{__plaintext_filename}, rpm 6 (Ubuntu 26.04)
+# passes the files as arguments instead, so an overridden command fits only
+# one of them. gpg by absolute path (rpm doesn't PATH-search it), batch +
+# loopback so it never tries to prompt on the passphrase-less key, and the key
+# under both names (rpm 4.x `_gpg_name`, rpm 6 `_openpgp_sign_id`).
 for f in "$SITE"/rpm/*.rpm; do
   [ -e "$f" ] || continue   # nullglob is off here; skip the literal glob on an empty pool
-  rpm --define "_gpg_name $KEYID" \
-      --define "__gpg_sign_cmd $rpm_sign_cmd" \
+  rpm --define "__gpg $(command -v gpg)" \
+      --define "_openpgp_sign gpg" \
+      --define "_gpg_name $KEYID" \
+      --define "_openpgp_sign_id $KEYID" \
+      --define "_gpg_digest_algo sha256" \
+      --define "_gpg_sign_cmd_extra_args --batch --pinentry-mode loopback" \
       --addsign "$f"
 done
 rm -rf "$SITE/rpm/repodata"
