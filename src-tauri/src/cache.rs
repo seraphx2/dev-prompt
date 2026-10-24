@@ -81,9 +81,16 @@ pub fn is_stale(age_secs: i64, ttl_secs: u64) -> bool {
 
 // --- installed-apps cache (parallel to the repo cache) --------------------
 
+/// Bumped when gathering learns something a cache from an older build
+/// doesn't carry (1: Store apps that can run as administrator), so that cache
+/// counts as stale and the list is gathered again.
+const APPS_CACHE_FORMAT: u32 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 struct AppsCacheFile {
+    /// [`APPS_CACHE_FORMAT`] when written; 0 before it existed.
+    format: u32,
     written_at: u64,
     apps: Vec<AppEntry>,
     /// Every gathered row the list was combined from — what lets the app
@@ -106,6 +113,11 @@ pub fn load_apps() -> AppResult<LoadedApps> {
     }
     let parsed: AppsCacheFile =
         serde_json::from_str(&std::fs::read_to_string(&path)?).unwrap_or_default();
+    if parsed.format != APPS_CACHE_FORMAT {
+        // Still shown at once, but rescanned on first use — and no index, so
+        // an app-watcher change can't mix the old rows back in.
+        return Ok(LoadedApps { apps: parsed.apps, index: Index::default(), age_secs: -1 });
+    }
     let age = now_secs().saturating_sub(parsed.written_at) as i64;
     Ok(LoadedApps { apps: parsed.apps, index: parsed.index, age_secs: age })
 }
@@ -113,6 +125,7 @@ pub fn load_apps() -> AppResult<LoadedApps> {
 pub fn save_apps(apps: &[AppEntry], index: &Index) -> AppResult<()> {
     let path = cache_dir()?.join(APPS_CACHE_FILE);
     let file = AppsCacheFile {
+        format: APPS_CACHE_FORMAT,
         written_at: now_secs(),
         apps: apps.to_vec(),
         index: index.clone(),
@@ -230,6 +243,7 @@ mod tests {
             elevate: false,
         };
         let file = AppsCacheFile {
+            format: APPS_CACHE_FORMAT,
             written_at: 100,
             apps: vec![app.clone()],
             index: Index::default(),
