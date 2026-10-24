@@ -271,6 +271,10 @@ fn vcs_state_file(top: &str, rel: &[String]) -> Option<bool> {
         t if t.starts_with("_FOSSIL_") || t.starts_with(".fslckout") => {
             rel.is_empty() && (t == "_FOSSIL_" || t == ".fslckout")
         }
+        // A cloned checkout keeps its repository file inside it (see
+        // clone.rs): a commit or sync rewrites it (the unsent count); status
+        // reads don't.
+        t if t.starts_with(".fossil") => rel.is_empty() && t == ".fossil",
         "_darcs" => first == "patches" || first == "hashed_inventory",
         _ => return None,
     };
@@ -784,6 +788,8 @@ mod tests {
         assert!(touches("_FOSSIL_"));
         assert!(!touches("_FOSSIL_-journal"), "comes and goes with every read");
         assert!(touches(".fslckout"));
+        assert!(touches(".fossil"));
+        assert!(!touches(".fossil-journal"));
         assert!(f.status_targets(&repo, &repo).is_empty());
         assert!(f.status_targets(&repo, &root.join("other/file")).is_empty());
         let _ = std::fs::remove_dir_all(&root);

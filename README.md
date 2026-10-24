@@ -66,8 +66,9 @@ WebView. Website: **[seraphx2.github.io/dev-prompt](https://seraphx2.github.io/d
   repo. It keeps running when you hide the overlay, so a dev server stays up and
   the hotkey brings you straight back to it. Every running shell is one `$` (or
   a footer click) away, to jump into or close.
-- **Repo management** — **New repository** (`Ctrl+Shift+N`) creates a folder
-  with Git, Jujutsu, Mercurial, Breezy or Darcs set up; **Set up version
+- **Repo management** — paste a repository's URL into the search to **clone**
+  it into one of your roots; **New repository** (`Ctrl+Shift+N`) creates a
+  folder with Git, Jujutsu, Mercurial, Breezy or Darcs set up; **Set up version
   control…** does the same for a folder that has none; **Move to Recycle Bin**
   checks for unpushed commits and uncommitted work first, and offers Undo.
 - **App launcher** — type `>` to search your installed applications instead of
@@ -272,6 +273,17 @@ you have more than one) and a tool; `Tab` moves between fields, `Enter`
 creates, `Esc` goes back. If setup fails, the error is shown and the folder is
 removed again. No remotes are set up; do that from your terminal or editor.
 
+**Clone** — paste a repository's address into the search (`https://…`,
+`git@host:owner/repo`, `svn://…`, or GitHub's `owner/repo` when no repo
+matches it) and press `Enter`. The same form opens with the name taken from
+the address; pick a root and press `Enter` again. dev-prompt tells from the
+address what's there — or, when it can't, asks Git, Mercurial, Subversion and
+Breezy in turn — and offers the installed tools that can clone it: Git or
+Jujutsu (colocated) for a Git repository, Mercurial, Subversion, Fossil or
+Breezy for theirs. Nothing waits on a password prompt you can't see: Git's
+credential manager still asks in its own window, and an SSH key needs to be
+in your agent. If the clone fails, its folder is removed again.
+
 A folder that isn't under version control yet (notes, documents, a project you
 haven't set up) shows up without a branch, and its action menu offers **Set up
 version control…** — the same form, for that folder. If setup fails, only what
@@ -471,6 +483,7 @@ src-tauri/                  Rust backend
   src/apps.rs               installed-app discovery for the > scope
   src/app_watch.rs          app watcher: Start Menu / registry / .desktop changes
   src/provision.rs          New repository / Set up version control
+  src/clone.rs              Clone: what's at a URL, and cloning it into a root
   src/removal.rs            Move to Recycle Bin: the at-risk check, Undo
   src/vcs_state.rs          a working copy's state, every system: branch, changes, unpushed, stashes, …
   src/status.rs             keeps every repo's state current in the background

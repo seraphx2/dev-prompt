@@ -61,6 +61,7 @@
   } from "./lib/types";
   import { fuzzyScore } from "./lib/fuzzy";
   import { attention, VCS_ACTION, vcsActions, vocab } from "./lib/vcsStatus";
+  import { cloneLabel, cloneSource } from "./lib/clone";
   import { followStatuses, loadStatuses, setStatus, statuses } from "./lib/statuses.svelte";
   import { stepZoom, zoomKey, zoomLabel } from "./lib/zoom";
   import { icons } from "./lib/icons";
@@ -137,9 +138,14 @@
     appScope || shellScope || attentionScope ? query.slice(1).replace(/^\s+/, "") : query.trim(),
   );
 
+  /** A URL (or owner/repo) in the search box: something to clone. */
+  const cloneKind = $derived(!appScope && !shellScope && !attentionScope ? cloneSource(query) : null);
+
   /** The repo rows on screen: the search results, or in "!" scope the ones
-   *  needing attention, most urgent first (the search order within that). */
+   *  needing attention, most urgent first (the search order within that). A
+   *  URL matches nothing — its letters would scatter across every name. */
   const listed = $derived.by<ScoredRepo[]>(() => {
+    if (cloneKind === "url") return [];
     if (!attentionScope) return results;
     return results
       .map((r, i) => ({ r, i, level: attention(statuses.get(r.repo.path)) }))
@@ -147,6 +153,22 @@
       .sort((a, b) => b.level - a.level || a.i - b.i)
       .map((x) => x.r);
   });
+  /** What Enter would clone: a URL always, owner/repo only when no repo matches. */
+  const cloneOffer = $derived(
+    cloneKind === "url" || (cloneKind === "shorthand" && listed.length === 0) ? query.trim() : null,
+  );
+  /** Set while the New repository form is in clone mode. */
+  let cloneUrl = $state<string | null>(null);
+  $effect(() => {
+    if (mode !== "new-repo") cloneUrl = null;
+  });
+
+  function openClone(src: string) {
+    cloneUrl = src;
+    setupTarget = null;
+    mode = "new-repo";
+  }
+
   /** How many listed repos need attention — the footer's count. */
   const attentionCount = $derived([...statuses.values()].filter((s) => attention(s) > 0).length);
 
@@ -688,7 +710,7 @@
       : mode === "repo-list"
       ? [
           ["Up/Down", "move"],
-          ["Enter", "actions"],
+          ["Enter", cloneOffer && !listed.length ? "clone" : "actions"],
           ["Esc", "close"],
         ]
       : mode === "settings"
@@ -701,7 +723,7 @@
           : mode === "new-repo"
             ? [
                 ["Tab", "next field"],
-                ["Enter", setupTarget ? "set up" : "create"],
+                ["Enter", setupTarget ? "set up" : cloneUrl !== null ? "clone" : "create"],
                 ["Esc", "back"],
               ]
           : mode === "remove"
@@ -1129,6 +1151,8 @@
         if (hit) resumeShell(hit.session);
       } else if (listed[selected]) {
         openActions(listed[selected]);
+      } else if (cloneOffer) {
+        openClone(cloneOffer);
       }
     } else if (e.key === "Delete" && e.ctrlKey && !appScope && !shellScope) {
       // Ctrl+Delete: Move to Recycle Bin for the selected repo (the check
@@ -1744,6 +1768,24 @@
           bottom-left — and add the directories your repositories live in.
         </p>
       </div>
+    {:else if cloneOffer}
+      <div class="px-2 py-2">
+        <button
+          type="button"
+          onclick={() => cloneOffer && openClone(cloneOffer)}
+          class="flex w-full items-center gap-3 rounded-lg bg-white/10 px-3 py-2 text-left"
+        >
+          <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            {@html icons.branch.raw}
+          </svg>
+          <span class="min-w-0 flex-1">
+            <span class="block truncate text-[15px] text-white/90">Clone {cloneLabel(cloneOffer)}</span>
+            <span class="block truncate text-[12px] text-white/50"
+              >{cloneKind === "shorthand" ? "From GitHub. " : ""}Pick where it goes and what clones it next.</span
+            >
+          </span>
+        </button>
+      </div>
     {:else}
       <ResultList
         entries={listed}
@@ -1795,6 +1837,7 @@
       existing={setupTarget
         ? { path: setupTarget.repo.path, name: setupTarget.repo.name }
         : null}
+      clone={cloneUrl}
       oncreated={openCreated}
       onback={newRepoBack}
     />

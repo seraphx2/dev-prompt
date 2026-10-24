@@ -13,6 +13,7 @@ mod apps;
 #[cfg(target_os = "linux")]
 mod autostart;
 mod cache;
+mod clone;
 mod commands;
 mod config;
 mod dotnet;
@@ -486,6 +487,8 @@ pub fn run() {
             commands::folders_exist,
             commands::create_repo,
             commands::init_repo,
+            commands::clone_plan,
+            commands::clone_repo,
             commands::list_statuses,
             commands::refresh_statuses,
             commands::vcs_branches,

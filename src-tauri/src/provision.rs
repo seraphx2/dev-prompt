@@ -137,7 +137,7 @@ fn is_available(p: &Provisioner) -> bool {
 
 /// An absolute program path is used as-is when it exists; a bare name is
 /// looked up on `PATH`.
-fn resolve_program(program: &str) -> Option<String> {
+pub(crate) fn resolve_program(program: &str) -> Option<String> {
     if !program.contains(['/', '\\']) {
         return which(program);
     }
@@ -442,7 +442,7 @@ fn run_step(argv: &[String], cwd: &Path) -> Result<String, String> {
     run_captured(&program, &argv[1..], cwd, RUN_TIMEOUT).map_err(|e| format!("`{shown}` failed: {e}"))
 }
 
-fn display_command(argv: &[String]) -> String {
+pub(crate) fn display_command(argv: &[String]) -> String {
     argv.iter()
         .map(|a| if a.contains(' ') || a.is_empty() { format!("\"{a}\"") } else { a.clone() })
         .collect::<Vec<_>>()

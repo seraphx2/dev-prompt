@@ -268,6 +268,38 @@ pub async fn create_repo(
     .map_err(|e| AppError::msg(format!("new repository task failed: {e}")))?
 }
 
+/// What a URL (or `owner/repo`) is, its folder name, and the installed tools
+/// that can clone it — for the New repository form in clone mode. May ask
+/// the network, so off the UI thread.
+#[tauri::command]
+pub async fn clone_plan(url: String) -> AppResult<crate::clone::ClonePlan> {
+    tauri::async_runtime::spawn_blocking(move || crate::clone::plan(&url))
+        .await
+        .map_err(|e| AppError::msg(format!("clone check task failed: {e}")))?
+}
+
+/// Clone `url` into `<root>/<name>` with `tool` and add it to the repo list
+/// (and cache) without a rescan. Emits `repos:updated`.
+#[tauri::command]
+pub async fn clone_repo(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    root: String,
+    name: String,
+    url: String,
+    tool: String,
+) -> AppResult<Repo> {
+    let cfg = state.config.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = crate::clone::clone(&cfg, &root, &name, &url, &tool)?;
+        let ctx = inspect_cold(&repo.path, &cfg);
+        put_repo(&app, &repo, ctx);
+        Ok::<_, AppError>(repo)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("clone task failed: {e}")))?
+}
+
 /// Run a version-control setup in an existing folder that has none ("Set up
 /// version control…"). The repo's list entry is replaced with the versioned
 /// one. Emits `repos:updated`.

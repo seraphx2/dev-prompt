@@ -1,16 +1,19 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { checkNewRepo, createRepo, initRepo, newRepoOptions } from "../ipc";
-  import type { NewRepoOptions, ProvisionTool, Repo } from "../types";
+  import { checkNewRepo, clonePlan, cloneRepo, createRepo, initRepo, newRepoOptions } from "../ipc";
+  import type { ClonePlan, NewRepoOptions, ProvisionTool, Repo } from "../types";
   import { middleTruncate } from "../text";
 
   let {
     /** Set up version control in this existing folder instead of creating one. */
     existing = null,
+    /** Clone this (a URL, or GitHub's owner/repo) instead of creating a folder. */
+    clone = null,
     oncreated,
     onback,
   }: {
     existing?: { path: string; name: string } | null;
+    clone?: string | null;
     oncreated: (repo: Repo) => void;
     onback: () => void;
   } = $props();
@@ -18,6 +21,7 @@
   // Last location / tool used, so a repeat visit is "type a name, Enter".
   const LAST_ROOT = "newRepo.root";
   const LAST_TOOL = "newRepo.tool";
+  const LAST_CLONE_TOOL = "newRepo.cloneTool";
   function recall(key: string): string | null {
     try {
       return localStorage.getItem(key);
@@ -47,9 +51,20 @@
   let attempted = $state(false);
   let nameInput: HTMLInputElement | undefined = $state();
 
-  const tool = $derived<ProvisionTool | undefined>(
-    options?.tools.find((t) => t.id === toolId),
-  );
+  // Clone mode: what's at the URL, worked out as it's typed.
+  let url = $state("");
+  let plan = $state<ClonePlan | null>(null);
+  let planError = $state("");
+  let planning = $state(false);
+  /** The name was typed by hand — a new plan no longer replaces it. */
+  let nameEdited = $state(false);
+  /** Enter came before the plan did: clone as soon as it's in. */
+  let submitWhenPlanned = false;
+
+  /** The tools on offer: the installed setups, or in clone mode the ones that
+   *  can clone this URL. */
+  const tools = $derived<ProvisionTool[]>(clone !== null ? (plan?.tools ?? []) : (options?.tools ?? []));
+  const tool = $derived<ProvisionTool | undefined>(tools.find((t) => t.id === toolId));
   const toolValues = $derived(values[toolId] ?? {});
   const missingField = $derived(
     tool?.fields.find((f) => !(toolValues[f.id] ?? "").trim()),
@@ -58,6 +73,7 @@
     !busy &&
       !!tool &&
       !missingField &&
+      (clone === null || (!planning && !!plan)) &&
       (existing !== null ||
         (!!root && name.length > 0 && nameProblem === null)),
   );
@@ -107,6 +123,8 @@
   });
 
   onMount(async () => {
+    // The field starts with what was pasted, then it's the user's to edit.
+    if (clone !== null) url = clone;
     try {
       const o = await newRepoOptions();
       const wantRoot = recall(LAST_ROOT);
@@ -121,7 +139,9 @@
       } else {
         root = o.roots.find((r) => r === wantRoot) ?? o.roots[0] ?? "";
       }
-      toolId = o.tools.find((t) => t.id === wantTool)?.id ?? o.tools[0]?.id ?? "";
+      if (clone === null) {
+        toolId = o.tools.find((t) => t.id === wantTool)?.id ?? o.tools[0]?.id ?? "";
+      }
       values = Object.fromEntries(
         o.tools.map((t) => [
           t.id,
@@ -166,6 +186,44 @@
     });
   });
 
+  // Clone mode: re-plan a moment after the URL stops changing. Sequenced so a
+  // slow answer for an older URL can't overwrite a newer one.
+  let planSeq = 0;
+  $effect(() => {
+    if (clone === null) return;
+    const u = url.trim();
+    const seq = ++planSeq;
+    plan = null;
+    planError = "";
+    if (!u) {
+      planning = false;
+      return;
+    }
+    planning = true;
+    const timer = setTimeout(() => {
+      void clonePlan(u)
+        .then((p) => {
+          if (seq !== planSeq) return;
+          plan = p;
+          if (!nameEdited) name = p.name;
+          const want = recall(LAST_CLONE_TOOL);
+          toolId = p.tools.find((t) => t.id === want)?.id ?? p.tools[0]?.id ?? "";
+        })
+        .catch((e) => {
+          if (seq === planSeq) planError = `${e}`;
+        })
+        .finally(() => {
+          if (seq !== planSeq) return;
+          planning = false;
+          if (submitWhenPlanned) {
+            submitWhenPlanned = false;
+            void submit();
+          }
+        });
+    }, 350);
+    return () => clearTimeout(timer);
+  });
+
   // A changed input makes the last failure stale.
   $effect(() => {
     void name;
@@ -176,15 +234,21 @@
 
   async function submit() {
     attempted = true;
+    if (clone !== null && planning) {
+      submitWhenPlanned = true;
+      return;
+    }
     if (!canCreate || !tool) return;
     busy = true;
     createError = "";
     try {
       const repo = existing
         ? await initRepo(existing.path, tool.id, { ...toolValues })
-        : await createRepo(root, name, tool.id, { ...toolValues });
+        : clone !== null && plan
+          ? await cloneRepo(root, name, plan.url, tool.id)
+          : await createRepo(root, name, tool.id, { ...toolValues });
       if (!existing) remember(LAST_ROOT, root);
-      remember(LAST_TOOL, tool.id);
+      remember(clone !== null ? LAST_CLONE_TOOL : LAST_TOOL, tool.id);
       oncreated(repo);
     } catch (e) {
       createError = `${e}`;
@@ -256,6 +320,8 @@
     >
     <span class="shrink-0 text-white/15">/</span>
     <span class="text-[13px] text-white/60">Set up version control</span>
+  {:else if clone !== null}
+    <span class="text-[13px] font-medium text-white/80">Clone repository</span>
   {:else}
     <span class="text-[13px] font-medium text-white/80">New repository</span>
   {/if}
@@ -283,11 +349,33 @@
           </p>
         </div>
       {:else}
+        {#if clone !== null}
+          <label class="block space-y-1.5">
+            <span class="text-orange-400">From</span>
+            <input
+              bind:value={url}
+              disabled={busy}
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="https://github.com/owner/repo"
+              class="w-full {field}"
+            />
+            {#if planning}
+              <span class="block text-[12px] text-white/50">Checking what's there…</span>
+            {:else if planError}
+              <span class="block whitespace-pre-wrap text-[12px] text-red-300">{planError}</span>
+            {:else if plan && plan.url !== url.trim()}
+              <span class="block font-mono text-[12px] text-white/50">{plan.url}</span>
+            {/if}
+          </label>
+        {/if}
+
         <label class="block space-y-1.5">
           <span class="text-orange-400">Name</span>
           <input
             bind:this={nameInput}
             bind:value={name}
+            oninput={() => (nameEdited = true)}
             disabled={busy}
             spellcheck="false"
             autocomplete="off"
@@ -336,7 +424,9 @@
 
       <div class="space-y-1.5">
         <span class="block text-orange-400">Version control</span>
-        {#if options.tools.length === 0}
+        {#if clone !== null && !plan}
+          <p class="text-white/45">{planning ? "…" : "Enter what to clone."}</p>
+        {:else if tools.length === 0}
           <p class="text-white/45">
             None of the supported tools (Git, Jujutsu, Mercurial, Breezy, Darcs)
             is on PATH. Install one, or add your own under
@@ -351,12 +441,12 @@
             onkeydown={(e) =>
               onGroupKey(
                 e,
-                options!.tools.map((t) => t.id),
+                tools.map((t) => t.id),
                 toolId,
                 (v) => (toolId = v),
               )}
           >
-            {#each options.tools as t (t.id)}
+            {#each tools as t (t.id)}
               <button
                 type="button"
                 role="radio"
@@ -415,10 +505,15 @@
         onclick={() => void submit()}
         class="rounded-sm bg-sky-500/80 px-3.5 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-40"
       >
-        {#if existing}{busy ? "Setting up…" : "Set up"}{:else}{busy
+        {#if existing}{busy ? "Setting up…" : "Set up"}{:else if clone !== null}{busy
+            ? "Cloning…"
+            : "Clone"}{:else}{busy
             ? "Creating…"
             : "Create"}{/if}
       </button>
     </div>
+    {#if busy && clone !== null}
+      <p class="pt-2 text-right text-[12px] text-white/50">A big repository can take a few minutes.</p>
+    {/if}
   {/if}
 </div>

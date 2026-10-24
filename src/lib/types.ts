@@ -344,6 +344,18 @@ export interface AppListPayload {
 }
 
 /** What the "New repository" screen (Ctrl+Shift+N) can offer. */
+/** What a pasted URL is and who can clone it — the New repository form in
+ *  clone mode. */
+export interface ClonePlan {
+  /** What will be cloned (`owner/repo` spelled out as a GitHub URL). */
+  url: string;
+  /** The folder name the URL suggests. */
+  name: string;
+  /** Installed tools that can clone it, the usual one first; `run` has
+   *  `{{dir}}` for the new folder. */
+  tools: ProvisionTool[];
+}
+
 export interface NewRepoOptions {
   /** Configured roots that exist right now, expanded. */
   roots: string[];

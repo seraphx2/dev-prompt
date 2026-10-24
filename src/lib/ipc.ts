@@ -8,6 +8,7 @@ import type {
   AppEntry,
   AppListPayload,
   BranchList,
+  ClonePlan,
   ConfigPatch,
   ConfigSummary,
   FileManagerOption,
@@ -208,6 +209,18 @@ export function checkNewRepo(root: string, name: string): Promise<string | null>
  * Create `<root>/<name>` and run version-control setup `tool` in it. Resolves to
  * the new repo (already added to the list); rejects with the tool's error.
  */
+/** What `url` is (asking the installed tools when its shape doesn't say), its
+ *  folder name, and the tools that can clone it. Rejects when nothing can. */
+export function clonePlan(url: string): Promise<ClonePlan> {
+  return invoke<ClonePlan>("clone_plan", { url });
+}
+
+/** Clone `url` into `<root>/<name>` with `tool`. Resolves to the new repo
+ *  (already added to the list); rejects with the tool's error. */
+export function cloneRepo(root: string, name: string, url: string, tool: string): Promise<Repo> {
+  return invoke<Repo>("clone_repo", { root, name, url, tool });
+}
+
 export function createRepo(
   root: string,
   name: string,
