@@ -1,7 +1,7 @@
 # dev-prompt
 
-**A command palette for every repo you own — one that reads each project and
-hands you its actual scripts, builds, and sub-packages.**
+**A command palette for every repo you own — where each one stands, and what
+it can actually do.**
 
 ![dev-prompt demo](docs/img/0_dev-prompt_demo.gif)
 
@@ -10,20 +10,28 @@ repository under your code folders appears. Type a few letters, hit `Enter`, and
 that repo's action menu is up: open it in your editor or terminal, run one of
 its scripts, or drop into a shell right inside the overlay.
 
+Every repo in that list shows where it stands: the branch it's on, and anything
+that exists only on this machine or was left half-done — uncommitted changes,
+commits nobody else has, stashes, a rebase stopped on a conflict. That works for
+Git, Jujutsu, Mercurial, Subversion, Fossil and Breezy, each in its own terms,
+and stays current in the background. Type `!` for just the repos that need you;
+open one for the safe next step (a fast-forward pull, a push, a fetch), a branch
+switcher, or a second working copy for an AI agent or a long build.
+
 Most launchers stop at "open the folder." dev-prompt opens the action menu it
 built by _inspecting the project_: the exact `package.json` scripts it defines
 (run through the right package manager), `cargo test`, your Makefile's or
-justfile's own targets, the `.sln` opened in
-Visual Studio, `docker compose up`, a jump straight into the `packages/api`
-sub-project. No file manager, no `cd`, no remembering whether it's `npm run dev`
-or `pnpm start`.
+justfile's own targets, the `.sln` opened in Visual Studio, `docker compose up`,
+a jump straight into the `packages/api` sub-project. No file manager, no `cd`,
+no remembering whether it's `npm run dev` or `pnpm start`.
 
 It adapts to your machine — actions for tools you haven't installed simply don't
 appear — and the entire editor-and-toolchain brain is a YAML file you can extend
-in a few lines. It looks after the repos themselves too: create one with version
-control already set up, put an existing folder under version control, or move
-one to the Recycle Bin after it checks what would be lost. Appears instantly,
-vanishes the moment it loses focus, never touches your taskbar.
+in a few lines. It looks after the repos themselves too: clone one by pasting
+its address, create one with version control already set up, put an existing
+folder under version control, or move one to the Recycle Bin after it checks
+what would be lost. Appears instantly, vanishes the moment it loses focus,
+never touches your taskbar.
 
 Cross-platform, built with **Tauri v2** (Rust) + **Svelte 5** + **Tailwind
 CSS** — a small single binary with no runtime dependencies beyond the system
@@ -32,14 +40,7 @@ WebView. Website: **[seraphx2.github.io/dev-prompt](https://seraphx2.github.io/d
 ## What it does
 
 - **Global-hotkey overlay** — frameless, centered, dismiss-on-blur. Toggle with
-  `Ctrl/Cmd+Backslash` (rebindable via a click-to-record field in Settings).
-- **Multi-root scan + cache** — walks the directories you list, respects
-  `.gitignore`, collapses nested repos, caches the result for instant startup and
-  refreshes in the background when stale. A folder watcher keeps the list
-  current while the app runs: a repo you clone or delete appears or goes on its
-  own.
-- **Fuzzy search** — fzf-style ranking over repo name, branch and path, with
-  match highlighting.
+  `Ctrl+Backslash` (rebindable via a click-to-record field in Settings).
 - **Branch and working-copy status** — for Git, Jujutsu, Mercurial,
   Subversion, Fossil and Breezy, each repo shows what's checked out and flags
   for what exists only here or is left half-done (uncommitted changes, unpushed
@@ -50,17 +51,26 @@ WebView. Website: **[seraphx2.github.io/dev-prompt](https://seraphx2.github.io/d
   and a branch switcher that also makes worktrees, workspaces, shares and
   checkouts. Everything else hands off to your GUI. See
   [`docs/vcs-status.md`](docs/vcs-status.md).
+- **Multi-root scan + cache** — walks the directories you list, respects
+  `.gitignore`, collapses nested repos, caches the result for instant startup and
+  refreshes in the background when stale. A folder watcher keeps the list
+  current while the app runs: a repo you clone or delete appears or goes on its
+  own.
+- **Fuzzy search** — fzf-style ranking over repo name, branch and path, with
+  match highlighting.
 - **Context detection** — on selecting a repo it inspects the tree (root plus
   side-by-side and `packages/*`-style sub-projects) for `.sln` / `.csproj`,
   `package.json` scripts, `Cargo.toml`, `go.mod` / `go.work`, Python
-  (`pyproject.toml` / `requirements.txt`, uv / poetry), `docker-compose`, and more.
+  (`pyproject.toml` / `requirements.txt`, uv / poetry), `docker-compose`,
+  Makefile / justfile / Taskfile targets, and more.
 - **Config-driven rule engine** — every editor / build-tool / launcher mapping
   lives in a bundled `default_config.yaml` (markers, program resolution, rules,
   universal actions). A hand-edited `rules.yaml` layers your own on top.
 - **Action menu** — always-available actions (terminal, file manager, copy path)
   first, then detected per-ecosystem actions; multi-project repos collapse into
   drill-in submenus. Actions gracefully disappear when the tool they need isn't
-  installed.
+  installed. `Shift` runs one as administrator (an admin terminal in the repo is
+  `Ctrl+Shift+T`).
 - **Built-in shell** — **Open shell** (`Ctrl+R` in the action menu) opens
   your own shell (pwsh, bash, zsh, fish, nu, …) right in the overlay, at the
   repo. It keeps running when you hide the overlay, so a dev server stays up and
@@ -73,7 +83,8 @@ WebView. Website: **[seraphx2.github.io/dev-prompt](https://seraphx2.github.io/d
   checks for unpushed commits and uncommitted work first, and offers Undo.
 - **App launcher** — type `>` to search your installed applications instead of
   repos (Start Menu, Store and installed programs on Windows; `.desktop`
-  entries on Linux), most-used first.
+  entries on Linux), most-used first. `Shift+Enter` runs one as administrator;
+  `Tab` opens its menu.
 - **Right-click menus** — on repos, apps, actions and the shell: the useful
   options for each, styled like the rest of the app.
 - **Settings screen** — a sidebar of pages (General, Repos, Tools, Apps, the
@@ -527,6 +538,11 @@ npm run check                 # svelte-check (types)
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+The MIT license covers the code. The name "dev-prompt" and its logo aren't
+covered by it: a fork or a redistribution is welcome under the license, but
+under its own name and logo, so nobody mistakes it for this project or its
+releases.
 
 ## Install note
 

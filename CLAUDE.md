@@ -135,6 +135,22 @@ surrounding style rather than running `cargo fmt`.
    absolute paths. See `docs/vcs-status.md`; `scripts/vcs-scenarios.sh <root>
    [systems]` builds a test repo per state (`--remove` deletes them), and `DP_SCENARIO_ROOT=<root> cargo
    test scenario_report -- --ignored --nocapture` prints what each reads as.
+   Every one of these commands goes through `provision::run_captured_env`:
+   no console, stdin closed, output captured, and a time limit that only
+   catches a stuck command (10 min local, 30 min remote — a big repo on a
+   cold disk is just slow). A command it stops takes everything it started
+   with it (a job object on Windows, a process group on Linux): Git for
+   Windows' `git.exe` is a launcher, and stopping only that leaves the real
+   Git running with the repo as its working folder, which then can't be
+   moved or deleted. A read a screen waits on (the Recycle Bin check, the
+   branch switcher, the menu's details) runs under `provision::cancellable`
+   with a token from `AppState.reads`; leaving the screen calls `cancel_read`.
+   **`clone.rs`** is Clone (a URL pasted into the search): what's at the
+   address, from its shape or by asking each installed tool, and cloning it
+   into a root with Git, jj (colocated), Mercurial, Subversion, Fossil (its
+   repository file kept inside the checkout as `.fossil`) or Breezy. The
+   frontend runs it from `App.svelte`, not the form, so it outlives the
+   form and a hide; the `Banner` component shows it, with Cancel.
 3. On selecting a repo, **`inspect.rs`** walks its tree once into a
    `RepoContext` — root plus side-by-side / `packages/*`-style sub-projects,
    each with its manifest details (npm scripts + package manager, Cargo.toml,
@@ -230,4 +246,14 @@ surrounding style rather than running `cargo fmt`.
 
 Usually pure data in `src-tauri/src/default_config.yaml` (a `markers` entry,
 a `programs` candidate list, a `rules` entry with `match`/`actions`) — no Rust
-required. Full field reference in `docs/rules-engine.md`.
+required. Full field reference in `docs/rules-engine.md`. A tool whose actions
+come from a file's contents (one per target) is a `provider`: an arm in
+`rules.rs::provider_actions` plus a small text parser module, like
+`gowork.rs`, `maven.rs`, `gradle.rs` or `tasks.rs` (Makefile / justfile /
+Taskfile targets) — parsed, never by running the tool, since they run on every
+menu open.
+
+Elevation (Shift): an action that starts a program gets an `elevated` launch
+(`rules::elevate` / `elevate_program`) — Windows runs it through the "runas"
+verb with the folder on its command line (an elevated process doesn't reliably
+keep its working directory); Linux gives only the plain terminal a root shell.
