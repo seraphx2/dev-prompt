@@ -58,6 +58,14 @@ pub struct AppState {
     pub scan_gate: Mutex<()>,
     /// The built-in shell's live sessions (see `pty.rs`).
     pub shells: std::sync::Arc<crate::pty::Sessions>,
+    /// Reads a screen is waiting on, cancelled when it's left.
+    pub reads: crate::provision::Reads,
+    /// Each repo's working-copy state — branch, uncommitted work, unpushed
+    /// commits — kept current in the background (see `status.rs`).
+    pub statuses: crate::status::Statuses,
+    /// The overlay is at its roomier size (a shell is open), for re-sizing
+    /// it when the zoom changes.
+    pub overlay_large: Mutex<bool>,
 }
 
 impl AppState {
@@ -94,6 +102,9 @@ impl AppState {
             watcher: Mutex::new(None),
             scan_gate: Mutex::new(()),
             shells: Default::default(),
+            reads: Default::default(),
+            statuses: crate::status::Statuses::load(),
+            overlay_large: Mutex::new(false),
         }
     }
 }
@@ -191,6 +202,9 @@ pub fn rescan_blocking(app: &AppHandle, reload: bool) -> AppResult<RepoListPaylo
 
     let out = payload(&state);
     let _ = app.emit("repos:updated", ());
+    // New repos have no status yet; gone ones lose theirs.
+    crate::status::sweep(app, crate::status::SWEEP_AGE);
+    crate::watch::track_vcs_dirs(app);
     Ok(out)
 }
 
@@ -200,8 +214,9 @@ pub fn search_repos(
     query: String,
     limit: Option<usize>,
 ) -> Vec<ScoredRepo> {
+    let branches = state.statuses.branches();
     let repos = state.repos.lock().unwrap();
-    index::search(&query, &repos, limit.unwrap_or(200))
+    index::search(&query, &repos, &branches, limit.unwrap_or(200))
 }
 
 // --- new repository (Ctrl+Shift+N) -----------------------------------------
@@ -256,6 +271,42 @@ pub async fn create_repo(
     .map_err(|e| AppError::msg(format!("new repository task failed: {e}")))?
 }
 
+/// What a URL (or `owner/repo`) is, its folder name, and the installed tools
+/// that can clone it — for the New repository form in clone mode. May ask
+/// the network, so off the UI thread.
+#[tauri::command]
+pub async fn clone_plan(state: State<'_, AppState>, url: String) -> AppResult<crate::clone::ClonePlan> {
+    // A newer address (or leaving the form) stops this one's probes.
+    let token = state.reads.start("plan");
+    tauri::async_runtime::spawn_blocking(move || crate::provision::cancellable(token, || crate::clone::plan(&url)))
+        .await
+        .map_err(|e| AppError::msg(format!("clone check task failed: {e}")))?
+}
+
+/// Clone `url` into `<root>/<name>` with `tool` and add it to the repo list
+/// (and cache) without a rescan. Emits `repos:updated`.
+#[tauri::command]
+pub async fn clone_repo(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    root: String,
+    name: String,
+    url: String,
+    tool: String,
+) -> AppResult<Repo> {
+    let cfg = state.config.lock().unwrap().clone();
+    // One clone at a time; `cancel_read("clone")` stops it (the banner's Cancel).
+    let token = state.reads.start("clone");
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = crate::provision::cancellable(token, || crate::clone::clone(&cfg, &root, &name, &url, &tool))?;
+        let ctx = inspect_cold(&repo.path, &cfg);
+        put_repo(&app, &repo, ctx);
+        Ok::<_, AppError>(repo)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("clone task failed: {e}")))?
+}
+
 /// Run a version-control setup in an existing folder that has none ("Set up
 /// version control…"). The repo's list entry is replaced with the versioned
 /// one. Emits `repos:updated`.
@@ -293,6 +344,7 @@ fn put_repo(app: &AppHandle, repo: &Repo, ctx: RepoContext) {
     }
     state.contexts.lock().unwrap().insert(repo.path.clone(), ctx);
     save_list(app, &state);
+    state.statuses.request(app, [repo.path.clone()], false);
 }
 
 /// Take `dir` and everything below it out of the list. Blocking, like
@@ -314,6 +366,169 @@ fn save_list(app: &AppHandle, state: &AppState) {
     let _ = app.emit("repos:updated", ());
 }
 
+// --- working-copy status and version control (status.rs, vcs_ops.rs) --------
+
+/// Every repo's last-read status, by path.
+#[tauri::command]
+pub fn list_statuses(state: State<'_, AppState>) -> HashMap<String, crate::vcs_state::RepoStatus> {
+    state.statuses.snapshot()
+}
+
+/// Read `paths` again now, or with none given, every repo not read in the
+/// last few minutes (the overlay opening). Results arrive as `status:updated`.
+#[tauri::command]
+pub fn refresh_statuses(app: AppHandle, state: State<'_, AppState>, paths: Option<Vec<String>>) {
+    match paths {
+        Some(p) => state.statuses.request(&app, p, false),
+        None => crate::status::sweep(&app, crate::status::SWEEP_AGE),
+    }
+}
+
+/// A repo's folder, or an error — the frontend's word isn't enough for
+/// anything that changes it. Accepted: a listed repo; a working copy inside a
+/// root that isn't listed yet (a worktree, workspace, share or checkout made
+/// a moment ago, before the watcher's rescan); a Git worktree anywhere whose
+/// repository is a listed one.
+fn vcs_dir_for(state: &AppState, path: &str) -> AppResult<std::path::PathBuf> {
+    let dir = std::path::PathBuf::from(path);
+    if state.repos.lock().unwrap().iter().any(|r| r.path == path) {
+        return Ok(dir);
+    }
+    let in_root = resolved_roots(&state.config.lock().unwrap()).iter().any(|r| dir.starts_with(r) && dir != *r);
+    if in_root && crate::vcs_state::detect(&dir).is_some() {
+        return Ok(dir);
+    }
+    let common = crate::vcs_state::git_dirs(&dir).map(|d| d.common_dir);
+    let belongs = common.is_some_and(|c| {
+        state.repos.lock().unwrap().iter().any(|r| {
+            crate::vcs_state::git_dirs(Path::new(&r.path)).is_some_and(|d| same_file(&d.common_dir, &c))
+        })
+    });
+    if belongs {
+        Ok(dir)
+    } else {
+        Err(AppError::msg("That folder isn't in the list any more."))
+    }
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// Branches or bookmarks (current first), remote ones nothing local tracks,
+/// and other working copies — for the branch switcher. Subversion's list
+/// comes from the server.
+#[tauri::command]
+pub async fn vcs_branches(state: State<'_, AppState>, path: String) -> AppResult<crate::vcs_ops::BranchList> {
+    let dir = vcs_dir_for(&state, &path)?;
+    let token = state.reads.start("branches");
+    tauri::async_runtime::spawn_blocking(move || crate::provision::cancellable(token, || crate::vcs_ops::branches(&dir)))
+        .await
+        .map_err(|e| AppError::msg(format!("branch list task failed: {e}")))?
+        .map_err(AppError::msg)
+}
+
+/// What the action menu shows beyond the status: remotes, the default branch,
+/// web links, pull and push locations. Local reads only.
+#[tauri::command]
+pub async fn vcs_details(state: State<'_, AppState>, path: String) -> AppResult<crate::vcs_ops::Details> {
+    let dir = vcs_dir_for(&state, &path)?;
+    let known = state.statuses.get(&path);
+    let token = state.reads.start("details");
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::provision::cancellable(token, || {
+            let s = known.unwrap_or_else(|| crate::vcs_state::read(&dir));
+            crate::vcs_ops::details(&dir, &s)
+        })
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("details task failed: {e}")))?
+    .map_err(AppError::msg)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VcsOutcome {
+    pub message: String,
+    pub status: Option<crate::vcs_state::RepoStatus>,
+}
+
+/// Check out a branch (bookmark). Never forced: refused while something's
+/// half-done, and — where switching would merge them — with uncommitted
+/// changes. Returns what happened and the repo's new status.
+#[tauri::command]
+pub async fn vcs_switch(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    target: crate::vcs_ops::Target,
+) -> AppResult<VcsOutcome> {
+    let dir = vcs_dir_for(&state, &path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = crate::vcs_ops::switch(&dir, &target);
+        let status = crate::status::refresh_now(&app, &path);
+        result.map(|message| VcsOutcome { message, status }).map_err(AppError::msg)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("switch task failed: {e}")))?
+}
+
+/// Fetch, pull, push, publish, update or sync — what the label said and
+/// nothing more. Returns what happened and the repo's new status.
+#[tauri::command]
+pub async fn vcs_sync(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    op: crate::vcs_ops::SyncOp,
+    remote: Option<String>,
+) -> AppResult<VcsOutcome> {
+    let dir = vcs_dir_for(&state, &path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = crate::vcs_ops::sync(&dir, op, remote.as_deref());
+        let status = crate::status::refresh_now(&app, &path);
+        result.map(|message| VcsOutcome { message, status }).map_err(AppError::msg)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("version-control task failed: {e}")))?
+}
+
+/// Check a branch out in a second working copy beside the repo (a worktree,
+/// workspace, share or checkout). Returns it as a repo — listed straight away
+/// when it's inside a root, as the scan would.
+#[tauri::command]
+pub async fn vcs_add_copy(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    target: crate::vcs_ops::Target,
+) -> AppResult<Repo> {
+    let dir = vcs_dir_for(&state, &path)?;
+    let cfg = state.config.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let wt = crate::vcs_ops::add_copy(&dir, &target).map_err(AppError::msg)?;
+        let inside_root = resolved_roots(&cfg).iter().any(|r| wt.starts_with(r));
+        match scan::probe(&wt, &cfg) {
+            Some(repo) if inside_root => {
+                put_repo(&app, &repo, inspect_cold(&repo.path, &cfg));
+                Ok(repo)
+            }
+            probed => Ok(probed.unwrap_or_else(|| Repo {
+                name: wt.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                path: wt.to_string_lossy().into_owned(),
+                vcs: crate::vcs_state::detect(&wt).map(String::from),
+                sentinels: Vec::new(),
+                last_seen: 0,
+            })),
+        }
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("working-copy task failed: {e}")))?
+}
+
 // --- move to Recycle Bin / Trash -------------------------------------------
 
 /// What moving `path` to the bin would lose, for the confirmation dialog.
@@ -328,9 +543,18 @@ pub async fn assess_removal(
         let repos = state.repos.lock().unwrap();
         crate::removal::check_removable(&cfg, &repos, &path).map_err(AppError::msg)?
     };
-    tauri::async_runtime::spawn_blocking(move || crate::removal::assess(&dir))
+    let token = state.reads.start("removal");
+    tauri::async_runtime::spawn_blocking(move || crate::provision::cancellable(token, || crate::removal::assess(&dir)))
         .await
         .map_err(|e| AppError::msg(format!("checking the folder failed: {e}")))
+}
+
+/// The screen waiting on a read ("removal", "branches", "details") was left,
+/// the clone form's "plan", or the clone banner's Cancel ("clone"):
+/// stop it, and whatever it started, so nothing keeps running in the repo.
+#[tauri::command]
+pub fn cancel_read(state: State<'_, AppState>, kind: String) {
+    state.reads.cancel(&kind);
 }
 
 /// Move a listed folder to the Recycle Bin / Trash and take it out of the
@@ -564,12 +788,14 @@ pub async fn refresh_repo_context(
 
 /// `async` + `spawn_blocking` for the same reason as [`build_actions`], plus the
 /// `CreateProcess` in `launch::launch` — the overlay `await`s this before it
-/// dismisses.
+/// dismisses. `elevated`: as administrator / root (Shift), for an action that
+/// has such a launch.
 #[tauri::command]
 pub async fn run_action(
     state: State<'_, AppState>,
     action_id: String,
     path: String,
+    elevated: Option<bool>,
 ) -> AppResult<()> {
     let repo = repo_for_path(&state, &path);
     let cached = state.contexts.lock().unwrap().get(&repo.path).cloned();
@@ -578,7 +804,11 @@ pub async fn run_action(
         let ctx = cached.unwrap_or_else(|| inspect_cold(&repo.path, &cfg));
         let action = find_action(&repo, &ctx, &cfg, &action_id)
             .ok_or_else(|| AppError::msg(format!("unknown action: {action_id}")))?;
-        launch::launch(&action, &repo)?;
+        if elevated == Some(true) {
+            launch::launch_elevated(&action, &repo)?;
+        } else {
+            launch::launch(&action, &repo)?;
+        }
         // Only the reorderable universal tier benefits from usage history — the
         // fixed-hotkey quick actions (their `hotkey` comes straight from
         // `default_config.yaml`, see `RuleAction::hotkey`) never move in the
@@ -670,6 +900,8 @@ pub struct ConfigPatch {
     /// `Some("")` / `Some(0)` go back to the default font / size.
     pub shell_font: Option<String>,
     pub shell_font_size: Option<u16>,
+    /// `Some(1.0)` goes back to normal size; stored only when it isn't.
+    pub zoom: Option<f64>,
     pub filemanager: Option<String>,
     pub filemanager_template: Option<String>,
     pub apps: Option<config::AppsConfig>,
@@ -747,6 +979,11 @@ pub fn save_config(
     }
     if let Some(n) = patch.shell_font_size {
         user.shell_font_size = (n != 0).then_some(n.clamp(6, 40));
+    }
+    if let Some(z) = patch.zoom.filter(|z| z.is_finite()) {
+        let (lo, hi) = (config::ZOOM_STEPS[0], config::ZOOM_STEPS[config::ZOOM_STEPS.len() - 1]);
+        let z = (z.clamp(lo, hi) * 100.0).round() / 100.0;
+        user.zoom = ((z - 1.0).abs() > f64::EPSILON).then_some(z);
     }
     if let Some(f) = patch.filemanager {
         let f = f.trim();
@@ -877,6 +1114,7 @@ pub fn save_config(
     let merged = config::load()?;
     *state.config.lock().unwrap() = merged.clone();
     sync_taskbar_visibility(&app, &merged);
+    apply_zoom(&app, &merged);
     crate::watch::sync_in_background(&app);
     crate::app_watch::sync_in_background(&app);
     Ok(merged)
@@ -933,28 +1171,36 @@ pub fn list_file_managers(state: State<'_, AppState>) -> Vec<FileManagerOption> 
 /// built-in shell's picker.
 #[tauri::command]
 pub fn list_shells() -> Vec<String> {
-    let mut out: Vec<String> = ["pwsh", "powershell", "cmd", "bash", "zsh", "fish", "nu"]
-        .into_iter()
-        .filter(|name| crate::rules::which(name).is_some())
-        .map(String::from)
-        .collect();
+    let found = |names: &[&str]| -> Vec<String> {
+        names
+            .iter()
+            .filter(|name| crate::rules::which(name).is_some())
+            .map(|name| name.to_string())
+            .collect()
+    };
 
-    // Git-for-Windows bash usually isn't on PATH.
+    // Windows has up to three different bashes, and the one on PATH is
+    // usually WSL's launcher — so each gets its own name: `git-bash` (Git
+    // for Windows, rarely on PATH), `wsl` (the default distro), and plain
+    // `bash` only for another bash on PATH (MSYS2, Cygwin, …).
     #[cfg(windows)]
-    if !out.iter().any(|s| s == "bash") {
-        let git_bash = ["ProgramFiles", "ProgramFiles(x86)"]
-            .into_iter()
-            .filter_map(|b| std::env::var(b).ok())
-            .flat_map(|pf| {
-                ["Git\\bin\\bash.exe", "Git\\usr\\bin\\bash.exe"]
-                    .map(|rel| Path::new(&pf).join(rel))
-            })
-            .any(|p| p.is_file());
-        if git_bash {
+    {
+        use crate::rules::{git_bash, is_git_bash, is_wsl_launcher, which};
+        let mut out = found(&["pwsh", "powershell", "cmd"]);
+        if git_bash().is_some() {
+            out.push("git-bash".to_string());
+        }
+        if which("bash").is_some_and(|p| !is_wsl_launcher(&p) && !is_git_bash(&p)) {
             out.push("bash".to_string());
         }
+        if which("wsl").is_some() {
+            out.push("wsl".to_string());
+        }
+        out.extend(found(&["zsh", "fish", "nu"]));
+        out
     }
-    out
+    #[cfg(not(windows))]
+    found(&["bash", "zsh", "fish", "nu", "pwsh"])
 }
 
 /// The shell used with nothing pinned — names the Settings dropdown's
@@ -1048,12 +1294,33 @@ pub fn shell_close_all(state: State<'_, AppState>) {
     state.shells.close_all();
 }
 
+/// Draw the overlay at `cfg`'s zoom: the web view zoomed, and the window grown
+/// (or shrunk) to match, so the layout keeps its proportions rather than
+/// spilling out of a window still sized for 100%.
+pub fn apply_zoom(app: &AppHandle, cfg: &Config) {
+    use tauri::Manager;
+    let Some(window) = app.get_webview_window("overlay") else { return };
+    let zoom = config::zoom_factor(cfg);
+    if let Err(e) = window.set_zoom(zoom) {
+        eprintln!("couldn't zoom the overlay: {e}");
+    }
+    let large = *app.state::<AppState>().overlay_large.lock().unwrap();
+    let _ = size_overlay(&window, large, zoom);
+}
+
 /// The overlay's size: the usual 760×480, or roomier while a shell is open —
-/// clamped to the screen it's on, and re-centred. Already that size: left
-/// alone, so a window the user dragged somewhere stays put.
+/// times the zoom, clamped to the screen it's on, and re-centred. Already
+/// that size: left alone, so a window the user dragged somewhere stays put.
 #[tauri::command]
-pub fn set_overlay_size(window: tauri::WebviewWindow, large: bool) -> AppResult<()> {
+pub fn set_overlay_size(window: tauri::WebviewWindow, state: State<'_, AppState>, large: bool) -> AppResult<()> {
+    *state.overlay_large.lock().unwrap() = large;
+    let zoom = config::zoom_factor(&state.config.lock().unwrap());
+    size_overlay(&window, large, zoom)
+}
+
+fn size_overlay(window: &tauri::WebviewWindow, large: bool, zoom: f64) -> AppResult<()> {
     let (mut w, mut h) = if large { (1000.0, 640.0) } else { (760.0, 480.0) };
+    (w, h) = (w * zoom, h * zoom);
     if let Ok(Some(monitor)) = window.current_monitor() {
         let area = monitor.work_area().size.to_logical::<f64>(monitor.scale_factor());
         w = f64::min(w, area.width * 0.94);
@@ -1225,13 +1492,15 @@ fn store_apps(app: &AppHandle, state: &AppState, index: apps::Index) -> AppsPayl
 /// Launch an installed app, bumping its frecency count only if the launch
 /// actually starts (a stale entry whose exe is gone shouldn't climb the list).
 /// `async` + `spawn_blocking`: keeps the spawn and the frecency file write off
-/// the UI thread, which is about to dismiss the overlay.
+/// the UI thread, which is about to dismiss the overlay. `elevated`: Run as
+/// administrator (Shift) — Windows desktop apps only.
 #[tauri::command]
 pub async fn run_app(
     exec: String,
     kind: String,
     args: Option<Vec<String>>,
     terminal: Option<bool>,
+    elevated: Option<bool>,
 ) -> AppResult<()> {
     let kind = match kind.as_str() {
         "aumid" => crate::apps::AppKind::Aumid,
@@ -1246,8 +1515,16 @@ pub async fn run_app(
         icon: None,
         terminal: terminal.unwrap_or(false),
         source: String::new(),
+        elevate: false,
     };
-    tauri::async_runtime::spawn_blocking(move || apps::launch(&entry))
+    let elevated = elevated == Some(true);
+    tauri::async_runtime::spawn_blocking(move || {
+        if elevated {
+            apps::launch_elevated(&entry)
+        } else {
+            apps::launch(&entry)
+        }
+    })
         .await
         .map_err(|e| AppError::msg(format!("launch task failed: {e}")))??;
     // Frecency write stays off the UI thread but is still awaited: it's a
@@ -1510,6 +1787,20 @@ pub fn system_paths() -> AppResult<SystemPaths> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn shells_name_each_bash_for_what_it_is() {
+        let shells = list_shells();
+        // Never WSL's launcher passing as plain `bash`.
+        if let Some(p) = crate::rules::which("bash") {
+            if crate::rules::is_wsl_launcher(&p) {
+                assert!(!shells.iter().any(|s| s == "bash"), "{shells:?}");
+            }
+        }
+        assert_eq!(shells.iter().any(|s| s == "git-bash"), crate::rules::git_bash().is_some());
+        assert_eq!(shells.iter().any(|s| s == "wsl"), crate::rules::which("wsl").is_some());
+    }
 
     #[test]
     fn only_plain_web_links_open() {

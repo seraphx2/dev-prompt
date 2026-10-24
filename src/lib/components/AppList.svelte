@@ -9,15 +9,21 @@
     onselect,
     onactivate,
     oncontext,
+    shift = false,
+    adminWord = "administrator",
   }: {
     entries: { app: AppEntry; positions: number[] }[];
     selected: number;
     /** True while a background enumeration is running and the list is empty. */
     scanning?: boolean;
     onselect: (i: number) => void;
-    onactivate: (i: number) => void;
+    /** `e` carries Shift: Run as administrator, where the app can be. */
+    onactivate: (i: number, e?: MouseEvent) => void;
     /** Row right-clicked -> its context menu. */
     oncontext?: (i: number, e: MouseEvent) => void;
+    /** Shift is held: the selected row says it will run as administrator. */
+    shift?: boolean;
+    adminWord?: string;
   } = $props();
 
   let container: HTMLDivElement | undefined = $state();
@@ -44,7 +50,7 @@
 
 <div bind:this={container} class="scroll-thin flex-1 overflow-y-auto px-2 py-2">
   {#if entries.length === 0}
-    <div class="px-3 py-8 text-center text-[13px] text-white/30">
+    <div class="px-3 py-8 text-center text-[13px] text-white/45">
       {scanning ? "Scanning apps…" : "No apps match."}
     </div>
   {:else}
@@ -54,7 +60,9 @@
           app={e.app}
           positions={e.positions}
           active={i === selected}
-          onactivate={() => onactivate(i)}
+          elevating={shift && i === selected && (e.app.kind === "exe" || !!e.app.elevate)}
+          {adminWord}
+          onactivate={(ev) => onactivate(i, ev)}
           onhover={() => {
             if (i !== selected) skipScroll = true;
             onselect(i);

@@ -69,6 +69,11 @@ pub struct AppEntry {
     pub terminal: bool,
     /// `start-menu` | `store` | `uninstall` | `scan` | `extra` | `desktop`.
     pub source: String,
+    /// `Aumid` only: a packaged desktop app (Windows Terminal, PowerShell,
+    /// VS Code from the Store, …), which can run as administrator like any
+    /// desktop app; a Store-style app (Calculator) can't. `Exe` always can.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub elevate: bool,
 }
 // Launch frecency is *not* a field here — it's derived per read from
 // `app-usage.json` and carried only on `commands::AppView`, so it never touches
@@ -1128,6 +1133,7 @@ mod linux {
                 .and_then(resolve_icon),
             terminal: is_true(kv.get("Terminal")),
             source: "desktop".into(),
+            elevate: false,
         })
     }
 
@@ -1583,6 +1589,9 @@ struct RawApp {
     company: Option<String>,
     #[serde(default)]
     size: u64,
+    /// Store rows: a packaged desktop app (see `AppEntry::elevate`).
+    #[serde(default)]
+    elevate: Option<bool>,
 }
 
 impl RawApp {
@@ -1641,6 +1650,7 @@ impl RawApp {
                 icon,
                 terminal: false,
                 source,
+                elevate: kind == AppKind::Aumid && self.elevate == Some(true),
             },
             product: self.product.unwrap_or_default().trim().to_string(),
             company: self.company.unwrap_or_default().trim().to_string(),
@@ -1682,6 +1692,30 @@ pub fn launch(entry: &AppEntry) -> AppResult<()> {
     }
 }
 
+/// [`launch`] as administrator — the UAC prompt, then the app. A Windows
+/// desktop app has that, packaged ones from the Store included (started by
+/// their AppUserModelID, as Start does); a Store-style app can't be started
+/// elevated, and a Linux one isn't meant to run as root.
+pub fn launch_elevated(entry: &AppEntry) -> AppResult<()> {
+    #[cfg(windows)]
+    match entry.kind {
+        AppKind::Exe => {
+            let cwd = std::path::Path::new(&entry.exec)
+                .parent()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let params: Vec<String> = entry.args.iter().map(|a| crate::rules::win_quote(a)).collect();
+            return crate::launch::run_as_admin(&entry.exec, &params.join(" "), &cwd, false);
+        }
+        AppKind::Aumid => {
+            return crate::launch::run_as_admin(&format!("shell:AppsFolder\\{}", entry.exec), "", "", false);
+        }
+        AppKind::Desktop => {}
+    }
+    let _ = entry;
+    Err(crate::error::AppError::msg("this app can't run as administrator"))
+}
+
 // Windows-only: every case drives the discovery scoring (`keep_entry`,
 // `prune_scanned`, `dedupe*`, `into_scored`, `looks_like_main_binary`) with
 // `C:\`-style paths and `.exe` semantics. The code under test never runs off
@@ -1699,6 +1733,7 @@ mod tests {
             icon: icon.map(String::from),
             terminal: false,
             source: source.into(),
+            elevate: false,
         }
     }
 
@@ -1815,7 +1850,22 @@ mod tests {
             product: None,
             company: None,
             size: 0,
+            elevate: None,
         }
+    }
+
+    #[test]
+    fn a_packaged_desktop_app_from_the_store_can_run_elevated() {
+        let cfg = crate::config::bundled_defaults();
+        let mut wt = raw("Terminal", "Microsoft.WindowsTerminal_8wekyb3d8bbwe!App", "aumid");
+        wt.elevate = Some(true);
+        assert!(wt.into_gathered(&cfg).unwrap().entry.elevate);
+        let calc = raw("Calculator", "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", "aumid");
+        assert!(!calc.into_gathered(&cfg).unwrap().entry.elevate);
+        // The flag is the Store's to set; an exe can always run elevated anyway.
+        let mut exe = raw("Tool", r"C:\x\tool.exe", "exe");
+        exe.elevate = Some(true);
+        assert!(!exe.into_gathered(&cfg).unwrap().entry.elevate);
     }
 
     #[test]
@@ -1900,6 +1950,7 @@ mod tests {
             product: None,
             company: None,
             size: 0,
+            elevate: None,
         };
         assert!(raw.into_gathered(&cfg).is_none());
     }

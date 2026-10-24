@@ -66,6 +66,27 @@ pub struct Action {
     /// spawning. See `RuleAction::remove`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub remove: bool,
+    /// Whether Shift runs it as administrator (Windows) or root (Linux), and
+    /// how. Worked out from what building the action already resolved, so it
+    /// costs nothing here; the elevated launch itself is put together only
+    /// when it's used (`launch::launch_elevated`). The frontend sees
+    /// `elevated: true`.
+    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "elevatable")]
+    pub elevated: Option<Elevation>,
+}
+
+/// How an action runs elevated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Elevation {
+    /// A terminal (with a command, or bare). Linux: a bare one only, with a
+    /// root shell.
+    Terminal,
+    /// A program started straight: an editor, an IDE, a Git GUI (Windows).
+    Program,
+}
+
+fn elevatable<S: serde::Serializer>(e: &Option<Elevation>, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_bool(e.is_some())
 }
 
 // --- program resolution (process-global memo) -----------------------------
@@ -87,10 +108,12 @@ fn which_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
 /// Forget every memoized program lookup (call after the config changes or a tool
 /// is installed while the app runs).
 pub fn clear_program_cache() {
+    refresh_path();
     program_cache().lock().unwrap().clear();
     which_cache().lock().unwrap().clear();
     #[cfg(target_os = "linux")]
     host_which_cache().lock().unwrap().clear();
+    crate::tasks::forget();
 }
 
 pub struct Resolver<'a> {
@@ -241,6 +264,87 @@ pub fn which(program: &str) -> Option<String> {
         .unwrap()
         .insert(program.to_string(), resolved.clone());
     resolved
+}
+
+/// Windows: bring this process's PATH up to date with Windows' own settings.
+/// A process keeps the PATH it started with, so a tool installed since
+/// (winget, an installer, `uv tool update-shell`) is invisible to it — and to
+/// every terminal and shell it starts — until dev-prompt *and* whatever
+/// started it restart, which for an app started at login means signing out.
+/// Called at startup and whenever the program cache is cleared (a rescan,
+/// a config save), so a fresh install shows up on the next Ctrl+R.
+///
+/// The machine's entries come first, then the user's — the order a new
+/// process gets — then whatever the inherited PATH has beyond both (a dev
+/// shell's additions). Linux has no such store: its PATH comes from the
+/// login shell, and is left alone.
+pub fn refresh_path() {
+    #[cfg(windows)]
+    {
+        use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+        use winreg::RegKey;
+
+        let read = |root, key: &str| -> String {
+            RegKey::predef(root)
+                .open_subkey(key)
+                .and_then(|k| k.get_value::<String, _>("Path"))
+                .unwrap_or_default()
+        };
+        let machine = read(HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment");
+        let user = read(HKEY_CURRENT_USER, "Environment");
+        let current = std::env::var("PATH").unwrap_or_default();
+        let merged = merge_paths(&[&expand_env(&machine), &expand_env(&user), &current]);
+        if !merged.is_empty() && merged != current {
+            // Sound on Windows: the OS serialises environment access.
+            std::env::set_var("PATH", merged);
+        }
+    }
+}
+
+/// `%NAME%` references expanded from this process's environment (a `Path`
+/// stored as REG_EXPAND_SZ reads back unexpanded); unknown ones stay as written.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn expand_env(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(a) = rest.find('%') {
+        out.push_str(&rest[..a]);
+        let after = &rest[a + 1..];
+        match after.find('%') {
+            Some(b) => {
+                let name = &after[..b];
+                match std::env::var(name) {
+                    Ok(v) if !name.is_empty() => out.push_str(&v),
+                    _ => out.push_str(&rest[a..a + b + 2]),
+                }
+                rest = &after[b + 1..];
+            }
+            None => {
+                out.push_str(&rest[a..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `;`-separated lists joined in order, each folder once (compared without
+/// case or a trailing slash, as Windows does) and empty entries dropped.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn merge_paths(lists: &[&str]) -> String {
+    let mut seen: Vec<String> = Vec::new();
+    let mut out: Vec<&str> = Vec::new();
+    for entry in lists.iter().flat_map(|l| l.split(';')) {
+        let e = entry.trim();
+        let key = e.trim_end_matches(['\\', '/']).to_lowercase();
+        if key.is_empty() || seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        out.push(e);
+    }
+    out.join(";")
 }
 
 fn which_uncached(program: &str) -> Option<String> {
@@ -613,6 +717,49 @@ pub fn auto_terminal_label(config: &Config) -> String {
     basename(&pick_terminal_binary(&resolver).0)
 }
 
+/// Git for Windows' install folder. Found next to the `git` on PATH first
+/// (`<root>\cmd\git.exe`), which covers custom and per-user installs, then
+/// in the standard places.
+#[cfg(windows)]
+fn git_root() -> Option<std::path::PathBuf> {
+    use std::path::{Path, PathBuf};
+    let beside_git = which("git")
+        .and_then(|g| Path::new(&g).parent()?.parent().map(Path::to_path_buf));
+    let standard = ["ProgramFiles", "ProgramFiles(x86)"]
+        .into_iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .map(|pf| PathBuf::from(pf).join("Git"))
+        .chain(std::env::var("LOCALAPPDATA").ok().map(|l| PathBuf::from(l).join("Programs\\Git")));
+    beside_git
+        .into_iter()
+        .chain(standard)
+        .find(|root| root.join("bin\\bash.exe").is_file())
+}
+
+/// Git for Windows' bash ("Git Bash"). Its folder usually isn't on PATH —
+/// the `bash` that is, on a machine with WSL, is WSL's launcher.
+#[cfg(windows)]
+pub fn git_bash() -> Option<String> {
+    git_root().map(|root| root.join("bin\\bash.exe").to_string_lossy().into_owned())
+}
+
+/// Whether a `bash` found on PATH is Git for Windows' own.
+#[cfg(windows)]
+pub fn is_git_bash(path: &str) -> bool {
+    git_root().is_some_and(|root| {
+        path.to_lowercase().starts_with(&root.to_string_lossy().to_lowercase())
+    })
+}
+
+/// WSL's `bash.exe` launchers (System32, and the Store copy under
+/// WindowsApps): a `bash` on PATH that opens a Linux distro, not a Windows
+/// bash. Offered as `wsl` instead, so it can't pass for Git Bash.
+#[cfg(windows)]
+pub fn is_wsl_launcher(path: &str) -> bool {
+    let p = path.to_lowercase().replace('/', "\\");
+    p.ends_with("\\system32\\bash.exe") || p.ends_with("\\windowsapps\\bash.exe")
+}
+
 /// The shell used when nothing is pinned (`config.shell` absent) — `pwsh` if
 /// it's installed, else the legacy Windows PowerShell that's always present.
 /// Feeds the Settings dropdown's "Default (…)" label too, so it names the
@@ -682,6 +829,19 @@ fn shell_wrap(argv: &[String], shell: Option<&str>) -> Vec<String> {
             "-c".to_string(),
             format!("{}; exec {kind}", join_quoted(argv, sh)),
         ],
+        "git-bash" => vec![
+            git_bash().unwrap_or_else(|| "bash".to_string()),
+            "-c".to_string(),
+            format!("{}; exec bash", join_quoted(argv, sh)),
+        ],
+        // The default distro's bash, in the Windows folder (WSL maps the cwd).
+        "wsl" => vec![
+            "wsl".to_string(),
+            "-e".to_string(),
+            "bash".to_string(),
+            "-c".to_string(),
+            format!("{}; exec bash", join_quoted(argv, sh)),
+        ],
         "nu" => vec![
             shell.to_string(),
             "-e".to_string(),
@@ -732,8 +892,13 @@ fn pick_terminal_binary(resolver: &Resolver) -> (String, bool) {
 
 #[cfg(not(windows))]
 fn pick_terminal_binary(resolver: &Resolver) -> (String, bool) {
+    let pinned = resolver
+        .terminal
+        .and_then(|t| if t.contains('/') { Some(t.to_string()) } else { which(t) });
     (
-        resolver.resolve("terminal").unwrap_or_else(|| "xterm".to_string()),
+        pinned
+            .or_else(|| resolver.resolve("terminal"))
+            .unwrap_or_else(|| "xterm".to_string()),
         false,
     )
 }
@@ -828,6 +993,88 @@ fn terminalize(
     }
 }
 
+/// Whether a terminal action can run elevated. Windows: any. Linux: only a
+/// bare terminal (`argv` empty) — a project's own commands run as root leave
+/// root-owned files in the repo — in an emulator whose way of taking a command
+/// is known. No PATH lookups: `term` is what `terminalize` already picked.
+fn terminal_elevation(argv: &[String], term: &str) -> Option<Elevation> {
+    #[cfg(windows)]
+    {
+        let _ = (argv, term);
+        Some(Elevation::Terminal)
+    }
+    #[cfg(not(windows))]
+    {
+        (argv.is_empty() && root_shell_args(term, "").is_some()).then_some(Elevation::Terminal)
+    }
+}
+
+/// Whether a program started straight can run elevated: on Windows, all but
+/// Explorer, which Windows never runs elevated (the offer would be empty). On
+/// Linux, GUI programs don't run as root.
+fn program_elevation(program: &str) -> Option<Elevation> {
+    #[cfg(windows)]
+    {
+        let name = basename(program).to_lowercase();
+        (name != "explorer.exe" && name != "explorer").then_some(Elevation::Program)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = program;
+        None
+    }
+}
+
+/// A root shell in a bare terminal at `cwd`, for the emulators whose way of
+/// taking a command is known: the arguments after `term`. The terminal itself
+/// picks `sudo -s` or `doas -s` (both stay in the folder), and says so if
+/// neither is there — nothing is looked up while building the menu.
+#[cfg(not(windows))]
+pub fn root_shell_args(term: &str, cwd: &str) -> Option<Vec<String>> {
+    const ROOT: &str = "if command -v sudo >/dev/null 2>&1; then exec sudo -s; \
+        elif command -v doas >/dev/null 2>&1; then exec doas -s; \
+        else echo 'Neither sudo nor doas is installed.'; exec \"${SHELL:-sh}\"; fi";
+    let with = |lead: Vec<String>| -> Vec<String> {
+        lead.into_iter().chain(["sh".into(), "-c".into(), ROOT.into()]).collect()
+    };
+    Some(match basename(term).to_lowercase().as_str() {
+        "alacritty" => with(vec!["--working-directory".into(), cwd.into(), "-e".into()]),
+        "kitty" => with(vec!["--directory".into(), cwd.into()]),
+        "wezterm" | "wezterm-gui" => with(vec!["start".into(), "--cwd".into(), cwd.into(), "--".into()]),
+        "foot" => with(vec![format!("--working-directory={cwd}")]),
+        "gnome-terminal" => with(vec![format!("--working-directory={cwd}"), "--".into()]),
+        "konsole" => with(vec!["--workdir".into(), cwd.into(), "-e".into()]),
+        "xfce4-terminal" => with(vec![format!("--working-directory={cwd}"), "-x".into()]),
+        // Debian requires `x-terminal-emulator` to take `-e`; both start in
+        // the working directory they're given.
+        "xterm" | "x-terminal-emulator" => with(vec!["-e".into()]),
+        _ => return None,
+    })
+}
+
+/// Quote one argument the way Windows programs split their command line.
+#[cfg(windows)]
+pub(crate) fn win_quote(arg: &str) -> String {
+    if !arg.is_empty() && !arg.contains([' ', '\t', '"']) {
+        return arg.to_string();
+    }
+    let mut out = String::from('"');
+    let mut slashes = 0;
+    for c in arg.chars() {
+        if c == '\\' {
+            slashes += 1;
+            continue;
+        }
+        // Backslashes are literal unless they end up before a quote.
+        out.push_str(&"\\".repeat(if c == '"' { slashes * 2 + 1 } else { slashes }));
+        slashes = 0;
+        out.push(c);
+    }
+    out.push_str(&"\\".repeat(slashes * 2));
+    out.push('"');
+    out
+}
+
 // --- action construction ---------------------------------------------
 
 fn build_action(
@@ -855,6 +1102,7 @@ fn build_action(
             prompt: false,
             provision: false,
             remove: false,
+            elevated: None,
         });
     }
 
@@ -881,6 +1129,7 @@ fn build_action(
             prompt: false,
             provision: false,
             remove: true,
+            elevated: None,
         });
     }
 
@@ -903,6 +1152,7 @@ fn build_action(
             prompt: false,
             provision: true,
             remove: false,
+            elevated: None,
         });
     }
 
@@ -924,6 +1174,7 @@ fn build_action(
             prompt: true,
             provision: false,
             remove: false,
+            elevated: None,
         });
     }
 
@@ -947,18 +1198,21 @@ fn build_action(
         (String::new(), Vec::new(), "terminal".to_string())
     };
 
-    let (final_prog, final_args, final_cwd) = if ra.terminal {
+    let (final_prog, final_args, final_cwd, elevated) = if ra.terminal {
         let argv: Vec<String> = if program.is_empty() {
             Vec::new()
         } else {
             std::iter::once(program.clone()).chain(args).collect()
         };
-        terminalize(&argv, cwd, resolver)
+        let (p, a, c) = terminalize(&argv, cwd, resolver);
+        let elevated = terminal_elevation(&argv, &p);
+        (p, a, c, elevated)
     } else {
         if program.is_empty() {
             return None;
         }
-        (program, args, Some(cwd.to_string()))
+        let elevated = program_elevation(&program);
+        (program, args, Some(cwd.to_string()), elevated)
     };
 
     Some(Action {
@@ -977,6 +1231,7 @@ fn build_action(
         prompt: false,
         provision: false,
         remove: false,
+        elevated,
     })
 }
 
@@ -1001,6 +1256,7 @@ fn provider_actions(
     let term_in = |id: String, label: String, argv: Vec<String>, at: &str| -> Action {
         let hint = argv.join(" ");
         let (p, a, c) = terminalize(&argv, at, resolver);
+        let elevated = terminal_elevation(&argv, &p);
         Action {
             id,
             label,
@@ -1017,6 +1273,7 @@ fn provider_actions(
             prompt: false,
             provision: false,
             remove: false,
+            elevated,
         }
     };
     let term = |id: String, label: String, argv: Vec<String>| term_in(id, label, argv, cwd);
@@ -1277,6 +1534,22 @@ fn provider_actions(
                 ]
             })
             .collect(),
+        // Task runners: one action per target, from the project's directory.
+        "make" | "just" | "task" => {
+            let (bin, targets) = match name {
+                "make" => ("make".to_string(), crate::tasks::make_targets(&proj.dir)),
+                "just" => ("just".to_string(), crate::tasks::just_recipes(&proj.dir)),
+                // Whichever name go-task goes by here; none, no targets.
+                _ => match crate::tasks::go_task() {
+                    Some(bin) => (bin, crate::tasks::taskfile_tasks(&proj.dir)),
+                    None => return Vec::new(),
+                },
+            };
+            targets
+                .into_iter()
+                .map(|t| term(format!("{name}:{ns}:{t}"), format!("{bin} {t}"), vec![bin.clone(), t]))
+                .collect()
+        }
         // A Flutter app's Gradle project lives one level down, in `android/` —
         // invisible to `gradle-modules` (which only checks the project's own
         // top-level files). Point the same parser at that subdir instead. Uses
@@ -1798,6 +2071,39 @@ mod tests {
     use crate::config::bundled_defaults;
     use crate::inspect::{NodeInfo, PkgManager};
 
+    #[test]
+    fn path_entries_expand_and_merge_in_order() {
+        std::env::set_var("DP_TEST_HOME", r"C:\Users\t");
+        assert_eq!(expand_env(r"%DP_TEST_HOME%\bin;%NOT_SET_ANYWHERE%\x;100%"), r"C:\Users\t\bin;%NOT_SET_ANYWHERE%\x;100%");
+        assert_eq!(expand_env("%%"), "%%");
+        assert_eq!(
+            merge_paths(&[r"C:\Windows;C:\Tools\", r"c:\tools;;C:\Users\t\bin", r"C:\Windows\;D:\dev"]),
+            r"C:\Windows;C:\Tools\;C:\Users\t\bin;D:\dev",
+            "machine first, then user, then what the process had beyond them — each once"
+        );
+    }
+
+    /// A tool installed after dev-prompt started is found once the program
+    /// cache is cleared: the process's PATH is re-read from Windows' settings.
+    #[cfg(windows)]
+    #[test]
+    fn a_refresh_keeps_what_the_process_had_and_adds_the_settings() {
+        let before = std::env::var("PATH").unwrap_or_default();
+        refresh_path();
+        let after = std::env::var("PATH").unwrap_or_default();
+        let has = |p: &str, e: &str| p.split(';').any(|x| x.trim_end_matches('\\').eq_ignore_ascii_case(e.trim_end_matches('\\')));
+        for e in before.split(';').filter(|e| !e.trim().is_empty()) {
+            assert!(has(&after, e.trim()), "{e} was dropped");
+        }
+        let user = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+            .open_subkey("Environment")
+            .and_then(|k| k.get_value::<String, _>("Path"))
+            .unwrap_or_default();
+        for e in expand_env(&user).split(';').filter(|e| !e.trim().is_empty()) {
+            assert!(has(&after, e.trim()), "the user's {e} isn't on PATH after a refresh");
+        }
+    }
+
     fn repo() -> Repo {
         Repo {
             name: "demo".into(),
@@ -1843,6 +2149,30 @@ mod tests {
             shell_wrap(&spaced, Some("cmd")).last().unwrap(),
             "\"\"C:\\a b\\tool.exe\" run\""
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn wsl_launchers_are_told_apart_from_other_bashes() {
+        assert!(is_wsl_launcher(r"C:\WINDOWS\system32\bash.exe"));
+        assert!(is_wsl_launcher(r"C:\Users\me\AppData\Local\Microsoft\WindowsApps\bash.exe"));
+        assert!(!is_wsl_launcher(r"C:\Program Files\Git\bin\bash.exe"));
+        assert!(!is_wsl_launcher(r"C:\msys64\usr\bin\bash.exe"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn git_bash_and_wsl_wrap_a_command_in_their_own_bash() {
+        let argv = vec!["npm".to_string(), "run".to_string(), "dev".to_string()];
+        let w = shell_wrap(&argv, Some("wsl"));
+        assert_eq!(&w[..4], ["wsl", "-e", "bash", "-c"]);
+        assert_eq!(w[4], "'npm' 'run' 'dev'; exec bash");
+        let g = shell_wrap(&argv, Some("git-bash"));
+        assert_eq!(&g[1..], ["-c", "'npm' 'run' 'dev'; exec bash"]);
+        if let Some(path) = git_bash() {
+            assert_eq!(g[0], path);
+            assert!(is_git_bash(&path));
+        }
     }
 
     #[test]
@@ -1960,6 +2290,51 @@ mod tests {
             &pin("C:/x/kitty.exe", Some("kitty --directory {{dir}} -- {{cmd}}")),
         );
         assert_eq!(a, vec!["--directory", "C:\\my repo", "--", "my tool", "go"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_root_shell_in_a_plain_terminal_only() {
+        let args = root_shell_args("/usr/bin/konsole", "/repo").unwrap();
+        assert_eq!(&args[..5], &["--workdir", "/repo", "-e", "sh", "-c"]);
+        assert!(args[5].contains("sudo -s") && args[5].contains("doas -s"));
+        let args = root_shell_args("/usr/bin/gnome-terminal", "/repo").unwrap();
+        assert_eq!(&args[..2], &["--working-directory=/repo", "--"]);
+
+        // A project's own command doesn't run as root, and an emulator whose
+        // way of taking a command isn't known gets no elevated launch.
+        assert_eq!(terminal_elevation(&[], "/usr/bin/konsole"), Some(Elevation::Terminal));
+        assert_eq!(terminal_elevation(&["npm".into(), "test".into()], "/usr/bin/konsole"), None);
+        assert_eq!(terminal_elevation(&[], "/opt/mystery-term"), None);
+        assert_eq!(program_elevation("/usr/bin/code"), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn win_quote_round_trips_through_the_windows_split() {
+        for arg in [
+            "plain",
+            "",
+            "C:\\my repo",
+            "C:\\trailing\\",
+            "C:\\my dir\\",
+            "say \"hi\"",
+            "a\\\"b",
+            "& 'C:\\a b\\tool.exe' 'run'",
+        ] {
+            assert_eq!(win_split_args(&win_quote(arg)), [arg], "{arg:?}");
+        }
+        assert_eq!(win_quote("plain"), "plain");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn every_launch_can_elevate_but_explorer() {
+        assert_eq!(terminal_elevation(&[], "C:/x/wt.exe"), Some(Elevation::Terminal));
+        assert_eq!(program_elevation("C:/VS/Common7/IDE/devenv.exe"), Some(Elevation::Program));
+        assert_eq!(program_elevation("code"), Some(Elevation::Program));
+        // Windows won't run Explorer elevated, so it isn't offered.
+        assert_eq!(program_elevation("C:\\Windows\\explorer.exe"), None);
     }
 
     #[test]

@@ -55,6 +55,7 @@ npm run build                     # svelte-check + vite build (what CI runs)
 npm run test                      # vitest run, whole suite
 npm run check:tauri               # Tauri npm packages ↔ Rust crates on the same major.minor
 npm run screenshots               # regenerate docs/img/ — demo GIF + stills (headless, fake backend — see scripts/screenshots/)
+npm run screenshots:wsl           # the same from Windows, under Linux in WSL (fonts match the AppStream shots)
 npx vitest run src/lib/fuzzy.test.ts   # a single test file
 npx vitest run -t "name substring"     # tests matching a name
 
@@ -112,6 +113,48 @@ surrounding style rather than running `cargo fmt`.
    the backend (listed, strictly inside a root, not a link), and an
    assessment per VCS of what exists only locally — anything it can't check
    counts as at risk, never as clean.
+   **`vcs_state.rs`** is that per-VCS reading (`RepoStatus`: branch, upstream,
+   ahead/behind, changed/untracked/conflicted, stashes, unpushed, an operation
+   in progress, jj's conflicted/divergent changes), offline, for Git, jj,
+   Mercurial, Subversion, Fossil, Breezy and Darcs; shared by removal and the
+   repo list's status flags. Reads must never write a file the watcher
+   follows (Git's set `GIT_OPTIONAL_LOCKS=0`). `limits` holds what a system
+   can't tell offline — removal counts it as unknown, the row doesn't flag it.
+   **`status.rs`** keeps every repo's status current on 3 background threads
+   — asked for by the watcher (a working-tree file or one of the VCS state
+   files `watch.rs`'s `vcs_state_file` allows, debounced per repo), by the
+   overlay opening (anything older than `SWEEP_AGE`), and by a menu opening —
+   and persists it to `status.json`. **`vcs_ops.rs`** dispatches the branch
+   switcher, second working copies (worktree / workspace / share / checkout)
+   and remote steps to `git_ops.rs`, `jj_ops.rs`, `hg_ops.rs`, `svn_ops.rs`,
+   `fossil_ops.rs`, `brz_ops.rs`, and refuses a switch while something's
+   half-done or where it would merge uncommitted changes. The line it holds:
+   one keystroke, fully described by its label, never forced — anything
+   needing review (staging, commits, conflicts) hands off to a GUI. Breezy on
+   Windows resolves relative file arguments against the drive root: pass it
+   absolute paths. See `docs/vcs-status.md`; `scripts/vcs-scenarios.sh <root>
+   [systems]` builds a test repo per state (`--remove` deletes them), and `DP_SCENARIO_ROOT=<root> cargo
+   test scenario_report -- --ignored --nocapture` prints what each reads as.
+   Every one of these commands goes through `provision::run_captured_env`:
+   no console, stdin closed, output captured, and a time limit that only
+   catches a stuck command (10 min local, 30 min remote — a big repo on a
+   cold disk is just slow; the background status reads get 2 min, since
+   they share three threads, and a read skips its remaining commands once
+   one gets stuck). A command it stops takes everything it started
+   with it (a job object on Windows — the command starts suspended and is
+   resumed once it's in the job, so nothing it starts can escape it — a
+   process group on Linux): Git for
+   Windows' `git.exe` is a launcher, and stopping only that leaves the real
+   Git running with the repo as its working folder, which then can't be
+   moved or deleted. A read a screen waits on (the Recycle Bin check, the
+   branch switcher, the menu's details) runs under `provision::cancellable`
+   with a token from `AppState.reads`; leaving the screen calls `cancel_read`.
+   **`clone.rs`** is Clone (a URL pasted into the search): what's at the
+   address, from its shape or by asking each installed tool, and cloning it
+   into a root with Git, jj (colocated), Mercurial, Subversion, Fossil (its
+   repository file kept inside the checkout as `.fossil`) or Breezy. The
+   frontend runs it from `App.svelte`, not the form, so it outlives the
+   form and a hide; the `Banner` component shows it, with Cancel.
 3. On selecting a repo, **`inspect.rs`** walks its tree once into a
    `RepoContext` — root plus side-by-side / `packages/*`-style sub-projects,
    each with its manifest details (npm scripts + package manager, Cargo.toml,
@@ -207,4 +250,18 @@ surrounding style rather than running `cargo fmt`.
 
 Usually pure data in `src-tauri/src/default_config.yaml` (a `markers` entry,
 a `programs` candidate list, a `rules` entry with `match`/`actions`) — no Rust
-required. Full field reference in `docs/rules-engine.md`.
+required. Full field reference in `docs/rules-engine.md`. A tool whose actions
+come from a file's contents (one per target) is a `provider`: an arm in
+`rules.rs::provider_actions` plus a small text parser module, like
+`gowork.rs`, `maven.rs`, `gradle.rs` or `tasks.rs` (Makefile / justfile /
+Taskfile targets) — parsed, never by running the tool, since they run on every
+menu open.
+
+Elevation (Shift): building an action only notes whether it can run elevated
+(`Action.elevated`, from what was already resolved — no PATH lookups); the
+elevated launch is put together when it's used (`launch::launch_elevated`).
+Windows runs it through the "runas" verb with the folder on its command line
+(an elevated process doesn't reliably keep its working directory) — via
+PowerShell single-quoted strings, never `cmd`, whose quoting lets `&` / `%`
+in a folder or script name run as a command of its own. Linux gives only the
+plain terminal a root shell (`rules::root_shell_args`).

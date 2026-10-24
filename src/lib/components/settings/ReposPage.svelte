@@ -73,7 +73,7 @@
 
 <div class="space-y-1.5">
   <span class={ui.label}
-    >Root directories <span class="text-white/25">— scanned recursively for projects</span></span
+    >Root directories <span class="text-white/45">— scanned recursively for projects</span></span
   >
   <FolderList
     rows={form.roots}

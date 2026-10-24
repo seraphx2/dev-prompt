@@ -1,7 +1,7 @@
 # dev-prompt
 
-**A command palette for every repo you own — one that reads each project and
-hands you its actual scripts, builds, and sub-packages.**
+**A command palette for every repo you own — where each one stands, and what
+it can actually do.**
 
 ![dev-prompt demo](docs/img/0_dev-prompt_demo.gif)
 
@@ -10,58 +10,81 @@ repository under your code folders appears. Type a few letters, hit `Enter`, and
 that repo's action menu is up: open it in your editor or terminal, run one of
 its scripts, or drop into a shell right inside the overlay.
 
+Every repo in that list shows where it stands: the branch it's on, and anything
+that exists only on this machine or was left half-done — uncommitted changes,
+commits nobody else has, stashes, a rebase stopped on a conflict. That works for
+Git, Jujutsu, Mercurial, Subversion, Fossil and Breezy, each in its own terms,
+and stays current in the background. Type `!` for just the repos that need you;
+open one for the safe next step (a fast-forward pull, a push, a fetch), a branch
+switcher, or a second working copy for an AI agent or a long build.
+
 Most launchers stop at "open the folder." dev-prompt opens the action menu it
 built by _inspecting the project_: the exact `package.json` scripts it defines
-(run through the right package manager), `cargo test`, the `.sln` opened in
-Visual Studio, `docker compose up`, a jump straight into the `packages/api`
-sub-project. No file manager, no `cd`, no remembering whether it's `npm run dev`
-or `pnpm start`.
+(run through the right package manager), `cargo test`, your Makefile's or
+justfile's own targets, the `.sln` opened in Visual Studio, `docker compose up`,
+a jump straight into the `packages/api` sub-project. No file manager, no `cd`,
+no remembering whether it's `npm run dev` or `pnpm start`.
 
 It adapts to your machine — actions for tools you haven't installed simply don't
 appear — and the entire editor-and-toolchain brain is a YAML file you can extend
-in a few lines. It looks after the repos themselves too: create one with version
-control already set up, put an existing folder under version control, or move
-one to the Recycle Bin after it checks what would be lost. Appears instantly,
-vanishes the moment it loses focus, never touches your taskbar.
+in a few lines. It looks after the repos themselves too: clone one by pasting
+its address, create one with version control already set up, put an existing
+folder under version control, or move one to the Recycle Bin after it checks
+what would be lost. Appears instantly, vanishes the moment it loses focus,
+never touches your taskbar.
 
 Cross-platform, built with **Tauri v2** (Rust) + **Svelte 5** + **Tailwind
 CSS** — a small single binary with no runtime dependencies beyond the system
-WebView.
+WebView. Website: **[seraphx2.github.io/dev-prompt](https://seraphx2.github.io/dev-prompt/)**.
 
 ## What it does
 
 - **Global-hotkey overlay** — frameless, centered, dismiss-on-blur. Toggle with
-  `Ctrl/Cmd+Backslash` (rebindable via a click-to-record field in Settings).
+  `Ctrl+Backslash` (rebindable via a click-to-record field in Settings).
+- **Branch and working-copy status** — for Git, Jujutsu, Mercurial,
+  Subversion, Fossil and Breezy, each repo shows what's checked out and flags
+  for what exists only here or is left half-done (uncommitted changes, unpushed
+  commits, stashes, a rebase stopped on a conflict, jj's conflicted and
+  divergent changes, …). `!` lists just the repos that need attention; the
+  action menu offers each system's safe one-keystroke steps (a fast-forward
+  pull, push, publish, fetch, update, sync, the branch on GitHub / GitLab / …)
+  and a branch switcher that also makes worktrees, workspaces, shares and
+  checkouts. Everything else hands off to your GUI. See
+  [`docs/vcs-status.md`](docs/vcs-status.md).
 - **Multi-root scan + cache** — walks the directories you list, respects
   `.gitignore`, collapses nested repos, caches the result for instant startup and
   refreshes in the background when stale. A folder watcher keeps the list
   current while the app runs: a repo you clone or delete appears or goes on its
   own.
-- **Fuzzy search** — fzf-style ranking over repo name and path, with match
-  highlighting.
+- **Fuzzy search** — fzf-style ranking over repo name, branch and path, with
+  match highlighting.
 - **Context detection** — on selecting a repo it inspects the tree (root plus
   side-by-side and `packages/*`-style sub-projects) for `.sln` / `.csproj`,
   `package.json` scripts, `Cargo.toml`, `go.mod` / `go.work`, Python
-  (`pyproject.toml` / `requirements.txt`, uv / poetry), `docker-compose`, and more.
+  (`pyproject.toml` / `requirements.txt`, uv / poetry), `docker-compose`,
+  Makefile / justfile / Taskfile targets, and more.
 - **Config-driven rule engine** — every editor / build-tool / launcher mapping
   lives in a bundled `default_config.yaml` (markers, program resolution, rules,
   universal actions). A hand-edited `rules.yaml` layers your own on top.
 - **Action menu** — always-available actions (terminal, file manager, copy path)
   first, then detected per-ecosystem actions; multi-project repos collapse into
   drill-in submenus. Actions gracefully disappear when the tool they need isn't
-  installed.
+  installed. `Shift` runs one as administrator (an admin terminal in the repo is
+  `Ctrl+Shift+T`).
 - **Built-in shell** — **Open shell** (`Ctrl+R` in the action menu) opens
   your own shell (pwsh, bash, zsh, fish, nu, …) right in the overlay, at the
   repo. It keeps running when you hide the overlay, so a dev server stays up and
   the hotkey brings you straight back to it. Every running shell is one `$` (or
   a footer click) away, to jump into or close.
-- **Repo management** — **New repository** (`Ctrl+Shift+N`) creates a folder
-  with Git, Jujutsu, Mercurial, Breezy or Darcs set up; **Set up version
+- **Repo management** — paste a repository's URL into the search to **clone**
+  it into one of your roots; **New repository** (`Ctrl+Shift+N`) creates a
+  folder with Git, Jujutsu, Mercurial, Breezy or Darcs set up; **Set up version
   control…** does the same for a folder that has none; **Move to Recycle Bin**
   checks for unpushed commits and uncommitted work first, and offers Undo.
 - **App launcher** — type `>` to search your installed applications instead of
   repos (Start Menu, Store and installed programs on Windows; `.desktop`
-  entries on Linux), most-used first.
+  entries on Linux), most-used first. `Shift+Enter` runs one as administrator;
+  `Tab` opens its menu.
 - **Right-click menus** — on repos, apps, actions and the shell: the useful
   options for each, styled like the rest of the app.
 - **Settings screen** — a sidebar of pages (General, Repos, Tools, Apps, the
@@ -230,7 +253,7 @@ via your desktop's session settings.)
 
 **Repo list**
 
-<img src="docs/img/1_dev-prompt_repos.png" width="760" alt="The repo list: every repository under your code folders, with its version control and project files">
+<img src="docs/img/1_dev-prompt_repos.png" width="760" alt="The repo list: every repository under your code folders, its branch, status flags such as rebasing, changed files and unpushed commits, and icons for the kind of project — Rust, Node, Python, Docker">
 
 | Key                  | Action                                                |
 | -------------------- | ----------------------------------------------------- |
@@ -239,11 +262,18 @@ via your desktop's session settings.)
 | `Enter`              | open the action menu for the selected repo            |
 | `>`                  | search installed apps instead (see below)             |
 | `$`                  | list the running shells (see below)                   |
+| `!`                  | list only the repos that need attention (see below)   |
 | `Ctrl+R`             | force a rescan                                        |
 | `Ctrl+Shift+N`       | create a new repository (see below)                   |
 | `Delete`             | clear the query                                       |
+| `Ctrl+Delete`        | move the selected repo to the Recycle Bin (see below) |
 | `Ctrl+,`             | open Settings                                         |
 | `Esc` / click away   | hide the overlay                                      |
+
+Small icons on each row say what kind of project it is — Rust, Node, Python,
+Docker, .NET, … (hover one for the files that say so). A repo that isn't Git
+also shows its version control by command name: `jj`, `hg`, `svn`, `fossil`,
+`brz`, `darcs`.
 
 <img src="docs/img/6_dev-prompt_new-repo.png" width="760" alt="The New repository form: a name, the folder it goes in, and the version control to set up">
 
@@ -254,8 +284,25 @@ you have more than one) and a tool; `Tab` moves between fields, `Enter`
 creates, `Esc` goes back. If setup fails, the error is shown and the folder is
 removed again. No remotes are set up; do that from your terminal or editor.
 
+**Clone** — paste a repository's address into the search (`https://…`,
+`git@host:owner/repo`, `svn://…`, or GitHub's `owner/repo` when no repo
+matches it) and press `Enter`. The same form opens with the name taken from
+the address; pick a root and press `Enter` again. dev-prompt tells from the
+address what's there — or, when it can't, asks Git, Mercurial, Subversion and
+Breezy in turn — and offers the installed tools that can clone it: Git or
+Jujutsu (colocated) for a Git repository, Mercurial, Subversion, Fossil or
+Breezy for theirs. Nothing waits on a password prompt you can't see: Git's
+credential manager still asks in its own window, and an SSH key needs to be
+in your agent. If the clone fails, the form says why in plain words (a
+private repository you're not signed in to, an SSH key that isn't loaded, a
+server that can't be reached) and its folder is removed again. A big clone
+can take a while, and it doesn't hold you up: press `Esc` and carry on, or
+hide the overlay. A bar above the footer shows it's still going, with **Show**
+to watch it and **Cancel** to stop it (the half-cloned folder goes too). When
+it's done, or if it fails, a notification says so if you're not looking.
+
 A folder that isn't under version control yet (notes, documents, a project you
-haven't set up) shows up without a badge, and its action menu offers **Set up
+haven't set up) shows up without a branch, and its action menu offers **Set up
 version control…** — the same form, for that folder. If setup fails, only what
 it added is removed; nothing already in the folder is touched.
 Subversion isn't offered — see
@@ -264,20 +311,73 @@ why, and how to add it anyway.
 
 **Action menu**
 
-<img src="docs/img/2_dev-prompt_actions.png" width="760" alt="A repo's action menu: quick actions along the top, then editors, tools and the project's own scripts">
+<img src="docs/img/2_dev-prompt_actions.png" width="760" alt="A repo's action menu: its branch and state under the header, quick actions along the top, then editors and the Version control section — push, fetch, the repo on GitHub">
+
+<img src="docs/img/10_dev-prompt_scripts.png" width="760" alt="Further down the same menu: the project's own yarn scripts">
 
 | Key      | Action                                               |
 | -------- | ---------------------------------------------------- |
 | type     | filter actions (reaches into sub-projects)           |
 | `Enter`  | run the selected action, or drill into a sub-project |
+| `Shift+Enter` | run it as administrator (Windows) / root (Linux), where it can be |
 | `Tab`    | drill into the selected sub-project                  |
 | `Ctrl+T` | open in your terminal app                            |
+| `Ctrl+Shift+T` | the same, as administrator / root               |
 | `Ctrl+E` | show in your file manager                            |
 | `Ctrl+C` | copy the path                                        |
 | `Ctrl+R` | open a shell in the overlay (see below)              |
+| `Ctrl+B` | switch branch / bookmark, or open one in a new worktree, workspace, share or checkout |
+| `Ctrl+Delete` | move this repo to the Recycle Bin (see below)   |
 | `Esc`    | step back one level (sub-project → menu → repo list) |
 
 The four quick actions also sit as buttons along the top of the menu.
+
+**Shift runs it as administrator.** On Windows, every action that starts a
+program runs elevated with Shift: the terminal, a script or a build (opened in
+the repo), an editor or IDE such as Visual Studio or VS Code, a Git GUI.
+Windows asks with its usual prompt. Explorer is the exception, since Windows
+never runs it elevated. On Linux, Shift opens the terminal with a root shell
+(`sudo -s`, or `doas -s`); nothing else runs as root there, since a
+project's commands would leave files in the repo only root can change. Hold
+Shift to see it: the footer shows the hint when the selected action can be
+elevated, and the action's name says "as administrator". Right-click offers
+the same. In the `>` app list, `Shift+Enter` is Run as administrator for
+desktop apps (Store ones like Windows Terminal included), and `Tab` opens the
+same menu as a right-click.
+
+<img src="docs/img/8_dev-prompt_attention.png" width="760" alt="The ! list: only the repos that need attention — a rebase stopped on a conflict, uncommitted and unpushed work, a branch behind its upstream, stashes">
+
+**Branches and status** — each repo row shows what's checked out (a branch, a
+bookmark, `main +2` for Jujutsu changes on top of one) and flags for what
+exists only on this machine or is left half-done: `~3` changed files, `+1` new
+ones, `↑2` unpushed commits (drafts, unsent check-ins), `↓4` behind the
+upstream, `≡1` a stash or shelf, `rebasing` / `merging` / … with `!1`
+conflicts, jj's `!1ch` conflicted changes and `divergent`, `stale`, `needs
+cleanup`, `detached`, `gone`, `local` (hover any of them for the sentence).
+That works for Git, Jujutsu, Mercurial, Subversion, Fossil and Breezy, each in
+its own terms, and stays current in the background as you work. The footer
+counts the repos that need attention — click it, or type `!`, for just those,
+most urgent first. The search also matches branch names, so a ticket number
+finds every repo on that ticket.
+
+<img src="docs/img/9_dev-prompt_branches.png" width="760" alt="The branch switcher: branches by when they were last used, one checked out in another worktree, ahead / behind counts, and branches only on the remote">
+
+In the action menu a line under the header spells the state out, and a
+**Version control** section offers only what's safe in one keystroke right
+now: for Git a fast-forward **Pull**, a **Push** to the branch's upstream,
+**Publish** a branch that has none, **Fetch**; for Jujutsu push / publish a
+bookmark and fetch; Mercurial's pull and push of drafts; Subversion's update;
+Fossil's sync and update; Breezy's pull and push; and the repo, branch and new
+pull request on GitHub, GitLab, Bitbucket, Azure DevOps or Codeberg. `Ctrl+B`
+opens the branch switcher: `Enter` switches (never forced, and never merging
+uncommitted work in), `Ctrl+Enter` checks the branch out in a second working
+copy beside the repo instead — a Git worktree, a jj workspace, a Mercurial
+share, a Subversion or Fossil checkout — and typing a new name creates it.
+Staging, committing, diffs and conflicts are your GUI's job — Fork, GitKraken,
+Sublime Merge, Git Extensions, GitHub Desktop, TortoiseGit, gitg, lazygit,
+gitui and tig are offered when installed. More in
+[docs/vcs-status.md](docs/vcs-status.md), including a script that builds a
+test repo for every state of every system.
 
 <img src="docs/img/4_dev-prompt_shell.png" width="1000" alt="A shell open inside the overlay, running git log and a Hugo dev server">
 
@@ -329,8 +429,9 @@ folders to index or turns the whole scope off.
 
 **Right-click** works where it's useful, styled like the rest of the app:
 
-- a **repo** — open its actions, its quick actions (terminal, file manager,
-  copy path, open shell), "Set up version control…" when it has none, the
+- a **repo** — open its actions, "Switch branch…" for Git, its quick actions
+  (terminal, file manager, copy path, open shell), "Set up version control…"
+  when it has none, the
   actions you use most in that repo, "Close shell" while one runs there, and
   "Move to Recycle Bin…" (see below);
 - an **app** in `>` — launch it, show its folder, copy its path;
@@ -344,17 +445,19 @@ Inspect.)
 
 <img src="docs/img/7_dev-prompt_remove.png" width="760" alt="Move to Trash, listing the uncommitted changes, unpushed commits and stash that exist only in this folder">
 
-**Move to Recycle Bin** (Trash on Linux) — from a repo's right-click menu or
-its action menu — never deletes outright: the folder goes to the bin, Undo
+**Move to Recycle Bin** (Trash on Linux) — the **Recycle** button in a repo's
+action menu header, `Ctrl+Delete` there or on a selected repo in the list, or
+the repo's right-click menu — never deletes outright: the folder goes to the bin, Undo
 (`Ctrl+Z`) appears right after, and on Windows a folder too big for the bin
 gets Windows' own "permanently delete?" prompt rather than vanishing. First it
 checks what exists nowhere else: uncommitted changes, commits on no remote,
 stashes / shelves, repos nested inside, or no version control at all. A clean
 repo whose commits are all on a remote is one click; anything else lists what's
-at risk and asks you to type the folder's name. Git, Mercurial and Jujutsu are
-checked fully offline; for Subversion, Breezy, Darcs and Fossil only local
-changes can be checked without contacting the remote, so those always ask for
-the name. Your root folders themselves are never offered.
+at risk and asks you to type the folder's name. Git, Jujutsu, Mercurial and
+Fossil are checked fully offline; Subversion commits go straight to the
+server, so only local changes can be lost there; Breezy and Darcs can only
+tell what was pushed by asking the remote, so those always ask for the name.
+Your root folders themselves are never offered.
 
 The mouse **back / forward** buttons work throughout: back == `Esc` for the
 current screen, forward == open the action menu on the repo list, or drill
@@ -399,7 +502,12 @@ src-tauri/                  Rust backend
   src/apps.rs               installed-app discovery for the > scope
   src/app_watch.rs          app watcher: Start Menu / registry / .desktop changes
   src/provision.rs          New repository / Set up version control
+  src/clone.rs              Clone: what's at a URL, and cloning it into a root
   src/removal.rs            Move to Recycle Bin: the at-risk check, Undo
+  src/vcs_state.rs          a working copy's state, every system: branch, changes, unpushed, stashes, …
+  src/status.rs             keeps every repo's state current in the background
+  src/vcs_ops.rs            branches, switching, second working copies, remote steps, web links
+  src/*_ops.rs              each system's side of it: git, jj, hg, svn, fossil, brz
   src/pty.rs                built-in shell: the user's shell in a pseudo-terminal
   src/launch.rs             detached process spawning
   src/layer.rs              Wayland: the overlay as a centred layer-shell surface
@@ -408,9 +516,10 @@ src-tauri/                  Rust backend
   src/rules_template.yaml    scaffold written to the user's rules.yaml
 scripts/version.mjs         CalVer generator for releases
 packaging/                  Linux packaging: .desktop / AppStream, PKGBUILDs,
-                            Flatpak manifest, the apt/rpm/pacman repo builder
+                            Flatpak manifest, the apt/rpm/pacman repo builder,
+                            and the website (packaging/site/)
 .github/workflows/          CI, release, the package repo, dev sync
-docs/                       configuration.md, rules-engine.md, releasing.md, future-work.md
+docs/                       configuration.md, rules-engine.md, vcs-status.md, releasing.md, future-work.md
 ```
 
 ## Tests
@@ -429,6 +538,11 @@ npm run check                 # svelte-check (types)
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+The MIT license covers the code. The name "dev-prompt" and its logo aren't
+covered by it: a fork or a redistribution is welcome under the license, but
+under its own name and logo, so nobody mistakes it for this project or its
+releases.
 
 ## Install note
 

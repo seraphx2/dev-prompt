@@ -297,15 +297,23 @@ pub fn shell_spec(choice: Option<&str>, _cwd: &Path) -> ShellSpec {
         .map(str::to_string)
         .unwrap_or_else(crate::rules::default_shell);
     let label = shell_label(&name);
-    let program = crate::rules::which(&name)
-        .or_else(|| (label == "bash").then(git_bash).flatten())
-        .unwrap_or_else(|| name.clone());
+    let program = match label.as_str() {
+        "git-bash" => crate::rules::git_bash(),
+        // Whatever `bash` is on PATH — WSL's launcher, if that's what it is
+        // (the picker offers that as `wsl`), and Git Bash when nothing is.
+        // Kept as it was, so an existing `shell: bash` setting still means
+        // the same shell.
+        "bash" => crate::rules::which("bash").or_else(crate::rules::git_bash),
+        _ => crate::rules::which(&name),
+    }
+    .unwrap_or_else(|| name.clone());
     let args: &[&str] = match label.as_str() {
         "pwsh" | "powershell" => &["-NoLogo"],
         // Git for Windows' bash: a login shell is what reads its profile
         // (the git-aware prompt) — Windows Terminal's Git Bash profile does
         // the same.
-        "bash" => &["--login", "-i"],
+        "bash" | "git-bash" => &["--login", "-i"],
+        // `wsl` alone opens the default distro's login shell, in this folder.
         _ => &[],
     };
     ShellSpec {
@@ -314,20 +322,6 @@ pub fn shell_spec(choice: Option<&str>, _cwd: &Path) -> ShellSpec {
         label,
         relayed: false,
     }
-}
-
-/// Git for Windows' bash, which usually isn't on PATH (`list_shells` offers
-/// `bash` when it finds it here).
-#[cfg(windows)]
-fn git_bash() -> Option<String> {
-    ["ProgramFiles", "ProgramFiles(x86)"]
-        .into_iter()
-        .filter_map(|b| std::env::var(b).ok())
-        .flat_map(|pf| {
-            ["Git\\bin\\bash.exe", "Git\\usr\\bin\\bash.exe"].map(|rel| Path::new(&pf).join(rel))
-        })
-        .find(|p| p.is_file())
-        .map(|p| p.to_string_lossy().into_owned())
 }
 
 #[cfg(unix)]
@@ -619,6 +613,15 @@ mod tests {
         assert_eq!(shell_spec(Some("cmd"), &cwd).label, "cmd");
         assert_eq!(shell_spec(Some("powershell"), &cwd).args, ["-NoLogo"]);
         assert_eq!(shell_spec(Some("bash"), &cwd).args, ["--login", "-i"]);
+        let git_bash = shell_spec(Some("git-bash"), &cwd);
+        assert_eq!(git_bash.label, "git-bash");
+        assert_eq!(git_bash.args, ["--login", "-i"]);
+        if let Some(path) = crate::rules::git_bash() {
+            assert_eq!(git_bash.program, path, "git-bash runs Git for Windows' own bash");
+        }
+        let wsl = shell_spec(Some("wsl"), &cwd);
+        assert_eq!(wsl.label, "wsl");
+        assert!(wsl.args.is_empty(), "plain `wsl` opens the default distro's shell");
         // Nothing chosen → the same default `rules::default_shell` names.
         assert_eq!(shell_spec(None, &cwd).label, crate::rules::default_shell());
         assert_eq!(shell_spec(Some("  "), &cwd).label, crate::rules::default_shell());

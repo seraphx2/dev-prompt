@@ -8,6 +8,14 @@
 //! The open-time staleness check (`cache_ttl_secs`) stays as the backstop for
 //! whatever a watcher can miss: network shares that don't report changes, the
 //! Linux inotify watch limit, events lost while the watcher is rebuilt.
+//!
+//! The same events keep each repo's status flags current (`status.rs`): a
+//! file edited in a listed repo, or one of the few files in `.git` that say
+//! what's checked out and committed (`HEAD`, `index`, `refs/…`, a rebase or
+//! merge starting), asks for that repo to be read again. Git's object store,
+//! logs and lock files never do. On Linux only the folders the scan visits are
+//! watched, plus each repo's `.git` itself, so edits deeper in a repo are
+//! caught by the overlay-open sweep instead.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -40,8 +48,13 @@ pub struct RepoWatcher {
     /// The config it was built from (see [`watch_key`]), so a sync that
     /// changes nothing it depends on keeps it instead of rebuilding.
     key: String,
-    /// Shared with the Linux thread that adds watches for new folders.
-    _inner: Arc<Mutex<RecommendedWatcher>>,
+    /// Shared with the Linux thread that adds watches for new folders. Held
+    /// everywhere: dropping it stops the watcher.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    inner: Arc<Mutex<RecommendedWatcher>>,
+    /// Linux: the version-control folders watched so far (see [`track_vcs_dirs`]).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    vcs_dirs: Mutex<std::collections::HashSet<PathBuf>>,
 }
 
 /// Everything [`Filter`] and the watches depend on.
@@ -83,6 +96,52 @@ impl Filter {
     fn is_opaque(&self, name: &str) -> bool {
         let lower = name.to_lowercase();
         HARD_SKIP.iter().any(|s| lower == s.to_lowercase()) || self.vcs_dirs.contains(&lower)
+    }
+
+    /// The working copies whose status `path` changing can change, given
+    /// `repo`, the listed repo it's in. A file in its working tree, or one of
+    /// the few files in its version control's own folder that record what's
+    /// checked out and committed (see [`vcs_state_file`]): `repo` itself.
+    ///
+    /// A Git repo's `.git` also holds its linked worktrees' state. Under
+    /// `.git/worktrees/<name>/` are a worktree's own `HEAD` and index — a
+    /// commit, a stage or a switch made there — so that's the worktree. And
+    /// the refs every worktree shares (branches, remote branches, the stash, a
+    /// fetch) change the ahead / behind / unpushed of the repo and every
+    /// worktree alike.
+    fn status_targets(&self, repo: &Path, path: &Path) -> Vec<PathBuf> {
+        let Ok(rel) = path.strip_prefix(repo) else { return Vec::new() };
+        let rel: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+        let Some(first) = rel.first() else { return Vec::new() };
+        if first.eq_ignore_ascii_case(".git") {
+            let inner = &rel[1..];
+            if inner.first().map(String::as_str) == Some("worktrees") {
+                // .git/worktrees/<name>/<file…>
+                let (Some(name), Some(file)) = (inner.get(1), inner.get(2..)) else { return Vec::new() };
+                if vcs_state_file(".git", file) != Some(true) {
+                    return Vec::new();
+                }
+                return crate::vcs_state::linked_worktrees(&repo.join(".git"))
+                    .into_iter()
+                    .filter(|(n, _)| n == name)
+                    .map(|(_, folder)| folder)
+                    .collect();
+            }
+            if vcs_state_file(".git", inner) != Some(true) {
+                return Vec::new();
+            }
+            let mut out = vec![repo.to_path_buf()];
+            if matches!(inner.first().map(String::as_str), Some("refs" | "packed-refs" | "FETCH_HEAD")) {
+                out.extend(crate::vcs_state::linked_worktrees(&repo.join(".git")).into_iter().map(|(_, f)| f));
+            }
+            return out;
+        }
+        match vcs_state_file(first, &rel[1..]) {
+            Some(true) => vec![repo.to_path_buf()],
+            Some(false) => Vec::new(),
+            None if rel.iter().any(|seg| self.is_opaque(seg)) => Vec::new(),
+            None => vec![repo.to_path_buf()],
+        }
     }
 
     /// What `path` changing in the way `kind` describes means for the list.
@@ -171,6 +230,60 @@ impl Filter {
     }
 }
 
+/// For a path in a repo whose first part is `top` and the rest `rel`: `None`
+/// when `top` isn't a version-control folder (or checkout file); otherwise
+/// whether the change can mean the status changed. Only files the system's
+/// own commands write are followed, and never one its status read writes
+/// (that would read again, and again): Git's index is safe because reads set
+/// `GIT_OPTIONAL_LOCKS=0`, Mercurial's dirstate isn't, Fossil's checkout
+/// database settles after one extra read.
+fn vcs_state_file(top: &str, rel: &[String]) -> Option<bool> {
+    let first = rel.first().map(String::as_str).unwrap_or_default();
+    let last = rel.last().map(String::as_str).unwrap_or_default();
+    let lock = last.ends_with(".lock") || last.ends_with("-journal") || matches!(last, "lock" | "wlock");
+    let matters = match top {
+        // What's checked out, the index, branch and remote refs, an
+        // operation starting or ending, a fetch.
+        ".git" => matches!(
+            first,
+            "HEAD" | "index" | "refs" | "packed-refs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "MERGE_HEAD"
+                | "CHERRY_PICK_HEAD" | "REVERT_HEAD" | "BISECT_LOG" | "rebase-merge" | "rebase-apply"
+        ),
+        // Bookmarks, the branch, commits and phases (push), an operation's
+        // state file.
+        ".hg" => {
+            matches!(
+                first,
+                "bookmarks" | "bookmarks.current" | "branch" | "rebasestate" | "histedit-state" | "graftstate"
+                    | "shelvedstate" | "updatestate" | "bisect.state" | "merge"
+            ) || (first == "store" && (last == "phaseroots" || last.starts_with("00changelog")))
+        }
+        // Every jj command that changes anything records an operation.
+        ".jj" => rel.len() >= 3 && rel[0] == "repo" && rel[1] == "op_heads",
+        // The working-copy database; `svn status` only reads it.
+        ".svn" => first == "wc.db",
+        ".bzr" => matches!(
+            (first, last),
+            ("checkout", "dirstate" | "conflicts" | "merge-hashes") | ("branch", "last-revision")
+        ),
+        // The checkout database itself; its `-journal` / `-wal` beside it
+        // come and go with every read.
+        t if t.starts_with("_FOSSIL_") || t.starts_with(".fslckout") => {
+            rel.is_empty() && (t == "_FOSSIL_" || t == ".fslckout")
+        }
+        // A cloned checkout keeps its repository file inside it (see
+        // clone.rs): a commit or sync rewrites it (the unsent count); status
+        // reads don't.
+        // Its journal files beside it come and go; `.fossil-settings/` is
+        // versioned working files, so not this arm.
+        ".fossil" => rel.is_empty(),
+        ".fossil-journal" | ".fossil-wal" | ".fossil-shm" => false,
+        "_darcs" => first == "patches" || first == "hashed_inventory",
+        _ => return None,
+    };
+    Some(matters && !lock)
+}
+
 fn has_marker(dir: &Path, discovery: &GlobSet) -> bool {
     std::fs::read_dir(dir).is_ok_and(|rd| {
         rd.flatten()
@@ -188,6 +301,7 @@ pub fn sync(app: &AppHandle) {
     // keeps it, rather than dropping events while it's rebuilt (and, on
     // Linux, re-walking every root).
     if state.watcher.lock().unwrap().as_ref().is_some_and(|w| w.key == watch_key(&cfg)) {
+        track_vcs_dirs(app);
         return;
     }
     let tx = signals(app).clone();
@@ -197,19 +311,93 @@ pub fn sync(app: &AppHandle) {
         let repos = state.repos.lock().unwrap();
         repos.iter().any(|r| Path::new(&r.path).starts_with(p))
     };
-    let watcher = start(&cfg, holds_repo, move |s| {
-        let _ = tx.send(s);
-    });
+    let handler_app = app.clone();
+    let repo_of = move |p: &Path| {
+        let state = handler_app.state::<AppState>();
+        let repos = state.repos.lock().unwrap();
+        repos
+            .iter()
+            .filter(|r| r.vcs.is_some() && p.starts_with(&r.path))
+            .max_by_key(|r| r.path.len())
+            .map(|r| PathBuf::from(&r.path))
+    };
+    let status_app = app.clone();
+    let watcher = start(
+        &cfg,
+        holds_repo,
+        repo_of,
+        move |s| {
+            let _ = tx.send(s);
+        },
+        move |repo| crate::status::changed(&status_app, repo.to_string_lossy().into_owned()),
+    );
     *state.watcher.lock().unwrap() = watcher;
+    track_vcs_dirs(app);
+}
+
+/// Linux: watch the folders each listed repo's version control keeps its
+/// state in (one inotify watch each: `.git`, `.hg` and its store, jj's
+/// operation heads, `.svn`, `.bzr`'s checkout and branch, `_darcs`), which the
+/// root watches don't reach. Called after every sync and rescan; only new
+/// repos cost anything. Elsewhere the root watch already covers them.
+pub fn track_vcs_dirs(app: &AppHandle) {
+    #[cfg(target_os = "linux")]
+    {
+        const STATE_DIRS: &[&str] =
+            &[".git", ".hg", ".hg/store", ".jj/repo/op_heads/heads", ".svn", ".bzr/checkout", ".bzr/branch", "_darcs"];
+        let state = app.state::<AppState>();
+        let dirs: Vec<PathBuf> = state
+            .repos
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.vcs.is_some())
+            .flat_map(|r| {
+                let repo = Path::new(&r.path);
+                // Each linked worktree's own HEAD and index sit one level
+                // further down, in `.git/worktrees/<name>/`.
+                let worktrees = std::fs::read_dir(repo.join(".git/worktrees"))
+                    .map(|rd| rd.flatten().map(|e| e.path()).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                STATE_DIRS.iter().map(move |d| repo.join(d)).chain(worktrees)
+            })
+            .filter(|g| g.is_dir())
+            .collect();
+        let guard = state.watcher.lock().unwrap();
+        let Some(w) = guard.as_ref() else { return };
+        let mut watched = w.vcs_dirs.lock().unwrap();
+        let mut inner = w.inner.lock().unwrap();
+        for g in dirs {
+            if watched.contains(&g) {
+                continue;
+            }
+            match inner.watch(&g, RecursiveMode::NonRecursive) {
+                Ok(()) => {
+                    watched.insert(g);
+                }
+                Err(e) if matches!(e.kind, notify::ErrorKind::MaxFilesWatch) => {
+                    eprintln!("watching version-control folders stopped early: {e}");
+                    break;
+                }
+                Err(_) => {}
+            }
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = app;
 }
 
 /// Watch `cfg`'s roots, passing what each relevant event means to
-/// `on_signal`. `holds_repo(p)` says whether a listed repo is at or below `p`.
-/// `None` when no watcher could be created at all.
+/// `on_signal`, and each listed repo whose status it may change to
+/// `on_status`. `holds_repo(p)` says whether a listed repo is at or below `p`;
+/// `repo_of(p)` names the listed repo `p` is in. `None` when no watcher could
+/// be created at all.
 fn start(
     cfg: &Config,
     holds_repo: impl Fn(&Path) -> bool + Send + 'static,
+    repo_of: impl Fn(&Path) -> Option<PathBuf> + Send + 'static,
     on_signal: impl Fn(Signal) + Send + Sync + 'static,
+    on_status: impl Fn(PathBuf) + Send + 'static,
 ) -> Option<RepoWatcher> {
     let filter = Arc::new(Filter::new(cfg));
     let on_signal = Arc::new(on_signal);
@@ -227,10 +415,25 @@ fn start(
             Ok(ev) if ev.need_rescan() => return signal(Signal::Rescan),
             Ok(ev) => ev,
         };
-        if matches!(
-            ev.kind,
-            EventKind::Access(_) | EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Metadata(_))
-        ) {
+        if matches!(ev.kind, EventKind::Access(_)) {
+            return;
+        }
+        // Any write in a repo may change its status — contents included —
+        // and a linked worktree's state lives in its repo's `.git`.
+        let mut touched: Vec<PathBuf> = Vec::new();
+        for p in &ev.paths {
+            if let Some(repo) = repo_of(p) {
+                for target in f.status_targets(&repo, p) {
+                    if !touched.contains(&target) {
+                        touched.push(target);
+                    }
+                }
+            }
+        }
+        for repo in touched {
+            on_status(repo);
+        }
+        if matches!(ev.kind, EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Metadata(_))) {
             return;
         }
         if let Some(s) = ev.paths.iter().filter_map(|p| f.classify(p, &ev.kind, &holds_repo)).max() {
@@ -292,7 +495,7 @@ fn start(
             }
         });
     }
-    Some(RepoWatcher { key: watch_key(cfg), _inner: inner })
+    Some(RepoWatcher { key: watch_key(cfg), inner, vcs_dirs: Default::default() })
 }
 
 /// [`sync`] on its own thread — for callers on the UI thread, since on Linux
@@ -500,9 +703,15 @@ mod tests {
         cfg.roots = vec![root.to_string_lossy().into_owned()];
         let listed = root.join("listed");
         let (tx, rx) = mpsc::channel();
-        let _w = start(&cfg, move |p| listed.starts_with(p), move |s| {
-            let _ = tx.send(s);
-        })
+        let _w = start(
+            &cfg,
+            move |p| listed.starts_with(p),
+            |_| None,
+            move |s| {
+                let _ = tx.send(s);
+            },
+            |_| {},
+        )
         .expect("a watcher");
         std::thread::sleep(Duration::from_millis(300));
 
@@ -540,6 +749,128 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn status_follows_the_working_tree_and_gits_state_files_only() {
+        let root = tmp("status");
+        let f = filter(&root);
+        let repo = root.join("proj");
+        let touches = |rel: &str| f.status_targets(&repo, &repo.join(rel)) == vec![repo.clone()];
+        assert!(touches("src/main.rs"));
+        assert!(touches("README.md"));
+        assert!(touches(".git/HEAD"));
+        assert!(touches(".git/index"));
+        assert!(touches(".git/refs/heads/feature/x"));
+        assert!(touches(".git/refs/remotes/origin/main"));
+        assert!(touches(".git/rebase-merge/done"));
+        assert!(touches(".git/FETCH_HEAD"));
+        assert!(!touches(".git/index.lock"));
+        assert!(!touches(".git/refs/heads/main.lock"));
+        assert!(!touches(".git/objects/ab/cdef"));
+        assert!(!touches(".git/logs/HEAD"));
+        assert!(!touches(".git"));
+        assert!(!touches("node_modules/x/index.js"));
+        assert!(!touches("target/debug/app"));
+        // Each system's own state files — and never what its status read writes.
+        assert!(!touches(".hg/dirstate"), "a status read can write there");
+        assert!(!touches(".hg/wlock"));
+        assert!(touches(".hg/bookmarks"));
+        assert!(touches(".hg/rebasestate"));
+        assert!(touches(".hg/merge/state"));
+        assert!(touches(".hg/store/phaseroots"));
+        assert!(touches(".hg/store/00changelog.i"));
+        assert!(!touches(".hg/store/data/a.txt.i"));
+        assert!(touches(".jj/repo/op_heads/heads/0123abcd"));
+        assert!(!touches(".jj/working_copy/tree_state"), "jj's snapshot writes there");
+        assert!(!touches(".jj/repo/store/extra/abc"));
+        assert!(touches(".svn/wc.db"));
+        assert!(!touches(".svn/wc.db-journal"));
+        assert!(!touches(".svn/pristine/ab/abc.svn-base"));
+        assert!(touches(".bzr/branch/last-revision"));
+        assert!(touches(".bzr/checkout/dirstate"));
+        assert!(!touches(".bzr/repository/packs/x.pack"));
+        assert!(touches("_FOSSIL_"));
+        assert!(!touches("_FOSSIL_-journal"), "comes and goes with every read");
+        assert!(touches(".fslckout"));
+        assert!(touches(".fossil"));
+        assert!(!touches(".fossil-journal"));
+        // Versioned settings are working files: a change there is a change.
+        assert!(f.status_targets(&repo, &repo.join(".fossil-settings/ignore-glob")).contains(&repo));
+        assert!(f.status_targets(&repo, &repo).is_empty());
+        assert!(f.status_targets(&repo, &root.join("other/file")).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A linked worktree's HEAD and index live in its repo's `.git`: a change
+    /// there is the worktree's, and the refs they share are both's.
+    #[test]
+    fn a_linked_worktrees_state_is_traced_to_it() {
+        let root = tmp("wt-status");
+        let f = filter(&root);
+        let (repo, wt) = (root.join("main"), root.join("main-topic"));
+        let wt_git = repo.join(".git/worktrees/main-topic");
+        std::fs::create_dir_all(&wt_git).unwrap();
+        std::fs::create_dir_all(&wt).unwrap();
+        // What `git worktree add` writes: the path of the worktree's `.git` file.
+        std::fs::write(wt_git.join("gitdir"), format!("{}\n", wt.join(".git").to_string_lossy().replace('\\', "/"))).unwrap();
+        let targets = |rel: &str| {
+            let mut t: Vec<String> = f
+                .status_targets(&repo, &repo.join(rel))
+                .iter()
+                .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                .collect();
+            t.sort();
+            t
+        };
+        assert_eq!(targets(".git/worktrees/main-topic/HEAD"), vec!["main-topic"], "a switch in the worktree");
+        assert_eq!(targets(".git/worktrees/main-topic/index"), vec!["main-topic"], "staging in the worktree");
+        assert!(targets(".git/worktrees/main-topic/index.lock").is_empty());
+        assert!(targets(".git/worktrees/main-topic/logs/HEAD").is_empty());
+        assert!(targets(".git/worktrees/gone/HEAD").is_empty(), "a worktree git no longer knows");
+        assert_eq!(targets(".git/HEAD"), vec!["main"], "the main working copy's own HEAD");
+        assert_eq!(targets(".git/refs/heads/topic"), vec!["main", "main-topic"], "a commit on any branch");
+        assert_eq!(targets(".git/FETCH_HEAD"), vec!["main", "main-topic"], "a fetch");
+        assert_eq!(targets(".git/packed-refs"), vec!["main", "main-topic"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Real OS events: a file edited in a listed repo and a branch's ref
+    /// moving each ask for that repo's status; object-store churn doesn't.
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn real_events_in_a_repo_ask_for_its_status() {
+        let root = tmp("real-status");
+        let repo = root.join("listed");
+        std::fs::create_dir_all(repo.join(".git/objects/ab")).unwrap();
+        std::fs::create_dir_all(repo.join(".git/refs/heads")).unwrap();
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        let mut cfg = config::bundled_defaults();
+        cfg.roots = vec![root.to_string_lossy().into_owned()];
+        let (tx, rx) = mpsc::channel();
+        let listed = repo.clone();
+        let _w = start(
+            &cfg,
+            |_| false,
+            move |p| p.starts_with(&listed).then(|| listed.clone()),
+            |_| {},
+            move |r| {
+                let _ = tx.send(r);
+            },
+        )
+        .expect("a watcher");
+        std::thread::sleep(Duration::from_millis(300));
+
+        std::fs::write(repo.join(".git/objects/ab/cdef"), "x").unwrap();
+        assert!(rx.recv_timeout(Duration::from_secs(2)).is_err(), "object churn must not read status");
+
+        std::fs::write(repo.join("src/lib.rs"), "edit").unwrap();
+        assert_eq!(rx.recv_timeout(Duration::from_secs(10)), Ok(repo.clone()));
+        std::thread::sleep(Duration::from_millis(300));
+        while rx.try_recv().is_ok() {}
+        std::fs::write(repo.join(".git/refs/heads/main"), "abc").unwrap();
+        assert_eq!(rx.recv_timeout(Duration::from_secs(10)), Ok(repo.clone()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A root that can't be watched (an unplugged drive, a typo) mustn't
     /// leave the roots after it unwatched.
     #[test]
@@ -551,9 +882,15 @@ mod tests {
             root.to_string_lossy().into_owned(),
         ];
         let (tx, rx) = mpsc::channel();
-        let _w = start(&cfg, |_| false, move |s| {
-            let _ = tx.send(s);
-        })
+        let _w = start(
+            &cfg,
+            |_| false,
+            |_| None,
+            move |s| {
+                let _ = tx.send(s);
+            },
+            |_| {},
+        )
         .expect("a watcher");
         std::thread::sleep(Duration::from_millis(300));
         std::fs::create_dir(root.join("notes")).unwrap();

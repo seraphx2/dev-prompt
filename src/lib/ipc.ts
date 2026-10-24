@@ -7,6 +7,8 @@ import type {
   AppConfig,
   AppEntry,
   AppListPayload,
+  BranchList,
+  ClonePlan,
   ConfigPatch,
   ConfigSummary,
   FileManagerOption,
@@ -14,10 +16,15 @@ import type {
   RemovalAssessment,
   Repo,
   RepoListPayload,
+  RepoStatus,
   RepoTrace,
   ScoredRepo,
+  SwitchTarget,
+  SyncOp,
   SystemPaths,
   TerminalOption,
+  VcsDetails,
+  VcsOutcome,
 } from "./types";
 
 /** Cache-first repo list; returns instantly from the on-disk cache when present. */
@@ -67,9 +74,10 @@ export function refreshRepoContext(path: string): Promise<void> {
   return invoke<void>("refresh_repo_context", { path });
 }
 
-/** Spawn the action's process detached from the overlay. */
-export function runAction(actionId: string, path: string): Promise<void> {
-  return invoke<void>("run_action", { actionId, path });
+/** Spawn the action's process detached from the overlay — `elevated`: as
+ *  administrator / root, for an action with `elevated` set. */
+export function runAction(actionId: string, path: string, elevated = false): Promise<void> {
+  return invoke<void>("run_action", { actionId, path, elevated });
 }
 
 export function hideOverlay(): Promise<void> {
@@ -197,6 +205,18 @@ export function checkNewRepo(root: string, name: string): Promise<string | null>
   return invoke<string | null>("check_new_repo", { root, name });
 }
 
+/** What `url` is (asking the installed tools when its shape doesn't say), its
+ *  folder name, and the tools that can clone it. Rejects when nothing can. */
+export function clonePlan(url: string): Promise<ClonePlan> {
+  return invoke<ClonePlan>("clone_plan", { url });
+}
+
+/** Clone `url` into `<root>/<name>` with `tool`. Resolves to the new repo
+ *  (already added to the list); rejects with the tool's error. */
+export function cloneRepo(root: string, name: string, url: string, tool: string): Promise<Repo> {
+  return invoke<Repo>("clone_repo", { root, name, url, tool });
+}
+
 /**
  * Create `<root>/<name>` and run version-control setup `tool` in it. Resolves to
  * the new repo (already added to the list); rejects with the tool's error.
@@ -222,9 +242,62 @@ export function initRepo(
   return invoke<Repo>("init_repo", { path, tool, values });
 }
 
+/** Every repo's last-read working-copy status, by path. */
+export function listStatuses(): Promise<Record<string, RepoStatus>> {
+  return invoke<Record<string, RepoStatus>>("list_statuses");
+}
+
+/** Re-read `paths` now, or (none given) every repo not read in the last few
+ *  minutes. Results arrive through `onStatusUpdated`. */
+export function refreshStatuses(paths?: string[]): Promise<void> {
+  return invoke<void>("refresh_statuses", { paths: paths ?? null });
+}
+
+/** One repo's status changed (`status` null: it has none any more). */
+export function onStatusUpdated(
+  cb: (path: string, status: RepoStatus | null) => void,
+): Promise<UnlistenFn> {
+  return listen<{ path: string; status: RepoStatus | null }>("status:updated", (e) =>
+    cb(e.payload.path, e.payload.status),
+  );
+}
+
+/** Branches or bookmarks, remote ones nothing local tracks, and other
+ *  working copies, for the branch switcher (Subversion's from the server). */
+export function vcsBranches(path: string): Promise<BranchList> {
+  return invoke<BranchList>("vcs_branches", { path });
+}
+
+/** Remotes, the default branch, web links, pull / push locations — local reads only. */
+export function vcsDetails(path: string): Promise<VcsDetails> {
+  return invoke<VcsDetails>("vcs_details", { path });
+}
+
+/** Check out a branch (bookmark); rejects with the reason when it can't. */
+export function vcsSwitch(path: string, target: SwitchTarget): Promise<VcsOutcome> {
+  return invoke<VcsOutcome>("vcs_switch", { path, target });
+}
+
+/** Fetch, pull, push, publish (to `remote`), update or sync. */
+export function vcsSync(path: string, op: SyncOp, remote?: string): Promise<VcsOutcome> {
+  return invoke<VcsOutcome>("vcs_sync", { path, op, remote: remote ?? null });
+}
+
+/** Check a branch out in a second working copy beside the repo; resolves to it. */
+export function vcsAddCopy(path: string, target: SwitchTarget): Promise<Repo> {
+  return invoke<Repo>("vcs_add_copy", { path, target });
+}
+
 /** What moving the folder at `path` to the bin would lose. */
 export function assessRemoval(path: string): Promise<RemovalAssessment> {
   return invoke<RemovalAssessment>("assess_removal", { path });
+}
+
+/** The screen waiting on a read ("removal", "branches", "details", the clone
+ *  form's "plan") was left, or the clone banner's Cancel ("clone"): stop it,
+ *  so nothing keeps running in the repo. */
+export function cancelRead(kind: "removal" | "branches" | "details" | "clone" | "plan"): Promise<void> {
+  return invoke<void>("cancel_read", { kind });
 }
 
 /** Move a listed folder to the Recycle Bin / Trash. Resolves to whether Undo
@@ -248,13 +321,15 @@ export function rescanApps(): Promise<AppListPayload> {
   return invoke<AppListPayload>("rescan_apps");
 }
 
-/** Launch an installed app (bumps its frecency count). */
-export function runApp(e: AppEntry): Promise<void> {
+/** Launch an installed app (bumps its frecency count) — `elevated`: Run as
+ *  administrator, for a Windows desktop app (`kind: "exe"`). */
+export function runApp(e: AppEntry, elevated = false): Promise<void> {
   return invoke<void>("run_app", {
     exec: e.exec,
     kind: e.kind,
     args: e.args ?? null,
     terminal: e.terminal ?? null,
+    elevated,
   });
 }
 

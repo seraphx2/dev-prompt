@@ -74,6 +74,22 @@ function MetaFor($path) {
 #    up here but are picked up with a real path in step 2. All or nothing:
 #    there's no asking for one package.
 if ($Params.store) {
+  # Packaged desktop apps (Windows Terminal, PowerShell, VS Code from the
+  # Store) can run as administrator, as Start offers; Store-style ones can't.
+  # Their manifest says which: a full-trust entry point.
+  $fullTrust = @{}
+  try {
+    foreach ($pkg in (Get-AppxPackage -PackageTypeFilter Main)) {
+      $m = Join-Path $pkg.InstallLocation 'AppxManifest.xml'
+      if (-not (Test-Path -LiteralPath $m)) { continue }
+      try { [xml]$x = Get-Content -LiteralPath $m -Raw } catch { continue }
+      foreach ($app in @($x.Package.Applications.Application)) {
+        if ($app -and $app.OuterXml -match 'Windows\.FullTrustApplication|RuntimeBehavior="(packagedClassicApp|win32App)"') {
+          $fullTrust["$($pkg.PackageFamilyName)!$($app.Id)"] = $true
+        }
+      }
+    }
+  } catch {}
   foreach ($a in (Get-StartApps)) {
     if (-not $a.Name -or -not $a.AppID) { continue }
     if ($a.AppID -match '!') {
@@ -81,6 +97,7 @@ if ($Params.store) {
         origin = 'store'
         name = [string]$a.Name; exec = [string]$a.AppID; kind = 'aumid'
         args = ''; icon = ''; source = 'store'
+        elevate = [bool]$fullTrust[[string]$a.AppID]
       })
     }
   }

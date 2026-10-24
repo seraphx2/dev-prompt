@@ -9,6 +9,7 @@ use crate::config::cache_dir;
 use crate::error::AppResult;
 use crate::inspect::RepoContext;
 use crate::scan::Repo;
+use crate::vcs_state::RepoStatus;
 
 pub const CACHE_FILE: &str = "repos.json";
 pub const APPS_CACHE_FILE: &str = "apps.json";
@@ -80,9 +81,16 @@ pub fn is_stale(age_secs: i64, ttl_secs: u64) -> bool {
 
 // --- installed-apps cache (parallel to the repo cache) --------------------
 
+/// Bumped when gathering learns something a cache from an older build
+/// doesn't carry (1: Store apps that can run as administrator), so that cache
+/// counts as stale and the list is gathered again.
+const APPS_CACHE_FORMAT: u32 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 struct AppsCacheFile {
+    /// [`APPS_CACHE_FORMAT`] when written; 0 before it existed.
+    format: u32,
     written_at: u64,
     apps: Vec<AppEntry>,
     /// Every gathered row the list was combined from — what lets the app
@@ -105,6 +113,11 @@ pub fn load_apps() -> AppResult<LoadedApps> {
     }
     let parsed: AppsCacheFile =
         serde_json::from_str(&std::fs::read_to_string(&path)?).unwrap_or_default();
+    if parsed.format != APPS_CACHE_FORMAT {
+        // Still shown at once, but rescanned on first use — and no index, so
+        // an app-watcher change can't mix the old rows back in.
+        return Ok(LoadedApps { apps: parsed.apps, index: Index::default(), age_secs: -1 });
+    }
     let age = now_secs().saturating_sub(parsed.written_at) as i64;
     Ok(LoadedApps { apps: parsed.apps, index: parsed.index, age_secs: age })
 }
@@ -112,11 +125,41 @@ pub fn load_apps() -> AppResult<LoadedApps> {
 pub fn save_apps(apps: &[AppEntry], index: &Index) -> AppResult<()> {
     let path = cache_dir()?.join(APPS_CACHE_FILE);
     let file = AppsCacheFile {
+        format: APPS_CACHE_FORMAT,
         written_at: now_secs(),
         apps: apps.to_vec(),
         index: index.clone(),
     };
     std::fs::write(&path, serde_json::to_string_pretty(&file)?)?;
+    Ok(())
+}
+
+// --- working-copy status (see status.rs) ------------------------------------
+
+pub const STATUS_CACHE_FILE: &str = "status.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+struct StatusCacheFile {
+    written_at: u64,
+    /// Repo path → its last-read status. Each carries its own `checked_at`,
+    /// which is what decides when it's read again.
+    statuses: HashMap<String, RepoStatus>,
+}
+
+pub fn load_statuses() -> AppResult<HashMap<String, RepoStatus>> {
+    let path = cache_dir()?.join(STATUS_CACHE_FILE);
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+    let parsed: StatusCacheFile = serde_json::from_str(&std::fs::read_to_string(&path)?).unwrap_or_default();
+    Ok(parsed.statuses)
+}
+
+pub fn save_statuses(statuses: &HashMap<String, RepoStatus>) -> AppResult<()> {
+    let path = cache_dir()?.join(STATUS_CACHE_FILE);
+    let file = StatusCacheFile { written_at: now_secs(), statuses: statuses.clone() };
+    std::fs::write(&path, serde_json::to_string(&file)?)?;
     Ok(())
 }
 
@@ -197,8 +240,10 @@ mod tests {
             icon: Some("data:image/png;base64,AAAA".into()),
             terminal: false,
             source: "start-menu".into(),
+            elevate: false,
         };
         let file = AppsCacheFile {
+            format: APPS_CACHE_FORMAT,
             written_at: 100,
             apps: vec![app.clone()],
             index: Index::default(),
@@ -214,6 +259,27 @@ mod tests {
         let parsed: AppsCacheFile = serde_json::from_str(json).unwrap();
         assert!(parsed.apps.is_empty());
         assert_eq!(parsed.written_at, 0);
+    }
+
+    #[test]
+    fn status_cache_round_trips_and_tolerates_new_fields_missing() {
+        let mut statuses = HashMap::new();
+        let s = RepoStatus {
+            vcs: Some("Git".into()),
+            branch: Some("main".into()),
+            ahead: 2,
+            unpushed: Some(2),
+            checked_at: 9,
+            ..Default::default()
+        };
+        statuses.insert("/x/demo".to_string(), s);
+        let file = StatusCacheFile { written_at: 10, statuses: statuses.clone() };
+        let back: StatusCacheFile = serde_json::from_str(&serde_json::to_string(&file).unwrap()).unwrap();
+        assert_eq!(back.statuses, statuses);
+        // A status written before a field existed still loads.
+        let old: StatusCacheFile =
+            serde_json::from_str(r#"{ "statuses": { "/y": { "vcs": "Git", "branch": "dev" } } }"#).unwrap();
+        assert_eq!(old.statuses["/y"].branch.as_deref(), Some("dev"));
     }
 
     #[test]

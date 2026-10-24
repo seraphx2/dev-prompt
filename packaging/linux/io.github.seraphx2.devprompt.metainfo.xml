@@ -24,16 +24,20 @@
   <description>
     <p>
       dev-prompt is a global-hotkey overlay that finds the repositories on your
-      machine and opens each one's action menu: press the hotkey, type a few
-      letters, hit Enter. The menu is built by reading the project — its
-      package.json scripts through the right package manager, cargo, Go,
-      Python, .NET, Docker Compose, sub-projects — and only offers tools that
-      are actually installed.
+      machine, shows where each one stands, and opens its action menu: press
+      the hotkey, type a few letters, hit Enter. Every repo shows its branch and
+      anything uncommitted, unpushed or left half-done, in Git, Jujutsu,
+      Mercurial, Subversion, Fossil or Breezy. The menu is built by reading the
+      project — its package.json scripts through the right package manager,
+      cargo, Go, Python, .NET, Docker Compose, Makefile and justfile targets,
+      sub-projects — and only offers tools that are actually installed.
     </p>
     <ul>
+      <li>See which repos need you: uncommitted changes, unpushed commits, stashes, a stopped rebase</li>
+      <li>Switch branches, open a second working copy, pull, push and fetch in one keystroke</li>
       <li>Open a repo in your editor, terminal or file manager, or run its scripts</li>
       <li>A shell right inside the overlay that keeps running in the background</li>
-      <li>Create a repository with Git, Jujutsu, Mercurial, Breezy or Darcs set up</li>
+      <li>Clone a repository by pasting its address, or create one with version control set up</li>
       <li>Move a repo to the Trash after checking for unpushed or uncommitted work</li>
       <li>Type &gt; to launch any installed application instead</li>
     </ul>
@@ -46,7 +50,7 @@
 
   <launchable type="desktop-id">dev-prompt.desktop</launchable>
 
-  <url type="homepage">https://github.com/seraphx2/dev-prompt</url>
+  <url type="homepage">https://seraphx2.github.io/dev-prompt/</url>
   <url type="bugtracker">https://github.com/seraphx2/dev-prompt/issues</url>
   <url type="vcs-browser">https://github.com/seraphx2/dev-prompt</url>
 

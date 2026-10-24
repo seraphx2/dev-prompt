@@ -27,6 +27,8 @@
     onrescanrepos,
     onrescanapps,
     onunsaved,
+    zoom,
+    onzoom,
   }: {
     /** Open on this page instead of General. */
     initialPage?: Page | null;
@@ -41,6 +43,10 @@
     /** Something couldn't be saved and Settings is already closed — App
      *  shows it in the footer instead. */
     onunsaved: (msg: string) => void;
+    /** The overlay's zoom — App owns it, since Ctrl + / − change it on any
+     *  screen, this one included. */
+    zoom: number;
+    onzoom: (z: number) => void;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -247,7 +253,7 @@
     class="ml-auto truncate pl-2 text-[11px] {msgError
       ? 'text-red-300'
       : saving
-        ? 'text-white/35'
+        ? 'text-white/50'
         : 'text-emerald-300'}"
     title={msgError ? msg : ""}
   >
@@ -306,9 +312,9 @@
     {:else if page === "trace"}
       <TracePage {note} />
     {:else if !form}
-      <div class="text-white/30">{msgError ? "" : "Loading…"}</div>
+      <div class="text-white/45">{msgError ? "" : "Loading…"}</div>
     {:else if page === "general"}
-      <GeneralPage {form} {save} {commit} {note} />
+      <GeneralPage {form} {save} {commit} {note} {zoom} {onzoom} />
     {:else if page === "repos"}
       <ReposPage {form} {save} {note} {report} rescan={() => void saveThen(onrescanrepos)} />
     {:else if page === "tools"}

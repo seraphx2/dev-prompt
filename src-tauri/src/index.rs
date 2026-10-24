@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use serde::Serialize;
@@ -10,13 +12,18 @@ pub struct ScoredRepo {
     pub repo: Repo,
     pub score: u32,
     /// Char indices into `repo.name` that matched (for highlight). Empty when the
-    /// match came from the path rather than the name.
+    /// match came from the branch or the path rather than the name.
     pub match_indices: Vec<u32>,
+    /// Char indices into the repo's branch name, when that's what matched.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub branch_indices: Vec<u32>,
 }
 
 /// Rank `repos` against `query`. An empty query yields every repo ordered by
-/// recency then name. A non-empty query keeps only fuzzy matches, best first.
-pub fn search(query: &str, repos: &[Repo], limit: usize) -> Vec<ScoredRepo> {
+/// recency then name. A non-empty query keeps only fuzzy matches, best first:
+/// a match on the name, then on the branch checked out (`branches`, by repo
+/// path — so a ticket number finds every repo on that branch), then the path.
+pub fn search(query: &str, repos: &[Repo], branches: &HashMap<String, String>, limit: usize) -> Vec<ScoredRepo> {
     let query = query.trim();
 
     if query.is_empty() {
@@ -26,6 +33,7 @@ pub fn search(query: &str, repos: &[Repo], limit: usize) -> Vec<ScoredRepo> {
                 repo: r.clone(),
                 score: 0,
                 match_indices: Vec::new(),
+                branch_indices: Vec::new(),
             })
             .collect();
         all.sort_by(|a, b| {
@@ -43,6 +51,7 @@ pub fn search(query: &str, repos: &[Repo], limit: usize) -> Vec<ScoredRepo> {
 
     let mut out: Vec<ScoredRepo> = Vec::new();
     let mut name_buf: Vec<char> = Vec::new();
+    let mut branch_buf: Vec<char> = Vec::new();
     let mut path_buf: Vec<char> = Vec::new();
     let mut idx_buf: Vec<u32> = Vec::new();
 
@@ -60,8 +69,26 @@ pub fn search(query: &str, repos: &[Repo], limit: usize) -> Vec<ScoredRepo> {
                 repo: r.clone(),
                 score: s + 1000,
                 match_indices: indices,
+                branch_indices: Vec::new(),
             });
             continue;
+        }
+
+        if let Some(branch) = branches.get(&r.path) {
+            idx_buf.clear();
+            let hay = Utf32Str::new(branch, &mut branch_buf);
+            if let Some(s) = pattern.indices(hay, &mut matcher, &mut idx_buf) {
+                let mut indices = idx_buf.clone();
+                indices.sort_unstable();
+                indices.dedup();
+                out.push(ScoredRepo {
+                    repo: r.clone(),
+                    score: s + 500,
+                    match_indices: Vec::new(),
+                    branch_indices: indices,
+                });
+                continue;
+            }
         }
 
         let path_hay = Utf32Str::new(&r.path, &mut path_buf);
@@ -70,6 +97,7 @@ pub fn search(query: &str, repos: &[Repo], limit: usize) -> Vec<ScoredRepo> {
                 repo: r.clone(),
                 score: s,
                 match_indices: Vec::new(),
+                branch_indices: Vec::new(),
             });
         }
     }
@@ -105,7 +133,7 @@ mod tests {
             repo("alpha", "/a/alpha", 100),
             repo("beta", "/a/beta", 100),
         ];
-        let out = search("", &repos, 10);
+        let out = search("", &repos, &HashMap::new(), 10);
         let names: Vec<&str> = out.iter().map(|s| s.repo.name.as_str()).collect();
         assert_eq!(names, vec!["alpha", "beta", "zeta"]);
     }
@@ -116,7 +144,7 @@ mod tests {
             repo("unrelated", "/work/api-server/unrelated", 0),
             repo("api", "/work/api", 0),
         ];
-        let out = search("api", &repos, 10);
+        let out = search("api", &repos, &HashMap::new(), 10);
         assert_eq!(out[0].repo.name, "api");
         assert!(!out[0].match_indices.is_empty());
     }
@@ -124,7 +152,25 @@ mod tests {
     #[test]
     fn fuzzy_subsequence_matches() {
         let repos = vec![repo("dev-prompt", "/git/dev-prompt", 0)];
-        let out = search("dp", &repos, 10);
+        let out = search("dp", &repos, &HashMap::new(), 10);
         assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn a_branch_match_ranks_between_name_and_path() {
+        let repos = vec![
+            repo("billing", "/work/billing", 0),
+            repo("web", "/work/web", 0),
+            repo("proj-1234-notes", "/work/proj-1234-notes", 0),
+            repo("other", "/work/proj-1234/other", 0),
+        ];
+        let branches: HashMap<String, String> =
+            [("/work/billing".to_string(), "feature/PROJ-1234-invoices".to_string()), ("/work/web".to_string(), "main".to_string())]
+                .into();
+        let out = search("proj-1234", &repos, &branches, 10);
+        let names: Vec<&str> = out.iter().map(|s| s.repo.name.as_str()).collect();
+        assert_eq!(names, vec!["proj-1234-notes", "billing", "other"]);
+        assert!(out[1].match_indices.is_empty());
+        assert_eq!(out[1].branch_indices.len(), "proj-1234".len());
     }
 }

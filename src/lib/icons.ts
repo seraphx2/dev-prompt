@@ -36,6 +36,9 @@ export const icons: Record<string, Glyph> = {
   "trash": {
     "raw": "<path fill=\"#7dd3fc\" d=\"M9.5 2.5h5a1 1 0 0 1 1 1v1h4a1 1 0 0 1 0 2h-15a1 1 0 0 1 0-2h4v-1a1 1 0 0 1 1-1z\"/><path fill-rule=\"evenodd\" d=\"M5.5 8h13l-1 11.8a2 2 0 0 1-2 1.7h-7a2 2 0 0 1-2-1.7zm4 3v7.5h1.6V11zm3.4 0v7.5h1.6V11z\"/>"
   },
+  "shield": {
+    "raw": "<path d=\"M12 2 4 5v6c0 5.1 3.4 9.5 8 11z\"/><path fill=\"#7dd3fc\" d=\"M12 2l8 3v6c0 5.1-3.4 9.5-8 11z\"/>"
+  },
   "branch": {
     "raw": "<path d=\"M7 7v10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/><circle cx=\"7\" cy=\"5\" r=\"2.6\"/><circle cx=\"7\" cy=\"19\" r=\"2.6\"/><path d=\"M7 15c0-4 3-6.5 7.6-7.2\" fill=\"none\" stroke=\"#7dd3fc\" stroke-width=\"2\" stroke-linecap=\"round\"/><circle cx=\"17\" cy=\"7.5\" r=\"2.6\" fill=\"#7dd3fc\"/>"
   },

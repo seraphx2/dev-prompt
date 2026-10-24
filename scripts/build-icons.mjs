@@ -154,6 +154,13 @@ const GENERIC = {
       `<path fill="${SKY}" d="M9.5 2.5h5a1 1 0 0 1 1 1v1h4a1 1 0 0 1 0 2h-15a1 1 0 0 1 0-2h4v-1a1 1 0 0 1 1-1z"/>` +
       '<path fill-rule="evenodd" d="M5.5 8h13l-1 11.8a2 2 0 0 1-2 1.7h-7a2 2 0 0 1-2-1.7zm4 3v7.5h1.6V11zm3.4 0v7.5h1.6V11z"/>',
   },
+  // As administrator / root: a shield split down the middle, its right half
+  // sky — the two-tone of Windows' own UAC shield.
+  shield: {
+    raw:
+      '<path d="M12 2 4 5v6c0 5.1 3.4 9.5 8 11z"/>' +
+      `<path fill="${SKY}" d="M12 2l8 3v6c0 5.1-3.4 9.5-8 11z"/>`,
+  },
   // Version control in general, not any one tool: a trunk with a branch
   // forking off it. Stroked lines between solid dots; the branch is sky.
   branch: {

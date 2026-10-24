@@ -15,18 +15,13 @@
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use serde::Serialize;
 
 use crate::config::{self, Config};
 use crate::error::{AppError, AppResult};
-use crate::provision::run_captured;
-use crate::rules::which;
 use crate::scan::Repo;
-
-/// Each version-control query gets this long; a slower answer counts as "couldn't check".
-const CHECK_TIMEOUT: Duration = Duration::from_secs(10);
+use crate::vcs_state::{self, RepoStatus};
 
 /// What the confirmation dialog shows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -98,19 +93,6 @@ fn is_reparse_point(_meta: &std::fs::Metadata) -> bool {
 
 // --- what would be lost ---------------------------------------------------
 
-/// The version-control systems this checks, in the order they're looked for.
-/// Jujutsu first: a colocated `.jj` repo also has a `.git`, and jj's view is
-/// the authoritative one.
-const SYSTEMS: &[(&str, &[&str], &str)] = &[
-    (".jj", &[".jj"], "Jujutsu"),
-    (".git", &[".git"], "Git"),
-    (".hg", &[".hg"], "Mercurial"),
-    (".svn", &[".svn"], "Subversion"),
-    (".bzr", &[".bzr"], "Breezy"),
-    ("_darcs", &["_darcs"], "Darcs"),
-    (".fslckout", &[".fslckout", "_FOSSIL_"], "Fossil"),
-];
-
 /// Check `dir` for anything that exists only there. Runs version-control
 /// commands, so call it off the UI thread.
 pub fn assess(dir: &Path) -> Assessment {
@@ -118,57 +100,17 @@ pub fn assess(dir: &Path) -> Assessment {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| dir.to_string_lossy().into_owned());
-    let mut a = Assessment {
-        name,
-        path: dir.to_string_lossy().into_owned(),
-        vcs: None,
-        risks: Vec::new(),
-        unknown: Vec::new(),
-        needs_typed: false,
+    let state = vcs_state::read(dir);
+    let mut risks = match state.vcs.as_deref() {
+        None => vec!["Nothing in it is under version control, so its contents exist only here.".into()],
+        Some(label) => describe(label, &state),
     };
-
-    let found = SYSTEMS
-        .iter()
-        .find(|(_, markers, _)| markers.iter().any(|m| dir.join(m).exists()));
-    match found {
-        None => a.risks.push(
-            "Nothing in it is under version control, so its contents exist only here.".into(),
-        ),
-        Some((_, _, label)) => {
-            a.vcs = Some(label.to_string());
-            let tool = match *label {
-                "Jujutsu" => "jj",
-                "Git" => "git",
-                "Mercurial" => "hg",
-                "Subversion" => "svn",
-                "Breezy" => "brz",
-                "Darcs" => "darcs",
-                _ => "fossil",
-            };
-            if which(tool).is_none() {
-                a.unknown.push(format!(
-                    "{label} isn't installed here (`{tool}` isn't on PATH), so its state couldn't be checked."
-                ));
-            } else {
-                let mut c = Checker { dir, risks: &mut a.risks, unknown: &mut a.unknown };
-                match *label {
-                    "Jujutsu" => c.jj(),
-                    "Git" => c.git(),
-                    "Mercurial" => c.hg(),
-                    "Subversion" => c.svn(),
-                    "Breezy" => c.brz(),
-                    "Darcs" => c.darcs(),
-                    _ => c.fossil(),
-                }
-            }
-        }
-    }
 
     let nested = nested_repos(dir);
     if !nested.is_empty() {
         let shown: Vec<&str> = nested.iter().take(5).map(String::as_str).collect();
         let more = nested.len().saturating_sub(shown.len());
-        a.risks.push(format!(
+        risks.push(format!(
             "It holds {} more {} inside it, which would go too: {}{}.",
             nested.len(),
             if nested.len() == 1 { "repository" } else { "repositories" },
@@ -177,14 +119,66 @@ pub fn assess(dir: &Path) -> Assessment {
         ));
     }
 
-    a.needs_typed = !a.risks.is_empty() || !a.unknown.is_empty();
-    a
+    // What the system can't tell offline is as unknown here as a failed check.
+    let unknown: Vec<String> = state.unknown.into_iter().chain(state.limits).collect();
+    let needs_typed = !risks.is_empty() || !unknown.is_empty();
+    Assessment {
+        name,
+        path: dir.to_string_lossy().into_owned(),
+        vcs: state.vcs,
+        risks,
+        unknown,
+        needs_typed,
+    }
+}
+
+/// What in `s` exists only here, worded for the dialog in each system's terms.
+fn describe(label: &str, s: &RepoStatus) -> Vec<String> {
+    let mut out = Vec::new();
+    let changed = (s.changed + s.conflicted) as usize;
+    if label == "Jujutsu" {
+        // jj has no staging step: every change is part of the working-copy commit.
+        if changed > 0 {
+            out.push(format!("{changed} {} in the working copy.", plural(changed, "changed file", "changed files")));
+        }
+    } else {
+        if changed > 0 {
+            out.push(format!("{changed} {} not committed.", plural(changed, "changed file", "changed files")));
+        }
+        let new = s.untracked as usize;
+        if new > 0 {
+            out.push(format!("{new} new {} not yet added.", plural(new, "file", "files")));
+        }
+    }
+    if let Some(op) = &s.operation {
+        out.push(format!("A {op} is in progress here, not yet finished or aborted."));
+    }
+    if s.no_remote {
+        out.push("It has no remote, so its whole history exists only here.".into());
+    }
+    if let Some(n) = s.unpushed.filter(|n| *n > 0) {
+        let n = n as usize;
+        out.push(if label == "Mercurial" {
+            format!("{n} {} not pushed yet (draft).", plural(n, "commit", "commits"))
+        } else {
+            format!("{n} {} on no remote.", plural(n, "commit", "commits"))
+        });
+    }
+    let n = s.stashes as usize;
+    if n > 0 {
+        out.push(match label {
+            "Git" => format!("{n} {}.", plural(n, "stash", "stashes")),
+            "Fossil" => format!("{n} stashed {}.", plural(n, "change", "changes")),
+            _ => format!("{n} shelved {}.", plural(n, "change", "changes")),
+        });
+    }
+    out
 }
 
 /// Folders below `dir` (relative paths) that carry a version-control marker of
 /// their own — submodules, nested clones, vendored checkouts.
 fn nested_repos(dir: &Path) -> Vec<String> {
-    let markers: Vec<&str> = SYSTEMS.iter().flat_map(|(_, m, _)| m.iter().copied()).collect();
+    let markers: Vec<&str> = vcs_state::SYSTEMS.iter().flat_map(|(_, m)| m.iter().copied()).collect();
     let mut out = Vec::new();
     let walker = ignore::WalkBuilder::new(dir)
         .max_depth(Some(6))
@@ -214,262 +208,22 @@ fn nested_repos(dir: &Path) -> Vec<String> {
     out
 }
 
-/// Runs one system's checks, recording risks and unknowns as it goes.
-struct Checker<'a> {
-    dir: &'a Path,
-    risks: &'a mut Vec<String>,
-    unknown: &'a mut Vec<String>,
-}
-
-impl Checker<'_> {
-    /// Run `program args` in the repo; `None` (and an "unknown" note naming
-    /// `what`) when it fails or times out.
-    fn run(&mut self, what: &str, program: &str, args: &[&str]) -> Option<String> {
-        let resolved = which(program)?;
-        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
-        match run_captured(&resolved, &args, self.dir, CHECK_TIMEOUT) {
-            Ok(out) => Some(out),
-            Err(e) => {
-                self.unknown.push(format!("Couldn't check {what}: {e}"));
-                None
-            }
-        }
-    }
-
-    fn git(&mut self) {
-        if let Some(out) = self.run("for uncommitted changes", "git", &["status", "--porcelain"]) {
-            self.risks.extend(describe_changes(&out, "??"));
-        }
-        let has_commits = self
-            .run_quiet("git", &["rev-parse", "--verify", "--quiet", "HEAD"])
-            .is_some();
-        if has_commits {
-            let remotes = self.run("for remotes", "git", &["remote"]);
-            match remotes.as_deref().map(str::trim) {
-                Some("") => self.risks.push(
-                    "It has no remote, so its whole history exists only here.".into(),
-                ),
-                Some(_) => {
-                    // Commits on any local branch, or a detached HEAD, that no
-                    // remote-tracking ref contains.
-                    if let Some(out) = self.run(
-                        "for unpushed commits",
-                        "git",
-                        &["rev-list", "--count", "--branches", "HEAD", "--not", "--remotes"],
-                    ) {
-                        match out.trim().parse::<u64>() {
-                            Ok(0) => {}
-                            Ok(n) => self.risks.push(format!(
-                                "{n} {} on no remote.",
-                                commits(n)
-                            )),
-                            Err(_) => self.unknown.push("Couldn't read git's count of unpushed commits.".into()),
-                        }
-                    }
-                }
-                None => {}
-            }
-        }
-        if let Some(out) = self.run("for stashes", "git", &["stash", "list"]) {
-            let n = out.lines().filter(|l| !l.trim().is_empty()).count();
-            if n > 0 {
-                self.risks.push(format!("{n} {}.", plural(n, "stash", "stashes")));
-            }
-        }
-    }
-
-    fn hg(&mut self) {
-        // HGPLAIN isn't settable per call through `run_captured`, so ask for
-        // plain, stable output with flags instead.
-        if let Some(out) = self.run("for uncommitted changes", "hg", &["status", "--color", "never"]) {
-            self.risks.extend(describe_changes(&out, "?"));
-        }
-        let paths = self.run("for remotes", "hg", &["paths"]);
-        match paths.as_deref().map(str::trim) {
-            Some("") => {
-                // Failing to read the history counts as unknown, not as "no history".
-                if self.run("for commits", "hg", &["log", "-r", "tip", "-T", "x"]).is_some_and(|o| !o.trim().is_empty()) {
-                    self.risks.push("It has no remote, so its whole history exists only here.".into());
-                }
-            }
-            Some(_) => {
-                // Mercurial marks every commit not yet pushed to a publishing
-                // remote as draft (or secret) — answerable offline.
-                if let Some(out) = self.run(
-                    "for unpushed commits",
-                    "hg",
-                    &["log", "-r", "draft() or secret()", "-T", "x\\n"],
-                ) {
-                    let n = out.lines().filter(|l| !l.is_empty()).count() as u64;
-                    if n > 0 {
-                        self.risks.push(format!("{n} {} not pushed yet (draft).", commits(n)));
-                    }
-                }
-            }
-            None => {}
-        }
-        // `shelve` is a bundled extension that may not be switched on.
-        if let Some(out) = self.run(
-            "for shelved changes",
-            "hg",
-            &["--config", "extensions.shelve=", "shelve", "--list"],
-        ) {
-            let n = out.lines().filter(|l| !l.trim().is_empty()).count();
-            if n > 0 {
-                self.risks.push(format!("{n} shelved {}.", plural(n, "change", "changes")));
-            }
-        }
-    }
-
-    fn jj(&mut self) {
-        // The working copy is itself a commit (@): its own changes come first.
-        if let Some(out) = self.run(
-            "for uncommitted changes",
-            "jj",
-            &["--no-pager", "--color", "never", "diff", "-r", "@", "--summary"],
-        ) {
-            let n = out.lines().filter(|l| !l.trim().is_empty()).count();
-            if n > 0 {
-                self.risks.push(format!("{n} {} in the working copy.", plural(n, "changed file", "changed files")));
-            }
-        }
-        let remotes = self.run(
-            "for remotes",
-            "jj",
-            &["--no-pager", "--ignore-working-copy", "git", "remote", "list"],
-        );
-        match remotes.as_deref().map(str::trim) {
-            Some("") => self.risks.push("It has no remote, so its whole history exists only here.".into()),
-            Some(_) => {
-                // Non-empty commits besides @ that no remote bookmark contains.
-                // `remote_bookmarks()` was `remote_branches()` before jj 0.22.
-                let count = |c: &mut Self, f: &str| {
-                    let revset = format!("~::{f}() & ~empty() & ~@ & ~root()");
-                    c.run_quiet(
-                        "jj",
-                        &["--no-pager", "--ignore-working-copy", "log", "--no-graph", "-r", &revset, "-T", "\"x\\n\""],
-                    )
-                    .map(|o| o.lines().filter(|l| !l.is_empty()).count() as u64)
-                };
-                match count(self, "remote_bookmarks").or_else(|| count(self, "remote_branches")) {
-                    Some(0) => {}
-                    Some(n) => self.risks.push(format!("{n} {} on no remote.", commits(n))),
-                    None => self.unknown.push("Couldn't ask jj which commits are on no remote.".into()),
-                }
-            }
-            None => {}
-        }
-    }
-
-    fn svn(&mut self) {
-        // Every Subversion commit goes straight to the server, so local
-        // changes are the only thing that can be lost.
-        if let Some(out) = self.run("for uncommitted changes", "svn", &["status"]) {
-            self.risks.extend(describe_changes(&out, "?"));
-        }
-    }
-
-    fn brz(&mut self) {
-        if let Some(out) = self.run("for uncommitted changes", "brz", &["status", "--short"]) {
-            self.risks.extend(describe_changes(&out, "?"));
-        }
-        if let Some(out) = self.run("for shelved changes", "brz", &["shelve", "--list"]) {
-            let n = out.lines().filter(|l| l.trim_start().starts_with(|c: char| c.is_ascii_digit())).count();
-            if n > 0 {
-                self.risks.push(format!("{n} shelved {}.", plural(n, "change", "changes")));
-            }
-        }
-        self.unknown.push(
-            "Breezy can only tell whether every commit was pushed by asking the remote, which isn't done here."
-                .into(),
-        );
-    }
-
-    fn darcs(&mut self) {
-        // `whatsnew` exits 1 with "No changes!" when there's nothing to report;
-        // any other failure (a timeout included) leaves the changes unchecked.
-        if let Some(darcs) = which("darcs") {
-            let args = ["whatsnew", "--summary", "--look-for-adds"].map(String::from);
-            match run_captured(&darcs, &args, self.dir, CHECK_TIMEOUT) {
-                Ok(out) => self.risks.extend(describe_changes(&out, "a")),
-                Err(e) if e.starts_with("exit code 1.") && e.contains("No changes!") => {}
-                Err(e) => self.unknown.push(format!("Couldn't check for uncommitted changes: {e}")),
-            }
-        }
-        self.unknown.push(
-            "Darcs can only tell whether every patch was pushed by asking the remote, which isn't done here."
-                .into(),
-        );
-    }
-
-    fn fossil(&mut self) {
-        if let Some(out) = self.run("for uncommitted changes", "fossil", &["changes"]) {
-            self.risks.extend(describe_changes(&out, ""));
-        }
-        if let Some(out) = self.run("for files not added", "fossil", &["extras"]) {
-            let n = out.lines().filter(|l| !l.trim().is_empty()).count();
-            if n > 0 {
-                self.risks.push(format!("{n} new {} not yet added.", plural(n, "file", "files")));
-            }
-        }
-        if let Some(out) = self.run("for stashed changes", "fossil", &["stash", "list"]) {
-            let n = out.lines().filter(|l| l.trim_start().starts_with(|c: char| c.is_ascii_digit())).count();
-            if n > 0 {
-                self.risks.push(format!("{n} stashed {}.", plural(n, "change", "changes")));
-            }
-        }
-        self.unknown.push(
-            "Fossil can only tell whether every commit reached the remote by asking it, which isn't done here."
-                .into(),
-        );
-    }
-
-    /// Like [`Checker::run`], but a failure is just `None` — for queries whose
-    /// failure is itself an answer (no commits yet, an older jj revset name).
-    fn run_quiet(&mut self, program: &str, args: &[&str]) -> Option<String> {
-        let resolved = which(program)?;
-        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
-        run_captured(&resolved, &args, self.dir, CHECK_TIMEOUT).ok()
-    }
-}
-
-/// "3 changed files", "2 new files not yet added" from a status listing where
-/// lines starting with `untracked` are new files. Empty when there's nothing.
-fn describe_changes(status: &str, untracked: &str) -> Vec<String> {
-    let lines: Vec<&str> = status.lines().filter(|l| !l.trim().is_empty()).collect();
-    let new = if untracked.is_empty() {
-        0
-    } else {
-        lines.iter().filter(|l| l.trim_start().starts_with(untracked)).count()
-    };
-    let changed = lines.len() - new;
-    let mut out = Vec::new();
-    if changed > 0 {
-        out.push(format!("{changed} {} not committed.", plural(changed, "changed file", "changed files")));
-    }
-    if new > 0 {
-        out.push(format!("{new} new {} not yet added.", plural(new, "file", "files")));
-    }
-    out
-}
-
 fn plural<'a>(n: usize, one: &'a str, many: &'a str) -> &'a str {
     if n == 1 { one } else { many }
-}
-
-fn commits(n: u64) -> &'static str {
-    if n == 1 { "commit" } else { "commits" }
 }
 
 // --- moving it, and back --------------------------------------------------
 
 /// Move `dir` to the Recycle Bin / Trash. Returns the trash entry it became,
 /// for Undo — `None` when it went but can't be found again in the bin.
+/// One attempt, never retried: a retry would repeat Windows' "permanently
+/// delete?" question after a No. (dev-prompt's own shells in the folder are
+/// closed, and waited on, before this.)
 pub fn move_to_trash(dir: &Path) -> AppResult<Option<trash::TrashItem>> {
     let before: HashSet<OsString> = trashed_at(dir).into_iter().map(|i| i.id).collect();
     trash::delete(dir).map_err(|e| {
         AppError::msg(format!(
-            "Couldn't move {} to the {}: {e}. If a program has files in it open, close it and try again.",
+            "Couldn't move {} to the {}: {e}. If a program has files in it open, or a terminal is working in it, close it and try again.",
             dir.display(),
             bin_name()
         ))
@@ -516,6 +270,7 @@ pub fn bin_name() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rules::which;
 
     fn tmp(tag: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!(
@@ -543,13 +298,26 @@ mod tests {
     }
 
     #[test]
-    fn describe_changes_splits_changed_and_new() {
-        assert!(describe_changes("", "??").is_empty());
+    fn each_system_is_described_in_its_own_terms() {
+        let s = RepoStatus {
+            changed: 1,
+            conflicted: 1,
+            untracked: 2,
+            unpushed: Some(1),
+            stashes: 3,
+            ..Default::default()
+        };
         assert_eq!(
-            describe_changes(" M a.rs\n?? b.rs\n?? c/\nA  d.rs\n", "??"),
-            vec!["2 changed files not committed.", "2 new files not yet added."]
+            describe("Git", &s),
+            vec!["2 changed files not committed.", "2 new files not yet added.", "1 commit on no remote.", "3 stashes."]
         );
-        assert_eq!(describe_changes("M x\n", "?"), vec!["1 changed file not committed."]);
+        let hg = describe("Mercurial", &s).join(" | ");
+        assert!(hg.contains("1 commit not pushed yet (draft)") && hg.contains("3 shelved changes"), "{hg}");
+        let jj = describe("Jujutsu", &RepoStatus { changed: 1, ..Default::default() });
+        assert_eq!(jj, vec!["1 changed file in the working copy."]);
+        let op = describe("Git", &RepoStatus { operation: Some("rebase".into()), ..Default::default() });
+        assert_eq!(op, vec!["A rebase is in progress here, not yet finished or aborted."]);
+        assert!(describe("Git", &RepoStatus::default()).is_empty());
     }
 
     #[test]
