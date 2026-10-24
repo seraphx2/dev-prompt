@@ -12,8 +12,10 @@
 // through — the panel sits on a transparent background.
 //
 // Fonts come from the machine running it (the app uses the system UI font and
-// a monospace stack), so take them on Linux to match the AppStream shots.
+// a monospace stack), so take them on Linux to match the AppStream shots —
+// from Windows, `npm run screenshots:wsl` does that through WSL (wsl.sh).
 
+import { execFileSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -132,11 +134,62 @@ const scenes = [
       await page.getByText("uncommitted").first().waitFor();
     },
   },
+  {
+    n: 8,
+    file: "8_dev-prompt_attention.png",
+    // The `!` scope: only repos with work left only here or half-done.
+    async run(page) {
+      await page.keyboard.type("!");
+      await page.getByText("rebasing").first().waitFor();
+    },
+  },
+  {
+    n: 10,
+    file: "10_dev-prompt_scripts.png",
+    // The same menu scrolled down to what the project itself offers — the
+    // way you'd find the scripts by moving down to them.
+    async run(page) {
+      await openRepo(page, "prettier");
+      const first = page.getByText("yarn test").first();
+      await first.waitFor();
+      await first.scrollIntoViewIfNeeded();
+      await first.hover();
+    },
+  },
+  {
+    n: 9,
+    file: "9_dev-prompt_branches.png",
+    async run(page) {
+      await openRepo(page, "lazygit");
+      await page.keyboard.press("Control+B");
+      await page.getByText("perf/commit-graph").first().waitFor();
+    },
+  },
 ];
 
 // --- the demo GIF --------------------------------------------------------------
 
 const GIF_FILE = "0_dev-prompt_demo.gif";
+const MP4_FILE = "0_dev-prompt_demo.mp4";
+
+/** The demo as an MP4 too, for places that take video but not GIFs (some
+ *  subreddits, social posts). Needs ffmpeg; skipped with a note when it isn't
+ *  installed — the GIF itself never needs it. Two passes, since a video
+ *  player won't loop it the way a GIF does. */
+function gifToMp4(gif, mp4) {
+  try {
+    execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
+  } catch {
+    console.log(`${MP4_FILE}  skipped: ffmpeg isn't installed`);
+    return;
+  }
+  execFileSync("ffmpeg", [
+    "-loglevel", "error", "-y", "-stream_loop", "1", "-i", gif,
+    "-movflags", "+faststart", "-pix_fmt", "yuv420p", "-c:v", "libx264",
+    "-crf", "18", "-r", "30", mp4,
+  ]);
+  console.log(`${MP4_FILE}  ${LARGE.width}×${LARGE.height}, two passes`);
+}
 const GIF_BACKGROUND = [14, 14, 17];
 
 /** Type `text` a key at a time, a frame after each, like someone typing. */
@@ -236,6 +289,7 @@ try {
       await demo(page, gif);
       const { frames, seconds } = await gif.save(join(outDir, GIF_FILE));
       console.log(`${GIF_FILE}  ${LARGE.width}×${LARGE.height}, ${frames} frames, ${seconds.toFixed(1)} s`);
+      gifToMp4(join(outDir, GIF_FILE), join(outDir, MP4_FILE));
     } catch (e) {
       failed++;
       console.error(`${GIF_FILE}  FAILED: ${e.message.split("\n")[0]}`);

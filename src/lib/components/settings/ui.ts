@@ -3,7 +3,7 @@
 /** A section label. */
 export const label = "text-orange-400";
 /** Help text under a field. */
-export const help = "text-[11px] text-white/30";
+export const help = "text-[11px] text-white/45";
 /** A text input. */
 export const input =
   "rounded-sm border border-hair bg-white/4 px-2 py-1.5 text-white/90 focus:border-white/25 focus:outline-hidden";
@@ -20,3 +20,6 @@ export const btn =
   "rounded-sm border border-hair px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10 hover:text-white/90 disabled:opacity-50";
 /** The small heading over a group inside a page. */
 export const subhead = "mb-1 font-mono text-[11px] font-semibold uppercase tracking-wide text-sky-300/80";
+/** A key cap in help text, like the footer's. */
+export const kbd =
+  "rounded-[3px] border border-white/12 bg-white/9 px-1 py-px font-sans text-[10px] leading-none text-white/80";

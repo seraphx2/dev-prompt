@@ -70,6 +70,21 @@ already running to catch the hotkey. The OS is the source of truth: the checkbox
 
 ---
 
+## Zoom
+
+The overlay follows your display scaling (Windows' Scale setting, your Linux
+desktop's) on its own. **Settings ▸ General ▸ Zoom** makes it bigger or smaller
+on top of that — text, icons and the window together, so nothing gets cropped.
+From anywhere in the overlay, the built-in shell included, <kbd>Ctrl</kbd>
+<kbd>+</kbd> and <kbd>Ctrl</kbd> <kbd>−</kbd> step through 80 % to 200 %, and
+<kbd>Ctrl</kbd> <kbd>0</kbd> goes back to 100 %. It's saved as:
+
+```yaml
+zoom: 1.25        # 125 %; left out at 100 %
+```
+
+---
+
 ## Terminal
 
 Which terminal emulator "Open in terminal" and every `terminal: true` action
@@ -106,6 +121,11 @@ nothing — both already agree with dev-prompt's own default.
 inside the overlay. Unset, it's `pwsh` (else Windows PowerShell) on Windows and
 your login shell (`$SHELL`) on Linux. The shell's name in its header
 switches a single session to another one.
+
+On Windows, `git-bash` is Git for Windows' bash and `wsl` your default WSL
+distro. They're listed apart because the `bash` on a Windows PATH is usually
+WSL's launcher; plain `bash` is offered only for another bash on PATH (MSYS2,
+Cygwin, …). A `shell: bash` set before keeps meaning what it did.
 
 The same shell wraps a one-shot command in an external terminal, so the window
 stays open and keeps a real console (ANSI colour, a live TTY — tools like

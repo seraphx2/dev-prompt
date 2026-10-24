@@ -48,7 +48,7 @@
 <p class={ui.help}>Why each rule does or doesn't produce actions for one repo.</p>
 
 {#if repos === null}
-  <p class="text-white/30">Loading…</p>
+  <p class="text-white/45">Loading…</p>
 {:else if !repos.length}
   <p class="text-white/40">No repos found yet — add a root directory under Repos first.</p>
 {:else}
@@ -80,7 +80,7 @@
           <div>
             <div class="flex flex-wrap items-baseline gap-x-2">
               <span class={r.gate === "" ? "text-white/70" : "text-white/30"}>{r.id}</span>
-              <span class="text-white/25">{r.globs.join(", ")}</span>
+              <span class="text-white/45">{r.globs.join(", ")}</span>
               {#if r.gate}
                 <span class="text-amber-300/70">{r.gate}</span>
               {:else}
@@ -90,7 +90,7 @@
             {#each r.hits as h (h.project)}
               <div class="ml-3 text-white/45">
                 {h.project || "root"}:
-                <span class="text-white/30">{h.matched.join(", ")}</span>
+                <span class="text-white/45">{h.matched.join(", ")}</span>
                 → {h.produced.length ? h.produced.join(", ") : "(no actions)"}
               </div>
             {/each}

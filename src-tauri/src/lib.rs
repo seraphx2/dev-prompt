@@ -19,7 +19,12 @@ mod dotnet;
 mod error;
 mod gowork;
 mod gradle;
+mod brz_ops;
+mod fossil_ops;
+mod git_ops;
+mod hg_ops;
 mod index;
+mod jj_ops;
 mod inspect;
 #[cfg(target_os = "linux")]
 mod layer;
@@ -30,7 +35,11 @@ mod pty;
 mod removal;
 mod rules;
 mod scan;
+mod svn_ops;
+mod status;
 mod usage;
+mod vcs_ops;
+mod vcs_state;
 mod watch;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -183,6 +192,9 @@ const AUTOSTART_ARG: &str = "--autostart";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Windows: the PATH this process was started with may predate tools
+    // installed since; look them up with Windows' current settings.
+    rules::refresh_path();
     let builder = tauri::Builder::default();
 
     // Single-instance must be registered first: it holds an OS lock so a second
@@ -259,10 +271,12 @@ pub fn run() {
 
             apply_overlay_effects(&window);
 
-            // Taskbar presence follows the `dismiss` setting (see the fn docs).
+            // Taskbar presence follows the `dismiss` setting (see the fn docs),
+            // and the overlay is drawn at the saved zoom.
             {
                 let cfg = app.state::<AppState>().config.lock().unwrap().clone();
                 commands::sync_taskbar_visibility(app.handle(), &cfg);
+                commands::apply_zoom(app.handle(), &cfg);
             }
 
             // Keep the repo list current while the app runs (watch.rs).
@@ -471,6 +485,13 @@ pub fn run() {
             commands::folders_exist,
             commands::create_repo,
             commands::init_repo,
+            commands::list_statuses,
+            commands::refresh_statuses,
+            commands::vcs_branches,
+            commands::vcs_details,
+            commands::vcs_switch,
+            commands::vcs_sync,
+            commands::vcs_add_copy,
             commands::assess_removal,
             commands::remove_folder,
             commands::undo_removal,

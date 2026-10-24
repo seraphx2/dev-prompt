@@ -162,13 +162,13 @@
           >
             {f.label}
           </button>
-          <div class="min-w-0 truncate font-mono text-[11px] text-white/35" title={f.path}>
+          <div class="min-w-0 truncate font-mono text-[11px] text-white/50" title={f.path}>
             {f.path}
           </div>
         </div>
       {/each}
     </div>
-    <p class="text-[11px] text-white/25">
+    <p class="text-[11px] text-white/45">
       Config: <span class="font-mono">config.yaml</span>,
       <span class="font-mono">rules.yaml</span>, and usage history. Cache: regenerable repo / app
       indexes — safe to delete, dev-prompt rebuilds them.

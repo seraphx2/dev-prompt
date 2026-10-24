@@ -5,18 +5,28 @@
   import HotkeyRecorder from "./HotkeyRecorder.svelte";
   import type { Form, Note, Save } from "./model";
   import * as ui from "./ui";
+  import { ZOOM_STEPS, zoomLabel } from "../../zoom";
 
   let {
     form,
     save,
     commit,
     note,
+    zoom,
+    onzoom,
   }: {
     form: Form;
     save: Save;
     commit: (patch: ConfigPatch) => Promise<AppConfig | null>;
     note: Note;
+    zoom: number;
+    onzoom: (z: number) => void;
   } = $props();
+
+  // A hand-edited zoom between the levels still shows, as itself.
+  const zoomChoices = $derived(
+    ZOOM_STEPS.includes(zoom) ? ZOOM_STEPS : [...ZOOM_STEPS, zoom].sort((a, b) => a - b),
+  );
 
   let autostart = $state(false);
   let flatpak = $state(false);
@@ -103,3 +113,25 @@
     <option value="manual">Keep open until Esc</option>
   </select>
 </label>
+
+<div class="space-y-1.5">
+  <label class="block w-fit space-y-1.5">
+    <span class={ui.label}>Zoom</span>
+    <select
+      value={zoom}
+      onchange={(e) => onzoom(Number((e.currentTarget as HTMLSelectElement).value))}
+      title="How big the overlay is drawn, on top of your display scaling"
+      class="w-40 {ui.select}"
+    >
+      {#each zoomChoices as z (z)}
+        <option value={z}>{zoomLabel(z)}{z === 1 ? " (default)" : ""}</option>
+      {/each}
+    </select>
+  </label>
+  <p class={ui.help}>
+    Everything in the overlay, text and window together. From anywhere in it:
+    <kbd class={ui.kbd}>Ctrl</kbd> <kbd class={ui.kbd}>+</kbd> bigger,
+    <kbd class={ui.kbd}>Ctrl</kbd> <kbd class={ui.kbd}>−</kbd> smaller,
+    <kbd class={ui.kbd}>Ctrl</kbd> <kbd class={ui.kbd}>0</kbd> back to 100%.
+  </p>
+</div>

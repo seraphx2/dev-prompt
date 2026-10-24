@@ -279,16 +279,21 @@ fn make_repo(path: &Path, hits: Vec<String>, vcs: &HashMap<String, String>, now:
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string_lossy().into_owned());
 
-    // Split the hits: the first VCS marker becomes the badge, the rest are
-    // plain sentinel chips.
-    let mut repo_vcs = None;
-    let mut sentinels = Vec::new();
-    for hit in hits {
-        match vcs.get(&hit) {
-            Some(label) if repo_vcs.is_none() => repo_vcs = Some(label.clone()),
-            _ => sentinels.push(hit),
-        }
-    }
+    // Split the hits: the VCS marker that owns the folder becomes the badge,
+    // the rest are plain sentinel chips. A colocated Jujutsu repo has a `.git`
+    // too, and jj is the one in charge — so markers go in the order
+    // `vcs_state::SYSTEMS` reads them, the same one the status flags use (a
+    // marker added in rules.yaml comes after the known ones).
+    let rank = |m: &str| {
+        crate::vcs_state::SYSTEMS
+            .iter()
+            .flat_map(|(_, markers)| markers.iter())
+            .position(|p| p.eq_ignore_ascii_case(m))
+            .unwrap_or(usize::MAX)
+    };
+    let owner = hits.iter().filter(|h| vcs.contains_key(*h)).min_by_key(|h| rank(h)).cloned();
+    let repo_vcs = owner.as_ref().and_then(|o| vcs.get(o).cloned());
+    let sentinels: Vec<String> = hits.into_iter().filter(|h| Some(h) != owner.as_ref()).collect();
 
     Repo {
         name,
@@ -346,6 +351,26 @@ mod tests {
         }
         hits.sort();
         hits
+    }
+
+    #[test]
+    fn the_vcs_in_charge_gets_the_badge() {
+        let tmp = std::env::temp_dir().join(format!("dp-scan-colo-{}", now_secs()));
+        let _ = fs::remove_dir_all(&tmp);
+        // A colocated Jujutsu repo: `.git` sorts first, but jj is in charge.
+        touch(&tmp.join("colo/.git/HEAD"));
+        touch(&tmp.join("colo/.jj/repo/store/type"));
+        // Fossil's checkout file as Windows names it.
+        touch(&tmp.join("fos/_FOSSIL_"));
+        let cfg = config::bundled_defaults();
+        let repos = scan(std::slice::from_ref(&tmp), &cfg);
+        let colo = repos.iter().find(|r| r.name == "colo").unwrap();
+        assert_eq!(colo.vcs.as_deref(), Some("Jujutsu"));
+        assert_eq!(colo.sentinels, vec![".git"], "colocated: the .git still shows");
+        let fos = repos.iter().find(|r| r.name == "fos").unwrap();
+        assert_eq!(fos.vcs.as_deref(), Some("Fossil"));
+        assert!(fos.sentinels.is_empty(), "{fos:?}");
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]

@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dev-prompt — every repo you own, one keystroke away</title>
+<meta name="description" content="A command palette for developers on Windows and Linux. Press the hotkey, type a few letters, and pick from what the project can actually do: its scripts, your editors, a shell right in the overlay — and see where every repo stands: its branch, what's uncommitted or unpushed, what's left half-done.">
+<meta property="og:title" content="dev-prompt">
+<meta property="og:description" content="Every repo you own, one keystroke away. Its scripts, your editors, a shell, and where every branch stands, in an overlay that's gone when you're done.">
+<meta property="og:image" content="https://seraphx2.github.io/dev-prompt/img/4_dev-prompt_shell.png">
+<link rel="icon" type="image/png" href="img/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&family=Schibsted+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #e9edf1;
+    --ink: #16181d;
+    --muted: #535b67;
+    --rule: #ccd3db;
+    --screen: #0e0e11;          /* the demo GIF's own backdrop */
+    --link: #0b6e9f;
+    --key-face: #fbfcfd;
+    --key-edge: #b4bdc8;
+    --key-shadow: #8e99a6;
+    --code-bg: #dfe4ea;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #16181c;
+      --ink: #e7eaee;
+      --muted: #9aa3ae;
+      --rule: #2c3038;
+      --link: #6cc4ef;
+      --key-face: #2a2e35;
+      --key-edge: #3b414b;
+      --key-shadow: #0b0c0f;
+      --code-bg: #20232a;
+      color-scheme: dark;
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 400 17px/1.55 "Schibsted Grotesk", system-ui, sans-serif;
+    text-rendering: optimizeLegibility;
+  }
+  img { max-width: 100%; height: auto; display: block; }
+  a { color: var(--link); text-underline-offset: 0.18em; }
+  a:hover { text-decoration-thickness: 2px; }
+  :focus-visible { outline: 3px solid var(--link); outline-offset: 3px; border-radius: 4px; }
+  code, pre { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: 0.86em; }
+
+  .wrap { width: min(1160px, 100% - 32px); margin-inline: auto; }
+
+  /* --- header --------------------------------------------------------------- */
+  .top { display: flex; align-items: center; gap: 24px; padding-block: 22px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none;
+           font-weight: 700; font-size: 18px; letter-spacing: -0.01em; }
+  .brand img { width: 28px; height: 28px; border-radius: 6px; }
+  .top nav { margin-left: auto; display: flex; gap: 22px; font-weight: 500; }
+  .top nav a { color: inherit; text-decoration: none; }
+  .top nav a:hover { color: var(--link); }
+
+  /* --- hero ----------------------------------------------------------------- */
+  .hero { padding-block: 40px 88px; }
+  h1 { font-size: clamp(40px, 6vw, 76px); line-height: 1.0; letter-spacing: -0.04em;
+       font-weight: 800; margin: 0 0 28px; max-width: 13em; }
+  .hero-row { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 32px 56px;
+              align-items: end; margin-bottom: 30px; }
+  .lede { font-size: 19px; color: var(--muted); max-width: 33em; margin: 0 0 26px; }
+  .summon { justify-self: end; }
+
+  /* The keycaps: the one loud thing on the page. Press them (or the real
+     keys) and the overlay comes and goes on the screen beside them. */
+  .keys { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+  .key {
+    font: 700 22px/1 "Schibsted Grotesk", system-ui, sans-serif;
+    color: var(--ink);
+    min-width: 76px; height: 70px; padding: 0 18px;
+    display: inline-grid; place-items: center;
+    background: var(--key-face);
+    border: 1px solid var(--key-edge);
+    border-radius: 12px;
+    box-shadow: 0 6px 0 var(--key-shadow), 0 8px 18px rgb(0 0 0 / 0.12);
+    transform: translateY(0);
+    transition: transform 90ms ease-out, box-shadow 90ms ease-out;
+    cursor: pointer;
+  }
+  .key.slash { min-width: 70px; font-size: 28px; }
+  .key.down { transform: translateY(5px); box-shadow: 0 1px 0 var(--key-shadow), 0 2px 6px rgb(0 0 0 / 0.12); }
+  .plus { font-size: 26px; color: var(--muted); font-weight: 500; }
+  .try { color: var(--muted); font-size: 15px; margin: 0; }
+
+  .cta { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; }
+  .button {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 14px 22px; border-radius: 10px;
+    background: var(--ink); color: var(--paper);
+    font-weight: 700; text-decoration: none;
+  }
+  .button:hover { text-decoration: none; filter: brightness(1.15); }
+  .button small { font-weight: 400; opacity: 0.7; }
+  .cta .quiet { font-weight: 500; }
+
+  .screen {
+    position: relative;
+    aspect-ratio: 1000 / 640;
+    background: var(--screen);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 30px 60px -20px rgb(10 20 35 / 0.45), 0 0 0 1px rgb(0 0 0 / 0.25);
+  }
+  @media (prefers-color-scheme: dark) {
+    .screen { box-shadow: 0 30px 60px -20px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.09); }
+  }
+  .screen .overlay {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; transform: scale(0.985);
+    transition: opacity 200ms ease-out, transform 200ms ease-out;
+  }
+  .screen.on .overlay { opacity: 1; transform: none; }
+  .screen .idle {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    color: #5b6370; font-size: 15px; transition: opacity 200ms;
+  }
+  .screen.on .idle { opacity: 0; }
+
+  /* --- features --------------------------------------------------------------- */
+  .feature { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 56px;
+             align-items: center; padding-block: 64px; border-top: 1px solid var(--rule); }
+  .feature.flip { grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); }
+  .feature.flip .copy { order: 2; }
+  h2 { font-size: clamp(28px, 3vw, 38px); line-height: 1.08; letter-spacing: -0.025em;
+       font-weight: 800; margin: 0 0 16px; }
+  .copy p { margin: 0 0 14px; max-width: 34em; }
+  .copy p.aside, .install p.aside { color: var(--muted); font-size: 16px; }
+  .shot img { border-radius: 10px; box-shadow: 0 18px 40px -18px rgb(10 20 35 / 0.5); }
+  .pair { position: relative; padding-bottom: 14%; }
+  .pair img:first-child { width: 84%; }
+  .pair img:last-child {
+    position: absolute; right: 0; bottom: 0; width: 58%;
+    box-shadow: 0 24px 50px -16px rgb(10 20 35 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.08);
+  }
+  kbd {
+    font: 600 0.82em/1 "Schibsted Grotesk", system-ui, sans-serif;
+    padding: 0.18em 0.45em 0.24em; border-radius: 5px;
+    background: var(--key-face); border: 1px solid var(--key-edge);
+    box-shadow: 0 2px 0 var(--key-shadow);
+  }
+
+  /* --- install ---------------------------------------------------------------- */
+  .install { border-top: 1px solid var(--rule); padding-block: 72px 56px; }
+  .install > h2 { margin-bottom: 36px; }
+  .platforms { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; }
+  h3 { font-size: 21px; letter-spacing: -0.01em; margin: 0 0 12px; }
+  .platforms p { margin: 0 0 14px; max-width: 36em; }
+  pre {
+    margin: 0 0 18px; padding: 14px 16px; border-radius: 8px;
+    background: var(--code-bg); overflow-x: auto; line-height: 1.6;
+  }
+  .install ul { margin: 0 0 14px; padding-left: 1.1em; }
+  .install li { margin-bottom: 6px; }
+
+  footer { border-top: 1px solid var(--rule); padding-block: 28px 44px; color: var(--muted);
+           font-size: 15px; display: flex; flex-wrap: wrap; gap: 8px 26px; }
+  footer a { color: inherit; }
+
+  /* --- small screens ---------------------------------------------------------- */
+  @media (max-width: 900px) {
+    .hero-row, .feature, .feature.flip, .platforms { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+    .summon { justify-self: start; }
+    .feature.flip .copy { order: 0; }
+    .hero { padding-block: 24px 64px; }
+    .feature { padding-block: 48px; }
+  }
+  @media (max-width: 560px) {
+    body { font-size: 16px; }
+    .top nav { gap: 16px; }
+    .pair { padding-bottom: 0; display: grid; gap: 16px; }
+    .pair img:first-child, .pair img:last-child { position: static; width: 100%; }
+    .key { min-width: 64px; height: 58px; font-size: 19px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .key, .screen .overlay, .screen .idle { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="wrap top">
+  <a class="brand" href="./"><img src="img/icon.png" alt="">dev-prompt</a>
+  <nav>
+    <a href="#install">Install</a>
+    <a href="https://github.com/seraphx2/dev-prompt">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <section class="wrap hero">
+    <h1>Every repo you own, one keystroke away.</h1>
+    <div class="hero-row">
+      <div>
+        <p class="lede">Press the hotkey from anywhere, type a few letters, and pick from what
+          that project can actually do: its scripts through the right package manager, your
+          editors, a shell right in the overlay. Every repo shows its branch and anything you've
+          left uncommitted, unpushed or half-done. It's gone the moment you're done.</p>
+        <div class="cta">
+          <a class="button" href="https://github.com/seraphx2/dev-prompt/releases/download/v@VERSION@/dev-prompt_@VERSION@_x64-setup.exe">
+            Download for Windows <small>v@VERSION@</small></a>
+          <a class="quiet" href="#install">Install on Linux</a>
+        </div>
+      </div>
+      <div class="summon">
+        <div class="keys" role="group" aria-label="The dev-prompt hotkey">
+          <button class="key" type="button" data-key aria-label="Ctrl">Ctrl</button>
+          <span class="plus" aria-hidden="true">+</span>
+          <button class="key slash" type="button" data-key aria-label="Backslash">\</button>
+        </div>
+        <p class="try">Press <kbd>Ctrl</kbd> <kbd>\</kbd> to bring it up, and again to put it away.</p>
+      </div>
+    </div>
+
+    <div class="screen" id="screen" aria-live="polite">
+      <div class="idle">Your desktop, until you press the hotkey</div>
+      <img class="overlay" id="overlay" src="img/0_dev-prompt_demo.gif" width="1000" height="640"
+           alt="dev-prompt in use: searching for a repo, its action menu, a shell running a dev server, and the list of running shells">
+    </div>
+  </section>
+
+  <section class="wrap feature">
+    <div class="copy">
+      <h2>It reads the project</h2>
+      <p>Picking a repo walks it once and builds the menu from what's there:
+        <code>package.json</code> scripts through npm, pnpm, yarn or bun — whichever the
+        project uses — Cargo, Go, Python, .NET, Docker Compose, and a menu of their own for
+        sub-projects.</p>
+      <p>Your terminal, file manager, editors and AI tools sit on top, and anything you
+        haven't installed simply isn't there.</p>
+      <p class="aside">It's all one YAML file, so teaching it a new tool takes a few lines.</p>
+    </div>
+    <div class="shot">
+      <img src="img/10_dev-prompt_scripts.png" width="760" height="480" loading="lazy"
+           alt="The action menu for prettier, down at the project's own yarn scripts: build, fix, lint, test">
+    </div>
+  </section>
+
+  <section class="wrap feature flip">
+    <div class="copy">
+      <h2>Know where every repo stands</h2>
+      <p>Each repo shows the branch it's on, and flags for anything that exists only on this
+        machine or is left half-done: changed files, commits nobody else has, stashes, a rebase
+        that stopped on a conflict.</p>
+      <p>Type <kbd>!</kbd> for just the repos that need you, worst first — the end-of-day sweep,
+        across everything. Search finds branches too, so a ticket number brings up every repo
+        working on it.</p>
+      <p class="aside">Git, Jujutsu, Mercurial, Subversion, Fossil and Breezy, each in its own
+        terms, kept current in the background as you work.</p>
+    </div>
+    <div class="shot pair">
+      <img src="img/1_dev-prompt_repos.png" width="760" height="480" loading="lazy"
+           alt="The repo list: each repo's branch, with flags such as rebasing, conflicts, changed files, unpushed commits and stashes">
+      <img src="img/8_dev-prompt_attention.png" width="760" height="480" loading="lazy"
+           alt="The ! list: only the repos that need attention, a stopped rebase first">
+    </div>
+  </section>
+
+  <section class="wrap feature">
+    <div class="copy">
+      <h2>Branches, and the next step</h2>
+      <p>A repo's menu spells out where it stands and offers only what's safe in one keystroke
+        right now: a fast-forward pull, a push to its upstream, publishing a new branch, a fetch
+        — and the branch or a new pull request on GitHub, GitLab, Bitbucket or Azure DevOps.</p>
+      <p><kbd>Ctrl</kbd> <kbd>B</kbd> switches branch from a fuzzy list.
+        <kbd>Ctrl</kbd> <kbd>Enter</kbd> opens one in a second working copy beside the repo —
+        a worktree for an AI agent or a long build, without touching the one you're in.</p>
+      <p class="aside">Nothing is ever forced. Staging, commits and conflicts open in your Git
+        client instead — Fork, GitKraken, lazygit and the rest.</p>
+    </div>
+    <div class="shot pair">
+      <img src="img/2_dev-prompt_actions.png" width="760" height="480" loading="lazy"
+           alt="The action menu for prettier: its branch and state under the header, editors, then push 2 commits, fetch, and the repo on GitHub">
+      <img src="img/9_dev-prompt_branches.png" width="760" height="480" loading="lazy"
+           alt="The branch switcher: branches by when they were last used, one checked out in another worktree, and branches only on the remote">
+    </div>
+  </section>
+
+  <section class="wrap feature flip">
+    <div class="copy">
+      <h2>A shell that stays open</h2>
+      <p><kbd>Ctrl</kbd> <kbd>R</kbd> opens your own shell — pwsh, bash, zsh, fish — right
+        in the overlay, in that repo, with your prompt and history.</p>
+      <p>Hide the overlay and it keeps running, so a dev server stays up; the hotkey brings
+        you straight back. Type <kbd>$</kbd> to see every shell you've left running, and close
+        any of them from there.</p>
+    </div>
+    <div class="shot pair">
+      <img src="img/4_dev-prompt_shell.png" width="1000" height="640" loading="lazy"
+           alt="A shell inside the overlay showing git log and a Hugo dev server">
+      <img src="img/5_dev-prompt_shells.png" width="760" height="480" loading="lazy"
+           alt="The list of running shells, in hugo, prettier and ripgrep, with Close all">
+    </div>
+  </section>
+
+  <section class="wrap feature">
+    <div class="copy">
+      <h2>Start a repo, or retire one</h2>
+      <p>Create a repository with Git, Jujutsu, Mercurial, Breezy or Darcs already set up,
+        or put an existing folder under version control.</p>
+      <p>When one's done with, it goes to the Trash — but first dev-prompt checks for
+        uncommitted work, commits that aren't on any remote, and stashes, and asks you to
+        type the name if anything would be lost. Undo is right there afterwards.</p>
+    </div>
+    <div class="shot pair">
+      <img src="img/6_dev-prompt_new-repo.png" width="760" height="480" loading="lazy"
+           alt="The New repository form: a name, the folder it goes in, and Git, Jujutsu or Mercurial">
+      <img src="img/7_dev-prompt_remove.png" width="760" height="480" loading="lazy"
+           alt="Move to Trash, listing uncommitted changes, unpushed commits and a stash, and asking for the name">
+    </div>
+  </section>
+
+  <section class="wrap feature flip">
+    <div class="copy">
+      <h2>Your apps, too</h2>
+      <p>Start the search with <kbd>&gt;</kbd> and it looks through your installed
+        applications instead, the ones you use most first. A second hotkey opens straight
+        into it.</p>
+    </div>
+    <div class="shot">
+      <img src="img/3_dev-prompt_apps.png" width="760" height="480" loading="lazy"
+           alt="The app launcher listing Firefox, Alacritty, Obsidian, Thunderbird and more">
+    </div>
+  </section>
+
+  <section class="wrap install" id="install">
+    <h2>Install</h2>
+    <div class="platforms">
+      <div>
+        <h3>Windows</h3>
+        <p>The installed version updates itself when a new one is out.</p>
+        <ul>
+          <li><a href="https://github.com/seraphx2/dev-prompt/releases/download/v@VERSION@/dev-prompt_@VERSION@_x64-setup.exe">Installer</a> (<code>.exe</code>)</li>
+          <li><a href="https://github.com/seraphx2/dev-prompt/releases/download/v@VERSION@/dev-prompt_@VERSION@_x64-portable.zip">Portable zip</a>, if you'd rather not install</li>
+        </ul>
+        <p>The builds aren't code-signed yet, so SmartScreen may ask first: choose
+          <em>More info</em>, then <em>Run anyway</em>.</p>
+      </div>
+      <div>
+        <h3>Linux</h3>
+        <p>Signed package repositories for apt, dnf and pacman, so updates arrive with the
+          rest of your system. <a href="install/">Set one up</a> in three commands.</p>
+        <p>Or as a Flatpak:</p>
+        <pre>flatpak remote-add --if-not-exists --user dev-prompt \
+  https://seraphx2.github.io/dev-prompt/dev-prompt.flatpakrepo
+flatpak install --user dev-prompt io.github.seraphx2.devprompt</pre>
+        <p class="aside">It runs on the GNOME runtime from Flathub, so add that remote first if
+          you haven't (<a href="install/#flatpak">details</a>).</p>
+        <p>There's also an <a href="https://github.com/seraphx2/dev-prompt/releases/download/v@VERSION@/dev-prompt_@VERSION@_amd64.AppImage">AppImage</a>,
+          which updates itself.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <span>dev-prompt @VERSION@</span>
+  <span>MIT licensed</span>
+  <a href="https://github.com/seraphx2/dev-prompt">Source</a>
+  <a href="https://github.com/seraphx2/dev-prompt/releases">Releases</a>
+  <a href="install/">Package repositories</a>
+</footer>
+
+<script>
+  // The hero: the keycaps toggle the overlay on the screen beside them, the
+  // way the real hotkey does. Ctrl+\ on the visitor's own keyboard works too.
+  (() => {
+    const screen = document.getElementById("screen");
+    const overlay = document.getElementById("overlay");
+    const keys = document.querySelectorAll("[data-key]");
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const src = overlay.getAttribute("src");
+
+    function press() {
+      keys.forEach((k) => k.classList.add("down"));
+      setTimeout(() => keys.forEach((k) => k.classList.remove("down")), reduce ? 0 : 140);
+      const on = !screen.classList.contains("on");
+      // Restart the demo from the top each time it's summoned.
+      if (on) { overlay.src = ""; overlay.src = src; }
+      screen.classList.toggle("on", on);
+    }
+
+    keys.forEach((k) => k.addEventListener("click", press));
+    addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "\\") { e.preventDefault(); press(); }
+    });
+
+    // Bring it up once on arrival; with reduced motion it's simply there.
+    if (reduce) screen.classList.add("on");
+    else setTimeout(press, 700);
+  })();
+</script>
+</body>
+</html>

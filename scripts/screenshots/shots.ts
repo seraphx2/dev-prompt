@@ -96,6 +96,12 @@ function backend(cmd: string, args: Args): unknown {
       return (args.paths as string[]).map(() => true);
     case "assess_removal":
       return demo.assessment(String(args.path));
+    case "list_statuses":
+      return demo.statuses;
+    case "vcs_details":
+      return demo.gitDetails(String(args.path));
+    case "vcs_branches":
+      return demo.branches(String(args.path));
     case "updater_mode":
       // "managed": no update check, no update chip in the footer.
       return "managed";

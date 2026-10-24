@@ -94,7 +94,7 @@
         type="button"
         disabled={busy}
         onclick={() => onsave("")}
-        class="text-[11px] text-white/30 underline decoration-white/20 underline-offset-2 hover:text-white/60 disabled:opacity-50"
+        class="text-[11px] text-white/45 underline decoration-white/20 underline-offset-2 hover:text-white/60 disabled:opacity-50"
         >turn off</button
       >
     {/if}
@@ -114,7 +114,7 @@
     >
       {capturing ? "Press a combination…" : value || (clearable ? "off" : "not set")}
     </span>
-    <span class="shrink-0 text-[10px] uppercase tracking-wide text-white/30">
+    <span class="shrink-0 text-[10px] uppercase tracking-wide text-white/45">
       {capturing ? "Esc cancels" : "click to record"}
     </span>
   </button>

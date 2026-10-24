@@ -12,20 +12,21 @@
     "test": "vitest run",
     "check:tauri": "node scripts/check-tauri-versions.mjs",
     "version:calver": "node scripts/version.mjs",
-    "screenshots": "node scripts/screenshots/capture.mjs"
+    "screenshots": "node scripts/screenshots/capture.mjs",
+    "screenshots:wsl": "wsl bash scripts/screenshots/wsl.sh"
   },
   "license": "MIT",
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.12.3",
+    "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-autostart": "^2.7.0",
-    "@tauri-apps/plugin-clipboard-manager": "^2.4.2",
-    "@tauri-apps/plugin-dialog": "^2.8.2",
-    "@tauri-apps/plugin-notification": "^2.6.0",
+    "@tauri-apps/plugin-clipboard-manager": "^2.5.0",
+    "@tauri-apps/plugin-dialog": "^2.8.3",
+    "@tauri-apps/plugin-notification": "^2.7.0",
     "@tauri-apps/plugin-process": "^2.4.0",
-    "@tauri-apps/plugin-updater": "^2.13.3",
+    "@tauri-apps/plugin-updater": "^2.14.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/addon-web-links": "^0.12.0",
@@ -34,17 +35,17 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@tailwindcss/vite": "^4.3.3",
-    "@tauri-apps/cli": "^2.12.2",
+    "@tauri-apps/cli": "^2.12.3",
     "gifenc": "^1.0.3",
-    "playwright": "^1.63.0",
+    "playwright": "^1.64.1",
     "pngjs": "^7.0.0",
-    "simple-icons": "^16.34.0",
+    "simple-icons": "^16.35.0",
     "svelte": "^5.57.2",
     "svelte-check": "^4.1.1",
     "tailwindcss": "^4.3.3",
     "tslib": "^2.8.1",
     "typescript": "^5.7.2",
     "vite": "^6.4.4",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   }
 }

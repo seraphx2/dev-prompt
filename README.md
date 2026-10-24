@@ -26,7 +26,7 @@ vanishes the moment it loses focus, never touches your taskbar.
 
 Cross-platform, built with **Tauri v2** (Rust) + **Svelte 5** + **Tailwind
 CSS** — a small single binary with no runtime dependencies beyond the system
-WebView.
+WebView. Website: **[seraphx2.github.io/dev-prompt](https://seraphx2.github.io/dev-prompt/)**.
 
 ## What it does
 
@@ -37,8 +37,18 @@ WebView.
   refreshes in the background when stale. A folder watcher keeps the list
   current while the app runs: a repo you clone or delete appears or goes on its
   own.
-- **Fuzzy search** — fzf-style ranking over repo name and path, with match
-  highlighting.
+- **Fuzzy search** — fzf-style ranking over repo name, branch and path, with
+  match highlighting.
+- **Branch and working-copy status** — for Git, Jujutsu, Mercurial,
+  Subversion, Fossil and Breezy, each repo shows what's checked out and flags
+  for what exists only here or is left half-done (uncommitted changes, unpushed
+  commits, stashes, a rebase stopped on a conflict, jj's conflicted and
+  divergent changes, …). `!` lists just the repos that need attention; the
+  action menu offers each system's safe one-keystroke steps (a fast-forward
+  pull, push, publish, fetch, update, sync, the branch on GitHub / GitLab / …)
+  and a branch switcher that also makes worktrees, workspaces, shares and
+  checkouts. Everything else hands off to your GUI. See
+  [`docs/vcs-status.md`](docs/vcs-status.md).
 - **Context detection** — on selecting a repo it inspects the tree (root plus
   side-by-side and `packages/*`-style sub-projects) for `.sln` / `.csproj`,
   `package.json` scripts, `Cargo.toml`, `go.mod` / `go.work`, Python
@@ -230,7 +240,7 @@ via your desktop's session settings.)
 
 **Repo list**
 
-<img src="docs/img/1_dev-prompt_repos.png" width="760" alt="The repo list: every repository under your code folders, with its version control and project files">
+<img src="docs/img/1_dev-prompt_repos.png" width="760" alt="The repo list: every repository under your code folders, its branch, status flags such as rebasing, changed files and unpushed commits, and icons for the kind of project — Rust, Node, Python, Docker">
 
 | Key                  | Action                                                |
 | -------------------- | ----------------------------------------------------- |
@@ -239,11 +249,18 @@ via your desktop's session settings.)
 | `Enter`              | open the action menu for the selected repo            |
 | `>`                  | search installed apps instead (see below)             |
 | `$`                  | list the running shells (see below)                   |
+| `!`                  | list only the repos that need attention (see below)   |
 | `Ctrl+R`             | force a rescan                                        |
 | `Ctrl+Shift+N`       | create a new repository (see below)                   |
 | `Delete`             | clear the query                                       |
+| `Ctrl+Delete`        | move the selected repo to the Recycle Bin (see below) |
 | `Ctrl+,`             | open Settings                                         |
 | `Esc` / click away   | hide the overlay                                      |
+
+Small icons on each row say what kind of project it is — Rust, Node, Python,
+Docker, .NET, … (hover one for the files that say so). A repo that isn't Git
+also shows its version control by command name: `jj`, `hg`, `svn`, `fossil`,
+`brz`, `darcs`.
 
 <img src="docs/img/6_dev-prompt_new-repo.png" width="760" alt="The New repository form: a name, the folder it goes in, and the version control to set up">
 
@@ -255,7 +272,7 @@ creates, `Esc` goes back. If setup fails, the error is shown and the folder is
 removed again. No remotes are set up; do that from your terminal or editor.
 
 A folder that isn't under version control yet (notes, documents, a project you
-haven't set up) shows up without a badge, and its action menu offers **Set up
+haven't set up) shows up without a branch, and its action menu offers **Set up
 version control…** — the same form, for that folder. If setup fails, only what
 it added is removed; nothing already in the folder is touched.
 Subversion isn't offered — see
@@ -264,7 +281,9 @@ why, and how to add it anyway.
 
 **Action menu**
 
-<img src="docs/img/2_dev-prompt_actions.png" width="760" alt="A repo's action menu: quick actions along the top, then editors, tools and the project's own scripts">
+<img src="docs/img/2_dev-prompt_actions.png" width="760" alt="A repo's action menu: its branch and state under the header, quick actions along the top, then editors and the Version control section — push, fetch, the repo on GitHub">
+
+<img src="docs/img/10_dev-prompt_scripts.png" width="760" alt="Further down the same menu: the project's own yarn scripts">
 
 | Key      | Action                                               |
 | -------- | ---------------------------------------------------- |
@@ -275,9 +294,45 @@ why, and how to add it anyway.
 | `Ctrl+E` | show in your file manager                            |
 | `Ctrl+C` | copy the path                                        |
 | `Ctrl+R` | open a shell in the overlay (see below)              |
+| `Ctrl+B` | switch branch / bookmark, or open one in a new worktree, workspace, share or checkout |
+| `Ctrl+Delete` | move this repo to the Recycle Bin (see below)   |
 | `Esc`    | step back one level (sub-project → menu → repo list) |
 
 The four quick actions also sit as buttons along the top of the menu.
+
+<img src="docs/img/8_dev-prompt_attention.png" width="760" alt="The ! list: only the repos that need attention — a rebase stopped on a conflict, uncommitted and unpushed work, a branch behind its upstream, stashes">
+
+**Branches and status** — each repo row shows what's checked out (a branch, a
+bookmark, `main +2` for Jujutsu changes on top of one) and flags for what
+exists only on this machine or is left half-done: `~3` changed files, `+1` new
+ones, `↑2` unpushed commits (drafts, unsent check-ins), `↓4` behind the
+upstream, `≡1` a stash or shelf, `rebasing` / `merging` / … with `!1`
+conflicts, jj's `!1ch` conflicted changes and `divergent`, `stale`, `needs
+cleanup`, `detached`, `gone`, `local` (hover any of them for the sentence).
+That works for Git, Jujutsu, Mercurial, Subversion, Fossil and Breezy, each in
+its own terms, and stays current in the background as you work. The footer
+counts the repos that need attention — click it, or type `!`, for just those,
+most urgent first. The search also matches branch names, so a ticket number
+finds every repo on that ticket.
+
+<img src="docs/img/9_dev-prompt_branches.png" width="760" alt="The branch switcher: branches by when they were last used, one checked out in another worktree, ahead / behind counts, and branches only on the remote">
+
+In the action menu a line under the header spells the state out, and a
+**Version control** section offers only what's safe in one keystroke right
+now: for Git a fast-forward **Pull**, a **Push** to the branch's upstream,
+**Publish** a branch that has none, **Fetch**; for Jujutsu push / publish a
+bookmark and fetch; Mercurial's pull and push of drafts; Subversion's update;
+Fossil's sync and update; Breezy's pull and push; and the repo, branch and new
+pull request on GitHub, GitLab, Bitbucket, Azure DevOps or Codeberg. `Ctrl+B`
+opens the branch switcher: `Enter` switches (never forced, and never merging
+uncommitted work in), `Ctrl+Enter` checks the branch out in a second working
+copy beside the repo instead — a Git worktree, a jj workspace, a Mercurial
+share, a Subversion or Fossil checkout — and typing a new name creates it.
+Staging, committing, diffs and conflicts are your GUI's job — Fork, GitKraken,
+Sublime Merge, Git Extensions, GitHub Desktop, TortoiseGit, gitg, lazygit,
+gitui and tig are offered when installed. More in
+[docs/vcs-status.md](docs/vcs-status.md), including a script that builds a
+test repo for every state of every system.
 
 <img src="docs/img/4_dev-prompt_shell.png" width="1000" alt="A shell open inside the overlay, running git log and a Hugo dev server">
 
@@ -329,8 +384,9 @@ folders to index or turns the whole scope off.
 
 **Right-click** works where it's useful, styled like the rest of the app:
 
-- a **repo** — open its actions, its quick actions (terminal, file manager,
-  copy path, open shell), "Set up version control…" when it has none, the
+- a **repo** — open its actions, "Switch branch…" for Git, its quick actions
+  (terminal, file manager, copy path, open shell), "Set up version control…"
+  when it has none, the
   actions you use most in that repo, "Close shell" while one runs there, and
   "Move to Recycle Bin…" (see below);
 - an **app** in `>` — launch it, show its folder, copy its path;
@@ -344,17 +400,19 @@ Inspect.)
 
 <img src="docs/img/7_dev-prompt_remove.png" width="760" alt="Move to Trash, listing the uncommitted changes, unpushed commits and stash that exist only in this folder">
 
-**Move to Recycle Bin** (Trash on Linux) — from a repo's right-click menu or
-its action menu — never deletes outright: the folder goes to the bin, Undo
+**Move to Recycle Bin** (Trash on Linux) — the **Recycle** button in a repo's
+action menu header, `Ctrl+Delete` there or on a selected repo in the list, or
+the repo's right-click menu — never deletes outright: the folder goes to the bin, Undo
 (`Ctrl+Z`) appears right after, and on Windows a folder too big for the bin
 gets Windows' own "permanently delete?" prompt rather than vanishing. First it
 checks what exists nowhere else: uncommitted changes, commits on no remote,
 stashes / shelves, repos nested inside, or no version control at all. A clean
 repo whose commits are all on a remote is one click; anything else lists what's
-at risk and asks you to type the folder's name. Git, Mercurial and Jujutsu are
-checked fully offline; for Subversion, Breezy, Darcs and Fossil only local
-changes can be checked without contacting the remote, so those always ask for
-the name. Your root folders themselves are never offered.
+at risk and asks you to type the folder's name. Git, Jujutsu, Mercurial and
+Fossil are checked fully offline; Subversion commits go straight to the
+server, so only local changes can be lost there; Breezy and Darcs can only
+tell what was pushed by asking the remote, so those always ask for the name.
+Your root folders themselves are never offered.
 
 The mouse **back / forward** buttons work throughout: back == `Esc` for the
 current screen, forward == open the action menu on the repo list, or drill
@@ -400,6 +458,10 @@ src-tauri/                  Rust backend
   src/app_watch.rs          app watcher: Start Menu / registry / .desktop changes
   src/provision.rs          New repository / Set up version control
   src/removal.rs            Move to Recycle Bin: the at-risk check, Undo
+  src/vcs_state.rs          a working copy's state, every system: branch, changes, unpushed, stashes, …
+  src/status.rs             keeps every repo's state current in the background
+  src/vcs_ops.rs            branches, switching, second working copies, remote steps, web links
+  src/*_ops.rs              each system's side of it: git, jj, hg, svn, fossil, brz
   src/pty.rs                built-in shell: the user's shell in a pseudo-terminal
   src/launch.rs             detached process spawning
   src/layer.rs              Wayland: the overlay as a centred layer-shell surface
@@ -408,9 +470,10 @@ src-tauri/                  Rust backend
   src/rules_template.yaml    scaffold written to the user's rules.yaml
 scripts/version.mjs         CalVer generator for releases
 packaging/                  Linux packaging: .desktop / AppStream, PKGBUILDs,
-                            Flatpak manifest, the apt/rpm/pacman repo builder
+                            Flatpak manifest, the apt/rpm/pacman repo builder,
+                            and the website (packaging/site/)
 .github/workflows/          CI, release, the package repo, dev sync
-docs/                       configuration.md, rules-engine.md, releasing.md, future-work.md
+docs/                       configuration.md, rules-engine.md, vcs-status.md, releasing.md, future-work.md
 ```
 
 ## Tests

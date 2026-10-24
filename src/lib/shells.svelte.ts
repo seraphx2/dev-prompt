@@ -324,7 +324,7 @@ export class ShellSession {
         e.preventDefault();
         void this.paste();
       }
-      // "back" bubbles on to the window, where App steps back.
+      // "back" and "zoom" bubble on to the window, where App steps back or zooms.
     }
     return false;
   }

@@ -60,6 +60,11 @@ pub struct Config {
     /// Font size (px) for the built-in shell. `None` = 13.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell_font_size: Option<u16>,
+    /// How much bigger (or smaller) the whole overlay is drawn — text, icons
+    /// and the window together — on top of the OS's own display scaling.
+    /// `None` = 1.0. See [`zoom_factor`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zoom: Option<f64>,
     /// File manager to open (`programs.filemanager` key, a bare name, or an
     /// absolute path). `None` = first `programs.filemanager` candidate that
     /// resolves.
@@ -104,6 +109,7 @@ impl Default for Config {
             shell: None,
             shell_font: None,
             shell_font_size: None,
+            zoom: None,
             filemanager: None,
             filemanager_template: None,
             apps: AppsConfig::default(),
@@ -472,6 +478,8 @@ pub struct UserConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell_font_size: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub zoom: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub filemanager: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filemanager_template: Option<String>,
@@ -554,6 +562,9 @@ fn merge_settings(cfg: &mut Config, u: UserConfig) {
     }
     if let Some(n) = u.shell_font_size {
         cfg.shell_font_size = Some(n);
+    }
+    if let Some(z) = u.zoom {
+        cfg.zoom = Some(z);
     }
     if let Some(f) = u.filemanager {
         cfg.filemanager = Some(f);
@@ -667,6 +678,17 @@ pub fn load_user() -> AppResult<UserConfig> {
     Ok(serde_yaml_ng::from_str(&text)?)
 }
 
+/// The overlay's zoom levels, smallest to largest — what Ctrl+- / Ctrl++ step
+/// through and Settings offers.
+pub const ZOOM_STEPS: &[f64] = &[0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
+
+/// `cfg.zoom` as a usable factor: 1.0 when unset, never outside the steps'
+/// range (a hand-edited `zoom: 40` mustn't make a window wider than any screen).
+pub fn zoom_factor(cfg: &Config) -> f64 {
+    let (lo, hi) = (ZOOM_STEPS[0], ZOOM_STEPS[ZOOM_STEPS.len() - 1]);
+    cfg.zoom.filter(|z| z.is_finite()).map(|z| z.clamp(lo, hi)).unwrap_or(1.0)
+}
+
 pub fn save_user(u: &UserConfig) -> AppResult<()> {
     let path = config_path()?;
     let header = "# dev-prompt settings — managed by the Settings screen.\n\
@@ -698,6 +720,7 @@ fn first_run_user() -> UserConfig {
         shell: None,
         shell_font: None,
         shell_font_size: None,
+        zoom: None,
         filemanager: None,
         filemanager_template: None,
         // Bundled default is already `enabled: true`; leave the key out of the
@@ -862,7 +885,7 @@ mod tests {
         let has_rule = |id: &str| cfg.rules.iter().any(|r| r.id.as_deref() == Some(id));
         for id in [
             "maven", "gradle", "cmake", "composer", "mix", "deno", "nix-flake",
-            "docker-image", "csproj-editors", "eclipse-project",
+            "docker-image", "csproj-editors", "eclipse-project", "fossil-ui",
         ] {
             assert!(has_rule(id), "missing bundled rule `{id}`");
         }
@@ -873,6 +896,13 @@ mod tests {
 
         let has_universal = |id: &str| cfg.universal.actions.iter().any(|a| a.action_id() == id);
         assert!(has_universal("cursor") && has_universal("gitkraken") && has_universal("lazygit"));
+        // Git GUIs to hand a repo's status off to (see git_ops.rs).
+        for id in ["gitextensions", "github-desktop", "tortoisegit", "gitui", "tig", "gitg"] {
+            assert!(has_universal(id), "missing bundled git GUI `{id}`");
+        }
+        for key in ["gitextensions", "githubdesktop", "tortoisegit", "gitui", "tig", "gitg"] {
+            assert!(cfg.programs.contains_key(key), "missing bundled program `{key}`");
+        }
 
         // A rule's `match` doubles as a discovery marker.
         let globs = discovery_globs(&cfg);
@@ -982,6 +1012,20 @@ mod tests {
         assert!(!cfg.apps.enabled);
         assert_eq!(cfg.apps.extra_dirs, vec!["D:\\tools"]);
         assert_eq!(cfg.apps.exclude, vec!["zoom"]);
+    }
+
+    #[test]
+    fn settings_file_carries_zoom_kept_in_range() {
+        let mut cfg = bundled_defaults();
+        assert_eq!(zoom_factor(&cfg), 1.0, "unset: normal size");
+        merge_settings(&mut cfg, serde_yaml_ng::from_str("zoom: 1.25\n").unwrap());
+        assert_eq!(zoom_factor(&cfg), 1.25);
+        cfg.zoom = Some(40.0);
+        assert_eq!(zoom_factor(&cfg), 2.0, "a hand-edited value stays on screen");
+        cfg.zoom = Some(0.1);
+        assert_eq!(zoom_factor(&cfg), 0.8);
+        cfg.zoom = Some(f64::NAN);
+        assert_eq!(zoom_factor(&cfg), 1.0);
     }
 
     #[test]

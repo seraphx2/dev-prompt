@@ -1,9 +1,89 @@
 # dev-prompt — remaining work
 
-Everything below is discussed-but-not-built, ordered **easiest → hardest**.
+Everything below is discussed-but-not-built. The first three (#18–#20) are the
+current priorities, in order; the rest are ordered **easiest → hardest**.
 The config schema itself (markers / programs / rules / universal, templates,
 merge model) is implemented — read `src-tauri/src/default_config.yaml` for the
 canonical shape.
+
+## 18. In-app rules editor · _priority; unblocks #20_
+
+Edit `rules.yaml` inside Settings instead of in an outside editor and finding
+out on the next reload whether it parsed. The part an outside editor can't do:
+a **live preview** — pick a repo and see the actions the edited rules would
+produce for it (the "Trace a repo" machinery from #8), before saving.
+
+- Validate as you type against the rules schema (unknown fields, wrong types,
+  bad globs), errors pinned to the line; completion for field names and
+  `programs` keys.
+- Save goes through the same reload / `clear_program_cache()` path a config
+  save does.
+
+**Open decision — who owns the file.** Today the Settings screen never rewrites
+`rules.yaml` so hand-written comments survive. Two ways to go:
+
+- **Text editor (keeps that guarantee):** a YAML editor over the raw file, so
+  comments and formatting round-trip untouched.
+- **App owns the file (drops it):** per-rule forms, with what comments did
+  today covered by fields instead — a `note:` per rule and an `enabled:` toggle
+  (in place of commenting a rule out). Simpler UI; costs anyone who keeps
+  `rules.yaml` in a dotfiles repo or edits it by hand their comments on the
+  first save, since `serde_yaml` drops them.
+
+Either way it makes where the file lives irrelevant to the user, which is what
+#20 needs.
+
+Files: new `lib/components/settings/` page, `commands.rs` (validate / preview /
+save commands), `config.rs` (`merge_overrides`), `rules.rs`, `docs/rules-engine.md`.
+
+---
+
+## 19. winget package · _priority; one-time PR, then automated_
+
+A `winget install dev-prompt` listing, so Windows users find it by searching
+rather than by landing on the repo — discovery that needs no posting.
+
+- Manifest in `microsoft/winget-pkgs` for the NSIS installer
+  (`InstallerType: nullsoft`, silent switch `/S`), x64. Unsigned installers are
+  accepted; the validation pipeline scans them.
+- Automate new versions from the release workflow (`wingetcreate update` or a
+  winget-releaser action — pin it to a full SHA like every other action, since
+  the release job holds the updater key). Needs a PAT with `public_repo` as a
+  secret to open the PRs.
+- The installed app still self-updates; winget just sees the newer version on
+  its next upgrade check.
+
+Files: `.github/workflows/release.yml` (new job), README / product page
+install section.
+
+---
+
+## 20. Microsoft Store (MSIX) · _priority; after #18, real packaging work_
+
+Store listing for discovery in the Store app. Two submission routes:
+
+- **Win32 installer (the existing `setup.exe`)** — requires the installer to be
+  code-signed by a CA in Microsoft's Trusted Root Program. Blocked until the
+  builds are signed (which would also clear the SmartScreen prompt).
+- **MSIX (preferred while unsigned)** — the Store signs it. Costs:
+  - Tauri doesn't bundle MSIX; add a packaging step (`makeappx` from the
+    Windows SDK over the built output) to the release workflow.
+  - The Store build must not self-update — the Store owns updates. Build it
+    with the updater disabled.
+  - MSIX redirects files the app creates under `%APPDATA%` to a per-package
+    folder, so a user can't find `config.yaml` / `rules.yaml` by path. #18 makes
+    that moot for rules; `config.yaml` is already Settings-owned.
+  - Start at login uses the registry Run key; packaged apps need the
+    `windows.startupTask` extension instead.
+  - Fine as-is under `runFullTrust`: the global hotkey, spawning terminals /
+    shells, ConPTY, registry reads for the app list.
+- Partner Center account (free for individuals) and a privacy-policy URL — a
+  page on the product site.
+
+Files: `.github/workflows/release.yml`, a new `packaging/msix/`
+(`AppxManifest.xml`, assets), `tauri.conf.json` / updater gating, `autostart.rs`.
+
+---
 
 ## 6. `task-targets` provider · _medium, three small parsers_
 
@@ -269,6 +349,8 @@ Tracking: [Dependabot alert #1](https://github.com/seraphx2/dev-prompt/security/
   (`Ctrl+Shift+W`); "Close shell" on a repo's right-click menu; a tray "Close
   all shells (N)" item kept current by `pty::Sessions::on_count_change`.
   — 2026-10-14
+
+Priorities, in order: #18 in-app rules editor, #19 winget, #20 Microsoft Store.
 
 Remaining, hardest-first: #6 task-targets provider, #16 app-launcher phase 2,
 #15 conditional template expansion, #14 (Cargo-workspace / Xcode / Nx-Turbo-

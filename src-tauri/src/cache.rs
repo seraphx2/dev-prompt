@@ -9,6 +9,7 @@ use crate::config::cache_dir;
 use crate::error::AppResult;
 use crate::inspect::RepoContext;
 use crate::scan::Repo;
+use crate::vcs_state::RepoStatus;
 
 pub const CACHE_FILE: &str = "repos.json";
 pub const APPS_CACHE_FILE: &str = "apps.json";
@@ -120,6 +121,35 @@ pub fn save_apps(apps: &[AppEntry], index: &Index) -> AppResult<()> {
     Ok(())
 }
 
+// --- working-copy status (see status.rs) ------------------------------------
+
+pub const STATUS_CACHE_FILE: &str = "status.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+struct StatusCacheFile {
+    written_at: u64,
+    /// Repo path → its last-read status. Each carries its own `checked_at`,
+    /// which is what decides when it's read again.
+    statuses: HashMap<String, RepoStatus>,
+}
+
+pub fn load_statuses() -> AppResult<HashMap<String, RepoStatus>> {
+    let path = cache_dir()?.join(STATUS_CACHE_FILE);
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+    let parsed: StatusCacheFile = serde_json::from_str(&std::fs::read_to_string(&path)?).unwrap_or_default();
+    Ok(parsed.statuses)
+}
+
+pub fn save_statuses(statuses: &HashMap<String, RepoStatus>) -> AppResult<()> {
+    let path = cache_dir()?.join(STATUS_CACHE_FILE);
+    let file = StatusCacheFile { written_at: now_secs(), statuses: statuses.clone() };
+    std::fs::write(&path, serde_json::to_string(&file)?)?;
+    Ok(())
+}
+
 /// Merge a fresh scan over the previous cache: fresh entries win; anything not in
 /// the fresh set is considered gone and dropped.
 pub fn merge(previous: &[Repo], fresh: Vec<Repo>) -> Vec<Repo> {
@@ -214,6 +244,27 @@ mod tests {
         let parsed: AppsCacheFile = serde_json::from_str(json).unwrap();
         assert!(parsed.apps.is_empty());
         assert_eq!(parsed.written_at, 0);
+    }
+
+    #[test]
+    fn status_cache_round_trips_and_tolerates_new_fields_missing() {
+        let mut statuses = HashMap::new();
+        let s = RepoStatus {
+            vcs: Some("Git".into()),
+            branch: Some("main".into()),
+            ahead: 2,
+            unpushed: Some(2),
+            checked_at: 9,
+            ..Default::default()
+        };
+        statuses.insert("/x/demo".to_string(), s);
+        let file = StatusCacheFile { written_at: 10, statuses: statuses.clone() };
+        let back: StatusCacheFile = serde_json::from_str(&serde_json::to_string(&file).unwrap()).unwrap();
+        assert_eq!(back.statuses, statuses);
+        // A status written before a field existed still loads.
+        let old: StatusCacheFile =
+            serde_json::from_str(r#"{ "statuses": { "/y": { "vcs": "Git", "branch": "dev" } } }"#).unwrap();
+        assert_eq!(old.statuses["/y"].branch.as_deref(), Some("dev"));
     }
 
     #[test]

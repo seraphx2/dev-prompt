@@ -86,7 +86,7 @@
         <path d="M3 4.5 6 7.5 9 4.5" />
       </svg>
     </button>
-    <span class="min-w-0 flex-1 truncate text-right text-[11px] text-white/35">
+    <span class="min-w-0 flex-1 truncate text-right text-[11px] text-white/50">
       {#if session?.state === "starting"}
         starting…
       {:else if session?.state === "exited"}

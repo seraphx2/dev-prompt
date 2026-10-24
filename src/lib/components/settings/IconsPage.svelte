@@ -1,7 +1,7 @@
 <script lang="ts">
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { iconKeys, icons } from "../../icons";
-  import { glyphDim } from "../../glyph";
+  import { glyphColor } from "../../glyph";
   import type { Note } from "./model";
   import * as ui from "./ui";
 
@@ -24,7 +24,7 @@
 <div class="grid grid-cols-[repeat(auto-fill,minmax(76px,1fr))] gap-1">
   {#each iconKeys as k (k)}
     {@const g = icons[k]}
-    {@const tinted = g.hex && !glyphDim(g)}
+    {@const color = glyphColor(g)}
     <button
       type="button"
       onclick={() => copy(k)}
@@ -32,11 +32,11 @@
       class="flex flex-col items-center gap-1.5 rounded-sm px-1 py-2.5 hover:bg-white/6"
     >
       <svg
-        class="h-5 w-5 {tinted ? '' : 'text-white/45'}"
+        class="h-5 w-5 {color ? '' : 'text-white/45'}"
         viewBox={g.vb ?? "0 0 24 24"}
         fill="currentColor"
         fill-rule="evenodd"
-        style={tinted ? `color:${g.hex}` : ""}
+        style={color ? `color:${color}` : ""}
       >
         {#if g.raw}{@html g.raw}{:else}<path d={g.d} />{/if}
       </svg>
