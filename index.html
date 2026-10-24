@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>dev-prompt — every repo you own, one keystroke away</title>
-<meta name="description" content="A command palette for developers on Windows and Linux. Press the hotkey, type a few letters, and pick from what the project can actually do: its scripts, your editors, a shell right in the overlay.">
+<meta name="description" content="A command palette for every repo you own, on Windows and Linux. Press the hotkey and see where each one stands — its branch, and anything uncommitted, unpushed or left half-done, in Git, Jujutsu, Mercurial, Subversion, Fossil or Breezy — then pick from what that project can actually do: its scripts, your editors, a shell right in the overlay.">
 <meta property="og:title" content="dev-prompt">
-<meta property="og:description" content="Every repo you own, one keystroke away. Its scripts, your editors, and a shell, in an overlay that's gone when you're done.">
+<meta property="og:description" content="Every repo you own, one keystroke away: where each one stands, and what it can do — its branch and unpushed work, its scripts, your editors, a shell — in an overlay that's gone when you're done.">
 <meta property="og:image" content="https://seraphx2.github.io/dev-prompt/img/4_dev-prompt_shell.png">
 <link rel="icon" type="image/png" href="img/icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -206,12 +206,14 @@
     <h1>Every repo you own, one keystroke away.</h1>
     <div class="hero-row">
       <div>
-        <p class="lede">Press the hotkey from anywhere, type a few letters, and pick from what
-          that project can actually do: its scripts through the right package manager, your
-          editors, a shell right in the overlay. It's gone the moment you're done.</p>
+        <p class="lede">Press the hotkey from anywhere and every repo you own is there, each with
+          its branch and anything you've left uncommitted, unpushed or half-done — in Git,
+          Jujutsu, Mercurial, Subversion, Fossil or Breezy. Type a few letters and pick from what
+          that project can actually do: its scripts, your editors, a shell right in the overlay.
+          It's gone the moment you're done.</p>
         <div class="cta">
-          <a class="button" href="https://github.com/seraphx2/dev-prompt/releases/download/v2026.1015.1/dev-prompt_2026.1015.1_x64-setup.exe">
-            Download for Windows <small>v2026.1015.1</small></a>
+          <a class="button" href="https://github.com/seraphx2/dev-prompt/releases/download/v2026.1024.2/dev-prompt_2026.1024.2_x64-setup.exe">
+            Download for Windows <small>v2026.1024.2</small></a>
           <a class="quiet" href="#install">Install on Linux</a>
         </div>
       </div>
@@ -232,20 +234,63 @@
     </div>
   </section>
 
+
+  <section class="wrap feature">
+    <div class="copy">
+      <h2>Know where every repo stands</h2>
+      <p>Each repo shows the branch it's on, and flags for anything that exists only on this
+        machine or is left half-done: changed files, commits nobody else has, stashes, a rebase
+        that stopped on a conflict.</p>
+      <p>Type <kbd>!</kbd> for just the repos that need you, worst first — the end-of-day sweep,
+        across everything. Search finds branches too, so a ticket number brings up every repo
+        working on it.</p>
+      <p class="aside">Git, Jujutsu, Mercurial, Subversion, Fossil and Breezy, each in its own
+        terms, kept current in the background as you work.</p>
+    </div>
+    <div class="shot pair">
+      <img src="img/1_dev-prompt_repos.png" width="760" height="480" loading="lazy"
+           alt="The repo list: each repo's branch, with flags such as rebasing, conflicts, changed files, unpushed commits and stashes">
+      <img src="img/8_dev-prompt_attention.png" width="760" height="480" loading="lazy"
+           alt="The ! list: only the repos that need attention, a stopped rebase first">
+    </div>
+  </section>
+
+  <section class="wrap feature flip">
+    <div class="copy">
+      <h2>Branches, and the next step</h2>
+      <p>A repo's menu spells out where it stands and offers only what's safe in one keystroke
+        right now: a fast-forward pull, a push to its upstream, publishing a new branch, a fetch
+        — and the branch or a new pull request on GitHub, GitLab, Bitbucket or Azure DevOps.</p>
+      <p><kbd>Ctrl</kbd> <kbd>B</kbd> switches branch from a fuzzy list.
+        <kbd>Ctrl</kbd> <kbd>Enter</kbd> opens one in a second working copy beside the repo —
+        a worktree for an AI agent or a long build, without touching the one you're in.</p>
+      <p class="aside">Nothing is ever forced. Staging, commits and conflicts open in your Git
+        client instead — Fork, GitKraken, lazygit and the rest.</p>
+    </div>
+    <div class="shot pair">
+      <img src="img/2_dev-prompt_actions.png" width="760" height="480" loading="lazy"
+           alt="The action menu for prettier: its branch and state under the header, editors, then push 2 commits, fetch, and the repo on GitHub">
+      <img src="img/9_dev-prompt_branches.png" width="760" height="480" loading="lazy"
+           alt="The branch switcher: branches by when they were last used, one checked out in another worktree, and branches only on the remote">
+    </div>
+  </section>
+
   <section class="wrap feature">
     <div class="copy">
       <h2>It reads the project</h2>
       <p>Picking a repo walks it once and builds the menu from what's there:
         <code>package.json</code> scripts through npm, pnpm, yarn or bun — whichever the
-        project uses — Cargo, Go, Python, .NET, Docker Compose, and a menu of their own for
-        sub-projects.</p>
+        project uses — Cargo, Go, Python, .NET, Docker Compose, the targets in a Makefile,
+        justfile or Taskfile, and a menu of their own for sub-projects.</p>
       <p>Your terminal, file manager, editors and AI tools sit on top, and anything you
-        haven't installed simply isn't there.</p>
+        haven't installed simply isn't there. Hold <kbd>Shift</kbd> to run any of it as
+        administrator — <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>T</kbd> is an admin terminal in
+        the repo.</p>
       <p class="aside">It's all one YAML file, so teaching it a new tool takes a few lines.</p>
     </div>
     <div class="shot">
-      <img src="img/2_dev-prompt_actions.png" width="760" height="480" loading="lazy"
-           alt="The action menu for prettier: copy path, file manager, open shell and terminal along the top, then Claude Code, VS Code, Zed, lazygit, and the project's yarn scripts">
+      <img src="img/10_dev-prompt_scripts.png" width="760" height="480" loading="lazy"
+           alt="The action menu for prettier, down at the project's own yarn scripts: build, fix, lint, test">
     </div>
   </section>
 
@@ -268,8 +313,11 @@
 
   <section class="wrap feature">
     <div class="copy">
-      <h2>Start a repo, or retire one</h2>
-      <p>Create a repository with Git, Jujutsu, Mercurial, Breezy or Darcs already set up,
+      <h2>Clone, start or retire a repo</h2>
+      <p>Paste a repository's address into the search to clone it into one of your folders —
+        Git, Jujutsu, Mercurial, Subversion, Fossil or Breezy, whichever can read it. A big one
+        clones in the background while you carry on, and you can stop it any time.</p>
+      <p>Or create a repository with Git, Jujutsu, Mercurial, Breezy or Darcs already set up,
         or put an existing folder under version control.</p>
       <p>When one's done with, it goes to the Trash — but first dev-prompt checks for
         uncommitted work, commits that aren't on any remote, and stashes, and asks you to
@@ -288,7 +336,7 @@
       <h2>Your apps, too</h2>
       <p>Start the search with <kbd>&gt;</kbd> and it looks through your installed
         applications instead, the ones you use most first. A second hotkey opens straight
-        into it.</p>
+        into it, and <kbd>Shift</kbd> <kbd>Enter</kbd> runs one as administrator.</p>
     </div>
     <div class="shot">
       <img src="img/3_dev-prompt_apps.png" width="760" height="480" loading="lazy"
@@ -303,8 +351,8 @@
         <h3>Windows</h3>
         <p>The installed version updates itself when a new one is out.</p>
         <ul>
-          <li><a href="https://github.com/seraphx2/dev-prompt/releases/download/v2026.1015.1/dev-prompt_2026.1015.1_x64-setup.exe">Installer</a> (<code>.exe</code>)</li>
-          <li><a href="https://github.com/seraphx2/dev-prompt/releases/download/v2026.1015.1/dev-prompt_2026.1015.1_x64-portable.zip">Portable zip</a>, if you'd rather not install</li>
+          <li><a href="https://github.com/seraphx2/dev-prompt/releases/download/v2026.1024.2/dev-prompt_2026.1024.2_x64-setup.exe">Installer</a> (<code>.exe</code>)</li>
+          <li><a href="https://github.com/seraphx2/dev-prompt/releases/download/v2026.1024.2/dev-prompt_2026.1024.2_x64-portable.zip">Portable zip</a>, if you'd rather not install</li>
         </ul>
         <p>The builds aren't code-signed yet, so SmartScreen may ask first: choose
           <em>More info</em>, then <em>Run anyway</em>.</p>
@@ -319,7 +367,7 @@
 flatpak install --user dev-prompt io.github.seraphx2.devprompt</pre>
         <p class="aside">It runs on the GNOME runtime from Flathub, so add that remote first if
           you haven't (<a href="install/#flatpak">details</a>).</p>
-        <p>There's also an <a href="https://github.com/seraphx2/dev-prompt/releases/download/v2026.1015.1/dev-prompt_2026.1015.1_amd64.AppImage">AppImage</a>,
+        <p>There's also an <a href="https://github.com/seraphx2/dev-prompt/releases/download/v2026.1024.2/dev-prompt_2026.1024.2_amd64.AppImage">AppImage</a>,
           which updates itself.</p>
       </div>
     </div>
@@ -327,7 +375,7 @@ flatpak install --user dev-prompt io.github.seraphx2.devprompt</pre>
 </main>
 
 <footer class="wrap">
-  <span>dev-prompt 2026.1015.1</span>
+  <span>dev-prompt 2026.1024.2</span>
   <span>MIT licensed</span>
   <a href="https://github.com/seraphx2/dev-prompt">Source</a>
   <a href="https://github.com/seraphx2/dev-prompt/releases">Releases</a>
