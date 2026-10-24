@@ -6,6 +6,10 @@
 
 !macro NSIS_HOOK_POSTINSTALL
   CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+  ; The app's ID on the shortcut, as Tauri's own shortcut has it — this one
+  ; replaces that, and Windows shows an app's notifications only when a Start
+  ; Menu shortcut carries its ID.
+  !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\${PRODUCTNAME}.lnk"
 
   ; Enable start-at-login on a fresh install, silently — the user opts out later
   ; in the app's Settings. Skipped when $UpdateMode is set so the updater's
