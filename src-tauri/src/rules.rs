@@ -81,6 +81,10 @@ pub struct Elevated {
     pub program: String,
     #[cfg(windows)]
     pub params: String,
+    /// Windows: `program` is the `cmd` that starts a GUI app's script shim
+    /// (`code.cmd`), whose own console window has no business showing.
+    #[cfg(windows)]
+    pub hidden: bool,
     #[cfg(not(windows))]
     pub args: Vec<String>,
 }
@@ -1017,13 +1021,53 @@ fn elevate(argv: &[String], cwd: &str, resolver: &Resolver) -> Option<Elevated> 
         None => Elevated {
             params: args.iter().map(|a| win_quote(a)).collect::<Vec<_>>().join(" "),
             program,
+            hidden: false,
         },
         // `/s` makes `cmd` strip just the outer quotes and run the rest as is.
         Some(dir) => Elevated {
             params: format!("/s /c \"pushd {} && {}\"", win_quote(&dir), line(&program, &args)),
             program: "cmd.exe".to_string(),
+            hidden: false,
         },
     })
+}
+
+/// A program launched straight (an editor, an IDE, a Git GUI) as
+/// administrator. An `.exe` (`devenv.exe`) runs as is; a script shim
+/// (`code.cmd`) or a bare name goes through `cmd`, as the normal launch
+/// does, with `cmd`'s own window hidden. Explorer is left out: Windows never
+/// runs it elevated, so the offer would be empty.
+#[cfg(windows)]
+fn elevate_program(program: &str, args: &[String], cwd: &str) -> Option<Elevated> {
+    let resolved = if program.contains(['/', '\\']) {
+        Some(program.to_string())
+    } else {
+        which(program)
+    };
+    let quoted = |args: &[String]| args.iter().map(|a| win_quote(a)).collect::<Vec<_>>().join(" ");
+    match resolved {
+        Some(exe) if basename(&exe).eq_ignore_ascii_case("explorer.exe") => None,
+        Some(exe) if exe.to_lowercase().ends_with(".exe") => Some(Elevated {
+            params: quoted(args),
+            program: exe,
+            hidden: false,
+        }),
+        other => {
+            let shim = other.unwrap_or_else(|| program.to_string());
+            let line = std::iter::once(win_quote(&shim)).chain(args.iter().map(|a| win_quote(a))).collect::<Vec<_>>();
+            Some(Elevated {
+                params: format!("/s /c \"pushd {} && {}\"", win_quote(cwd), line.join(" ")),
+                program: "cmd.exe".to_string(),
+                hidden: true,
+            })
+        }
+    }
+}
+
+/// Linux: only a terminal gets a root shell; GUI apps don't run as root.
+#[cfg(not(windows))]
+fn elevate_program(_program: &str, _args: &[String], _cwd: &str) -> Option<Elevated> {
+    None
 }
 
 /// A plain terminal in `cwd` with a root shell (`sudo -s`, else `doas -s`,
@@ -1213,7 +1257,8 @@ fn build_action(
         if program.is_empty() {
             return None;
         }
-        (program, args, Some(cwd.to_string()), None)
+        let elevated = elevate_program(&program, &args, cwd);
+        (program, args, Some(cwd.to_string()), elevated)
     };
 
     Some(Action {
@@ -2351,6 +2396,26 @@ mod tests {
         // The plain terminal elevates too.
         let e = elevate(&[], cwd, &pin("C:/x/wt.exe")).unwrap();
         assert_eq!(win_split_args(&e.params), ["-d", cwd]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn elevate_program_runs_an_exe_straight_and_a_shim_through_a_hidden_cmd() {
+        let cwd = "C:\\my repo";
+        let sln = vec!["C:\\my repo\\App.sln".to_string()];
+
+        let e = elevate_program("C:/VS/Common7/IDE/devenv.exe", &sln, cwd).unwrap();
+        assert_eq!(e.program, "C:/VS/Common7/IDE/devenv.exe");
+        assert_eq!(win_split_args(&e.params), sln);
+        assert!(!e.hidden);
+
+        let e = elevate_program("C:/Code/bin/code.cmd", &[cwd.to_string()], cwd).unwrap();
+        assert_eq!(e.program, "cmd.exe");
+        assert_eq!(e.params, "/s /c \"pushd \"C:\\my repo\" && C:/Code/bin/code.cmd \"C:\\my repo\"\"");
+        assert!(e.hidden);
+
+        // Windows won't run Explorer elevated, so it isn't offered.
+        assert!(elevate_program("C:\\Windows\\explorer.exe", &[cwd.to_string()], cwd).is_none());
     }
 
     #[test]

@@ -1705,10 +1705,10 @@ pub fn launch_elevated(entry: &AppEntry) -> AppResult<()> {
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default();
             let params: Vec<String> = entry.args.iter().map(|a| crate::rules::win_quote(a)).collect();
-            return crate::launch::run_as_admin(&entry.exec, &params.join(" "), &cwd);
+            return crate::launch::run_as_admin(&entry.exec, &params.join(" "), &cwd, false);
         }
         AppKind::Aumid => {
-            return crate::launch::run_as_admin(&format!("shell:AppsFolder\\{}", entry.exec), "", "");
+            return crate::launch::run_as_admin(&format!("shell:AppsFolder\\{}", entry.exec), "", "", false);
         }
         AppKind::Desktop => {}
     }

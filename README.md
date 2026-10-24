@@ -315,16 +315,17 @@ why, and how to add it anyway.
 
 The four quick actions also sit as buttons along the top of the menu.
 
-**Shift runs it as administrator.** On Windows, anything that opens a
-terminal (the terminal itself, a script, a build) runs elevated with Shift:
-Windows asks with its usual prompt, and the terminal opens in the repo. On
-Linux, Shift opens the terminal with a root shell (`sudo -s`, or `doas -s`);
-a project's own commands don't run as root there, since that leaves files in
-the repo only root can change. Hold Shift to see it: the footer shows the
-hint when the selected action can be elevated, and the action's name says
-"as administrator". Right-click offers the same. In the `>` app list,
-`Shift+Enter` is Run as administrator for desktop apps (Store ones like Windows
-Terminal included), and `Tab` opens the
+**Shift runs it as administrator.** On Windows, every action that starts a
+program runs elevated with Shift: the terminal, a script or a build (opened in
+the repo), an editor or IDE such as Visual Studio or VS Code, a Git GUI.
+Windows asks with its usual prompt. Explorer is the exception, since Windows
+never runs it elevated. On Linux, Shift opens the terminal with a root shell
+(`sudo -s`, or `doas -s`); nothing else runs as root there, since a
+project's commands would leave files in the repo only root can change. Hold
+Shift to see it: the footer shows the hint when the selected action can be
+elevated, and the action's name says "as administrator". Right-click offers
+the same. In the `>` app list, `Shift+Enter` is Run as administrator for
+desktop apps (Store ones like Windows Terminal included), and `Tab` opens the
 same menu as a right-click.
 
 <img src="docs/img/8_dev-prompt_attention.png" width="760" alt="The ! list: only the repos that need attention — a rebase stopped on a conflict, uncommitted and unpushed work, a branch behind its upstream, stashes">
