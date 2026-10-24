@@ -105,7 +105,9 @@ rules:
                               #   "Pinning a rule to the universal tier" below
     actions: [ ... ]          # see below
     # provider: npm-scripts   # instead of `actions`: a built-in generator
-                              #   (npm-scripts | cargo | go | python | compose)
+                              #   (npm-scripts | cargo | go | go-work | python |
+                              #   compose | dotnet | maven-modules | gradle-modules |
+                              #   flutter-android | make | just | task)
 ```
 
 ### `actions`

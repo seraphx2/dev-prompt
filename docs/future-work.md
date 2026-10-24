@@ -85,21 +85,6 @@ Files: `.github/workflows/release.yml`, a new `packaging/msix/`
 
 ---
 
-## 6. `task-targets` provider · _medium, three small parsers_
-
-Parse target lists and emit one terminal action per target.
-
-- `Makefile`: lines matching `^([A-Za-z0-9_.-]+):(?!=)` minus `.PHONY` etc.
-- `justfile`: `just --summary` if `just` on PATH, else parse `^([a-z0-9_-]+)`.
-- `Taskfile.yml`: YAML parse, keys under `tasks:`.
-
-Cap at ~20. Register `"task-targets"` in `rules.rs::provider_actions`, then add
-the `[Makefile, justfile, Taskfile.yml]` rule to `default_config.yaml`.
-
-Files: `rules.rs` (or a `providers/` split if it grows), `default_config.yaml`.
-
----
-
 ## 10. Terminal abstraction — non-Windows · _hard; now testable on Linux_
 
 The Windows half shipped (see Done): `TermKind` table (`wt` / `alacritty` /
@@ -292,6 +277,9 @@ Tracking: [Dependabot alert #1](https://github.com/seraphx2/dev-prompt/security/
   (`src-tauri/src/autostart.rs`, `ashpd`)
 - **#5** `collapse_nested` toggle (`true` / `false` / `auto`) — 2026-09-01
 - **#8** per-repo rule trace in Settings ("Trace a repo") — 2026-09-01
+- **#6** Task runners — `make` / `just` / `task` providers: a Makefile's `.PHONY`
+  commands, a justfile's public recipes that run bare, a Taskfile's public tasks —
+  2026-10-23
 - **#7** `dotnet` provider — `.sln` / `.slnx` / lone `.??proj` → build/run/test — 2026-09-01
 - **go-work / maven-modules / gradle-modules** providers (#14's cheap tier) — 2026-09-01
 - **Sub-project discovery generalized** — `has_any_marker()` used to hardcode

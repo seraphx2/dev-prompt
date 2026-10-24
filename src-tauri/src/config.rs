@@ -886,6 +886,7 @@ mod tests {
         for id in [
             "maven", "gradle", "cmake", "composer", "mix", "deno", "nix-flake",
             "docker-image", "csproj-editors", "eclipse-project", "fossil-ui",
+            "make", "just", "task",
         ] {
             assert!(has_rule(id), "missing bundled rule `{id}`");
         }
@@ -906,7 +907,7 @@ mod tests {
 
         // A rule's `match` doubles as a discovery marker.
         let globs = discovery_globs(&cfg);
-        for g in ["pom.xml", "Dockerfile", "composer.json", "go.work"] {
+        for g in ["pom.xml", "Dockerfile", "composer.json", "go.work", "Makefile", "justfile", "Taskfile.yml"] {
             assert!(globs.iter().any(|x| x == g), "`{g}` should be a discovery glob");
         }
     }

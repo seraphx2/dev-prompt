@@ -1535,6 +1535,18 @@ fn provider_actions(
                 ]
             })
             .collect(),
+        // Task runners: one action per target, from the project's directory.
+        "make" | "just" | "task" => {
+            let targets = match name {
+                "make" => crate::tasks::make_targets(&proj.dir),
+                "just" => crate::tasks::just_recipes(&proj.dir),
+                _ => crate::tasks::taskfile_tasks(&proj.dir),
+            };
+            targets
+                .into_iter()
+                .map(|t| term(format!("{name}:{ns}:{t}"), format!("{name} {t}"), vec![name.into(), t]))
+                .collect()
+        }
         // A Flutter app's Gradle project lives one level down, in `android/` —
         // invisible to `gradle-modules` (which only checks the project's own
         // top-level files). Point the same parser at that subdir instead. Uses

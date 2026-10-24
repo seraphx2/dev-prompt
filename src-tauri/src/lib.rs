@@ -35,6 +35,7 @@ mod pty;
 mod removal;
 mod rules;
 mod scan;
+mod tasks;
 mod svn_ops;
 mod status;
 mod usage;

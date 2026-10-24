@@ -341,6 +341,23 @@ rules:
     provider: compose
 
   # --- build tools: gated on the CLI, run in a terminal --------------------
+  # Task runners: one action per target the file defines — a Makefile's
+  # .PHONY commands, a justfile's public recipes, a Taskfile's tasks.
+  - id: make
+    match: [Makefile, makefile, GNUmakefile]
+    provider: make
+    requires: [make]
+
+  - id: just
+    match: [justfile, Justfile, .justfile]
+    provider: just
+    requires: [just]
+
+  - id: task
+    match: [Taskfile.yml, taskfile.yml, Taskfile.yaml, taskfile.yaml, Taskfile.dist.yml, taskfile.dist.yml, Taskfile.dist.yaml, taskfile.dist.yaml]
+    provider: task
+    requires: [task]
+
   - id: maven
     match: pom.xml
     requires: [mvn]

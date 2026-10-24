@@ -12,7 +12,8 @@ its scripts, or drop into a shell right inside the overlay.
 
 Most launchers stop at "open the folder." dev-prompt opens the action menu it
 built by _inspecting the project_: the exact `package.json` scripts it defines
-(run through the right package manager), `cargo test`, the `.sln` opened in
+(run through the right package manager), `cargo test`, your Makefile's or
+justfile's own targets, the `.sln` opened in
 Visual Studio, `docker compose up`, a jump straight into the `packages/api`
 sub-project. No file manager, no `cd`, no remembering whether it's `npm run dev`
 or `pnpm start`.
