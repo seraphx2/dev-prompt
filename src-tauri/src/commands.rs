@@ -1495,6 +1495,7 @@ pub async fn run_app(
         icon: None,
         terminal: terminal.unwrap_or(false),
         source: String::new(),
+        elevate: false,
     };
     let elevated = elevated == Some(true);
     tauri::async_runtime::spawn_blocking(move || {

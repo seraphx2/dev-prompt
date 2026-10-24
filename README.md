@@ -323,7 +323,8 @@ a project's own commands don't run as root there, since that leaves files in
 the repo only root can change. Hold Shift to see it: the footer shows the
 hint when the selected action can be elevated, and the action's name says
 "as administrator". Right-click offers the same. In the `>` app list,
-`Shift+Enter` is Run as administrator for desktop apps, and `Tab` opens the
+`Shift+Enter` is Run as administrator for desktop apps (Store ones like Windows
+Terminal included), and `Tab` opens the
 same menu as a right-click.
 
 <img src="docs/img/8_dev-prompt_attention.png" width="760" alt="The ! list: only the repos that need attention — a rebase stopped on a conflict, uncommitted and unpushed work, a branch behind its upstream, stashes">

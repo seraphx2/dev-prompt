@@ -675,8 +675,9 @@
    *  another window had focus can't stick. */
   let shiftHeld = $state(false);
   const adminWord = document.documentElement.dataset.os === "windows" ? "administrator" : "root";
-  /** Run as administrator applies to a Windows desktop app, not a Store app. */
-  const appElevatable = (app: AppEntry) => app.kind === "exe";
+  /** Run as administrator applies to a Windows desktop app, packaged ones
+   *  from the Store included — not to a Store-style app (Calculator). */
+  const appElevatable = (app: AppEntry) => app.kind === "exe" || !!app.elevate;
   /** What Shift would promote right now, if anything — drives the footer hint. */
   const canElevate = $derived(
     mode === "action-menu"

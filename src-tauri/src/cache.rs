@@ -227,6 +227,7 @@ mod tests {
             icon: Some("data:image/png;base64,AAAA".into()),
             terminal: false,
             source: "start-menu".into(),
+            elevate: false,
         };
         let file = AppsCacheFile {
             written_at: 100,

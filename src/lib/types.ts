@@ -333,6 +333,9 @@ export interface AppEntry {
   icon?: string | null;
   /** "start-menu" | "store" | "uninstall" | "scan" | "desktop". */
   source: string;
+  /** A Store app that is a packaged desktop app (Windows Terminal, …), so it
+   *  can run as administrator; an `exe` always can. */
+  elevate?: boolean;
   /** Times launched from dev-prompt (frecency). */
   uses: number;
 }

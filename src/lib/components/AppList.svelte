@@ -60,7 +60,7 @@
           app={e.app}
           positions={e.positions}
           active={i === selected}
-          elevating={shift && i === selected && e.app.kind === "exe"}
+          elevating={shift && i === selected && (e.app.kind === "exe" || !!e.app.elevate)}
           {adminWord}
           onactivate={(ev) => onactivate(i, ev)}
           onhover={() => {
