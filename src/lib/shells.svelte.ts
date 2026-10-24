@@ -211,13 +211,26 @@ export class ShellSession {
     await this.start();
   }
 
-  /** End the process and drop the terminal for good. */
-  dispose() {
+  /** Resolves a `dispose` waiting for the process to be gone. */
+  private gone: (() => void) | null = null;
+
+  /** End the process and drop the terminal for good. Resolves once the
+   *  process has exited (or after a few seconds regardless) — until then it
+   *  still has its folder open, which keeps that from being moved. */
+  dispose(): Promise<void> {
     this.gen++;
+    const done =
+      this.id === null
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            this.gone = resolve;
+            setTimeout(resolve, 5000);
+          });
     if (this.id !== null) void shellClose(this.id).catch(() => {});
     this.id = null;
     this.term.dispose();
     this.el.remove();
+    return done;
   }
 
   private async start() {
@@ -236,6 +249,8 @@ export class ShellSession {
           if (gen === this.gen) this.term.write(bytes);
         },
         (code) => {
+          this.gone?.();
+          this.gone = null;
           if (gen === this.gen) this.exited(code);
         },
       );
@@ -344,11 +359,12 @@ export function shellFor(cwd: string, repo: Repo, shell = ""): ShellSession {
   return s;
 }
 
-export function closeShell(cwd: string) {
+/** Resolves once its process has exited (see `ShellSession.dispose`). */
+export function closeShell(cwd: string): Promise<void> {
   const s = shells.get(cwd);
-  if (!s) return;
+  if (!s) return Promise.resolve();
   shells.delete(cwd);
-  s.dispose();
+  return s.dispose();
 }
 
 /** `cwd` is `root` or a folder inside it. */
@@ -374,8 +390,9 @@ export function hasShellUnder(path: string): boolean {
   return shellsUnder(path).some((s) => s.state !== "exited");
 }
 
-export function closeShellsUnder(path: string) {
-  for (const s of shellsUnder(path)) closeShell(s.cwd);
+/** Resolves once they've all exited. */
+export function closeShellsUnder(path: string): Promise<void> {
+  return Promise.all(shellsUnder(path).map((s) => closeShell(s.cwd))).then(() => {});
 }
 
 export function closeAllShells() {

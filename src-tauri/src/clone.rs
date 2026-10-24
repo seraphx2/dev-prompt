@@ -30,6 +30,9 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 /// instead (its credential manager's own window still works), Mercurial
 /// answers like a script.
 const ENV: &[(&str, &str)] = &[("GIT_TERMINAL_PROMPT", "0"), ("HGPLAIN", "1")];
+/// Asking what's at an address while it's typed: not even the credential
+/// manager's own sign-in window — that's for the clone itself.
+const PROBE_ENV: &[(&str, &str)] = &[("GIT_TERMINAL_PROMPT", "0"), ("GCM_INTERACTIVE", "never"), ("HGPLAIN", "1")];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -141,10 +144,23 @@ fn probe(url: &str) -> Option<Kind> {
     asks.into_iter().find_map(|(kind, tool, args)| {
         let program = provision::resolve_program(tool)?;
         let args: Vec<String> = args.into_iter().map(String::from).collect();
-        provision::run_captured_env(&program, &args, &home, PROBE_TIMEOUT, ENV)
-            .ok()
-            .map(|_| kind)
+        match provision::run_captured_env(&program, &args, &home, PROBE_TIMEOUT, PROBE_ENV) {
+            Ok(_) => Some(kind),
+            // A Git server that wants a sign-in is still a Git server: the
+            // clone itself signs in.
+            Err(e) if kind == Kind::Git && wants_sign_in(&e) => Some(kind),
+            Err(_) => None,
+        }
     })
+}
+
+/// Git's answer when the server asked for credentials it wasn't allowed to
+/// prompt for.
+fn wants_sign_in(output: &str) -> bool {
+    let o = output.to_lowercase();
+    ["could not read username", "terminal prompts disabled", "authentication failed", "error: 401", "error: 403"]
+        .iter()
+        .any(|n| o.contains(n))
 }
 
 /// `(id, label, commands)` for each tool that clones `kind`, the usual first.
@@ -289,12 +305,18 @@ fn explain(output: &str) -> Option<&'static str> {
     }
 }
 
-/// Remove what a failed clone left; any extra text is for the error.
+/// Remove what a failed clone left; any extra text is for the error. A virus
+/// scanner can hold a file in a fresh clone for a moment, so it tries for a
+/// couple of seconds — deleting never asks the user anything, so that's safe.
 fn remove(dir: &Path) -> String {
-    match std::fs::remove_dir_all(dir) {
-        Ok(()) => String::new(),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => format!("\n\nThe folder couldn't be removed ({e}): {}", dir.display()),
+    let started = std::time::Instant::now();
+    loop {
+        match std::fs::remove_dir_all(dir) {
+            Ok(()) => return String::new(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return String::new(),
+            Err(_) if started.elapsed() < Duration::from_secs(2) => std::thread::sleep(Duration::from_millis(200)),
+            Err(e) => return format!("\n\nThe folder couldn't be removed ({e}): {}", dir.display()),
+        }
     }
 }
 
@@ -332,6 +354,14 @@ mod tests {
         assert_eq!(kind_from_url("https://chiselapp.com/user/x/repository/y"), Some(Kind::Fossil));
         assert_eq!(kind_from_url("lp:bzr"), Some(Kind::Brz));
         assert_eq!(kind_from_url("https://example.com/some/repo"), None);
+    }
+
+    #[test]
+    fn a_git_server_asking_for_a_sign_in_still_reads_as_git() {
+        assert!(wants_sign_in("fatal: could not read Username for 'https://git.example.com': terminal prompts disabled"));
+        assert!(wants_sign_in("remote: HTTP Basic: Access denied
+fatal: Authentication failed for 'https://x/'"));
+        assert!(!wants_sign_in("fatal: repository 'https://x/y/' not found"));
     }
 
     #[test]

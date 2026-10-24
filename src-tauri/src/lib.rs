@@ -131,6 +131,46 @@ pub(crate) fn same_shortcut(a: &str, b: &str) -> bool {
     )
 }
 
+/// Turn off WebView2's browser keys: F5 reload, Ctrl+P print, Ctrl+F find,
+/// F12 / Ctrl+Shift+C DevTools. They'd reload or overlay the app, and the
+/// keys are dev-prompt's own to use. Editing keys (copy, paste) and the page's
+/// own key handling are untouched; a dev build still opens DevTools from
+/// Shift+right-click ▸ Inspect.
+#[cfg(windows)]
+fn disable_browser_keys(window: &WebviewWindow) {
+    let _ = window.with_webview(|webview| {
+        use webview2_com::AcceleratorKeyPressedEventHandler;
+        use webview2_com::Microsoft::Web::WebView2::Win32::{
+            ICoreWebView2Settings3, COREWEBVIEW2_KEY_EVENT_KIND, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
+        };
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
+        use windows_core::Interface;
+        let controller = webview.controller();
+        let settings = unsafe { controller.CoreWebView2().and_then(|core| core.Settings()) };
+        if let Ok(s) = settings.and_then(|s| s.cast::<ICoreWebView2Settings3>()) {
+            let _ = unsafe { s.SetAreBrowserAcceleratorKeysEnabled(false) };
+        }
+        // That setting leaves Ctrl+Shift+I and Ctrl+Shift+J (the console)
+        // opening DevTools: take those two before WebView2 does.
+        let handler = AcceleratorKeyPressedEventHandler::create(Box::new(|_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let (mut kind, mut key) = (COREWEBVIEW2_KEY_EVENT_KIND::default(), 0u32);
+            unsafe {
+                args.KeyEventKind(&mut kind)?;
+                args.VirtualKey(&mut key)?;
+                let held = |vk: u16| GetKeyState(vk as i32) < 0;
+                let devtools = key == u32::from(b'I') || key == u32::from(b'J');
+                if kind == COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN && devtools && held(VK_CONTROL.0) && held(VK_SHIFT.0) {
+                    args.SetHandled(true)?;
+                }
+            }
+            Ok(())
+        }));
+        let mut token = 0i64;
+        let _ = unsafe { controller.add_AcceleratorKeyPressed(&handler, &mut token) };
+    });
+}
+
 fn apply_overlay_effects(window: &WebviewWindow) {
     #[cfg(windows)]
     {
@@ -272,6 +312,8 @@ pub fn run() {
             }
 
             apply_overlay_effects(&window);
+            #[cfg(windows)]
+            disable_browser_keys(&window);
 
             // Taskbar presence follows the `dismiss` setting (see the fn docs),
             // and the overlay is drawn at the saved zoom.

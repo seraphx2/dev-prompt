@@ -21,6 +21,11 @@ use crate::rules::which;
 /// for: the first look at a big repository on a cold disk can take minutes,
 /// and these reads run in the background anyway.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// The background status reads (status.rs) get less: they share three
+/// threads, and a stuck command on a drive that went away would hold one for
+/// every other repo. Long enough for a big repo on a cold disk; anything slower
+/// is "couldn't check" for now and read again on the next pass.
+const BACKGROUND_TIMEOUT: Duration = Duration::from_secs(2 * 60);
 
 /// Reads must never write. Without this `git status` refreshes the index as a
 /// side effect, which the watcher would see as a change and read again.
@@ -150,6 +155,15 @@ pub fn tool_for(label: &str) -> &'static str {
 /// Read `dir`'s state. Runs version-control commands, so call it off the UI
 /// thread.
 pub fn read(dir: &Path) -> RepoStatus {
+    read_within(dir, CHECK_TIMEOUT)
+}
+
+/// [`read`] for the background refresh, with its shorter time limit.
+pub fn read_background(dir: &Path) -> RepoStatus {
+    read_within(dir, BACKGROUND_TIMEOUT)
+}
+
+fn read_within(dir: &Path, limit: Duration) -> RepoStatus {
     let mut s = RepoStatus { checked_at: now_secs(), ..Default::default() };
     let Some(label) = detect(dir) else { return s };
     s.vcs = Some(label.to_string());
@@ -160,7 +174,7 @@ pub fn read(dir: &Path) -> RepoStatus {
         ));
         return s;
     }
-    let mut c = Checker { dir, s: &mut s };
+    let mut c = Checker { dir, s: &mut s, limit, stuck: false };
     match label {
         "Jujutsu" => c.jj(),
         "Git" => c.git(),
@@ -308,7 +322,13 @@ fn parse_porcelain_v2(out: &str, s: &mut RepoStatus) {
 /// and never bypassed: that check stops a planted repo running commands
 /// through its config.
 fn git_status_failure(e: &str) -> String {
-    if e.contains("dubious ownership") {
+    // Git names the repo by its resolved path: `//server/share/…` for one on
+    // a network share, mapped drive letter or not.
+    if e.contains("dubious ownership") && e.contains("'//") {
+        "Git won't read this repo: it's on a network share, whose files belong to the server's own \
+         account. Add it to git's safe.directory (git config --global --add safe.directory <path>)."
+            .into()
+    } else if e.contains("dubious ownership") {
         "Git won't read this repo: its folder belongs to another account (often one from an earlier Windows \
          install). Take ownership of the folder, or add it to git's safe.directory."
             .into()
@@ -335,6 +355,11 @@ fn count_changes(status: &str, untracked: &str) -> (u32, u32) {
 struct Checker<'a> {
     dir: &'a Path,
     s: &'a mut RepoStatus,
+    /// Each command's time limit.
+    limit: Duration,
+    /// A command hit the limit: what's left of the read is skipped — a drive
+    /// that hangs on one command hangs on the next.
+    stuck: bool,
 }
 
 impl Checker<'_> {
@@ -360,7 +385,20 @@ impl Checker<'_> {
     fn run_raw(&mut self, program: &str, args: &[&str]) -> Result<String, String> {
         let resolved = which(program).ok_or_else(|| format!("`{program}` isn't on PATH"))?;
         let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
-        run_captured_env(&resolved, &args, self.dir, CHECK_TIMEOUT, read_env(program))
+        self.exec(&resolved, &args, read_env(program))
+    }
+
+    /// Every command of a read goes through here: the time limit, and
+    /// nothing more once one got stuck.
+    fn exec(&mut self, program: &str, args: &[String], env: &[(&str, &str)]) -> Result<String, String> {
+        if self.stuck {
+            return Err("skipped: an earlier check here was still running at the time limit.".into());
+        }
+        let out = run_captured_env(program, args, self.dir, self.limit, env);
+        if out.as_ref().is_err_and(|e| e.contains("still running after")) {
+            self.stuck = true;
+        }
+        out
     }
 
     fn git(&mut self) {
@@ -657,7 +695,7 @@ impl Checker<'_> {
         // any other failure (a timeout included) leaves the changes unchecked.
         if let Some(darcs) = which("darcs") {
             let args = ["whatsnew", "--summary", "--look-for-adds"].map(String::from);
-            match run_captured_env(&darcs, &args, self.dir, CHECK_TIMEOUT, &[]) {
+            match self.exec(&darcs, &args, &[]) {
                 Ok(out) => (self.s.changed, self.s.untracked) = count_changes(&out, "a"),
                 Err(e) if e.starts_with("exit code 1.") && e.contains("No changes!") => {}
                 Err(e) => self.s.unknown.push(format!("Couldn't check for uncommitted changes: {e}")),
@@ -828,6 +866,24 @@ fn revset_str(s: &str) -> String {
 pub(crate) mod tests {
     use super::*;
 
+    /// One command stuck at the time limit: the rest of the read is skipped
+    /// rather than each waiting out the limit in turn.
+    #[test]
+    fn a_stuck_command_skips_the_rest_of_the_read() {
+        let dir = std::env::temp_dir();
+        let mut s = RepoStatus::default();
+        let mut c = Checker { dir: &dir, s: &mut s, limit: Duration::from_secs(1), stuck: false };
+        #[cfg(windows)]
+        let (slow, quick) = (("cmd", "/c", "ping -n 30 127.0.0.1 >nul"), ("cmd", "/c", "echo hi"));
+        #[cfg(not(windows))]
+        let (slow, quick) = (("sh", "-c", "sleep 30"), ("sh", "-c", "echo hi"));
+        let args = |a: &str, b: &str| vec![a.to_string(), b.to_string()];
+        assert!(c.exec(slow.0, &args(slow.1, slow.2), &[]).unwrap_err().contains("still running"));
+        let started = std::time::Instant::now();
+        assert!(c.exec(quick.0, &args(quick.1, quick.2), &[]).unwrap_err().starts_with("skipped"));
+        assert!(started.elapsed() < Duration::from_millis(200));
+    }
+
     pub(crate) fn tmp(tag: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!(
             "dp-vcs-{tag}-{}",
@@ -878,6 +934,10 @@ pub(crate) mod tests {
         let said = git_status_failure(refused);
         assert!(said.contains("belongs to another account") && said.contains("safe.directory"), "{said}");
         assert!(!said.contains("fatal"), "{said}");
+        // On a network share, taking ownership isn't the way out.
+        let share = "exit code 128.\nfatal: detected dubious ownership in repository at '//NAS/share/x'";
+        let said = git_status_failure(share);
+        assert!(said.contains("network share") && !said.contains("Take ownership"), "{said}");
         assert_eq!(git_status_failure("exit code 1.\nboom"), "Couldn't check for uncommitted changes: exit code 1.\nboom");
     }
 

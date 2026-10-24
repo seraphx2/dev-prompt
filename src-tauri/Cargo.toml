@@ -58,6 +58,10 @@ gtk = "0.18"
 libloading = "0.8"
 
 [target.'cfg(windows)'.dependencies]
+# WebView2's own settings Tauri doesn't expose (lib.rs: the browser keys) —
+# the versions wry already uses, so nothing new is built.
+webview2-com = "0.39"
+windows-core = "0.62"
 window-vibrancy = "0.8"
 raw-window-handle = "0.6"
 winreg = "0.55"
@@ -70,9 +74,12 @@ windows = { version = "0.61", features = [
     "Win32_System_Threading",
     # Stop a timed-out command with everything it started (provision.rs).
     "Win32_System_JobObjects",
+    "Win32_System_Diagnostics_ToolHelp", # resuming a command started suspended
     # Run as administrator: ShellExecuteEx with the "runas" verb (launch.rs).
     "Win32_System_Com",
     "Win32_UI_Shell",
+    # Ctrl / Shift held, for the DevTools keys (lib.rs).
+    "Win32_UI_Input_KeyboardAndMouse",
 ] }
 
 [profile.dev]

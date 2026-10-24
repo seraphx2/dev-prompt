@@ -275,8 +275,10 @@ pub async fn create_repo(
 /// that can clone it — for the New repository form in clone mode. May ask
 /// the network, so off the UI thread.
 #[tauri::command]
-pub async fn clone_plan(url: String) -> AppResult<crate::clone::ClonePlan> {
-    tauri::async_runtime::spawn_blocking(move || crate::clone::plan(&url))
+pub async fn clone_plan(state: State<'_, AppState>, url: String) -> AppResult<crate::clone::ClonePlan> {
+    // A newer address (or leaving the form) stops this one's probes.
+    let token = state.reads.start("plan");
+    tauri::async_runtime::spawn_blocking(move || crate::provision::cancellable(token, || crate::clone::plan(&url)))
         .await
         .map_err(|e| AppError::msg(format!("clone check task failed: {e}")))?
 }
@@ -548,7 +550,7 @@ pub async fn assess_removal(
 }
 
 /// The screen waiting on a read ("removal", "branches", "details") was left,
-/// or the clone banner's Cancel ("clone"):
+/// the clone form's "plan", or the clone banner's Cancel ("clone"):
 /// stop it, and whatever it started, so nothing keeps running in the repo.
 #[tauri::command]
 pub fn cancel_read(state: State<'_, AppState>, kind: String) {
@@ -564,10 +566,7 @@ pub async fn remove_folder(
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     path: String,
-    shells_closed: Option<bool>,
 ) -> AppResult<bool> {
-    // Shells of ours in it were just closed: give them a moment to exit.
-    let settle = if shells_closed == Some(true) { std::time::Duration::from_secs(5) } else { Default::default() };
     let dir = {
         let cfg = state.config.lock().unwrap();
         let repos = state.repos.lock().unwrap();
@@ -577,7 +576,7 @@ pub async fn remove_folder(
     // drive without one); that prompt must not open behind the overlay.
     let _ = window.set_always_on_top(false);
     let item = tauri::async_runtime::spawn_blocking(move || {
-        let item = crate::removal::move_to_trash(&dir, settle)?;
+        let item = crate::removal::move_to_trash(&dir)?;
         drop_from_list(&app, &dir);
         Ok::<_, AppError>(item)
     })

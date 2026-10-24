@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
-  import { checkNewRepo, clonePlan, createRepo, initRepo, newRepoOptions } from "../ipc";
+  import { onDestroy, onMount, tick } from "svelte";
+  import { cancelRead, checkNewRepo, clonePlan, createRepo, initRepo, newRepoOptions } from "../ipc";
   import type { CloneJob, CloneRequest } from "../clone";
   import type { ClonePlan, NewRepoOptions, ProvisionTool, Repo } from "../types";
   import { middleTruncate } from "../text";
@@ -154,6 +154,12 @@
     );
   });
 
+  // Left with an address still being looked into: stop the probes (each new
+  // address stops the last one's too).
+  onDestroy(() => {
+    if (planning) void cancelRead("plan");
+  });
+
   onMount(async () => {
     // The field starts with what was pasted, then it's the user's to edit.
     // Reopened for a clone that ran: its own name and location too.
@@ -258,7 +264,7 @@
             void submit();
           }
         });
-    }, 350);
+    }, 600);
     return () => clearTimeout(timer);
   });
 

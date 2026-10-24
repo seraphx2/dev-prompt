@@ -37,4 +37,6 @@ export interface CloneRequest {
 export interface CloneJob extends CloneRequest {
   state: "running" | "failed";
   error?: string;
+  /** Stopped on request — "failed" only because its folder couldn't go. */
+  cancelled?: boolean;
 }

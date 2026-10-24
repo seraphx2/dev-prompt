@@ -16,7 +16,8 @@
     /** dev-prompt's own shells running in it — closed before the move,
      *  since a terminal working in a folder keeps it from moving. */
     shells?: number;
-    oncloseshells?: () => void;
+    /** Close them; resolves once they've exited and let go of the folder. */
+    oncloseshells?: () => Promise<void>;
     /** Moved; `undoable` says whether Undo can bring it back. */
     ondone: (undoable: boolean) => void;
     onback: () => void;
@@ -64,9 +65,10 @@
     busy = true;
     error = "";
     try {
-      const closing = shells > 0;
-      if (closing) oncloseshells?.();
-      ondone(await removeFolder(path, closing));
+      // One attempt, once they're gone: a retry could repeat Windows'
+      // "permanently delete?" question after a No.
+      if (shells > 0) await oncloseshells?.();
+      ondone(await removeFolder(path));
     } catch (e) {
       error = `${e}`;
       busy = false;

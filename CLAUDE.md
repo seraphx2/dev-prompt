@@ -138,8 +138,12 @@ surrounding style rather than running `cargo fmt`.
    Every one of these commands goes through `provision::run_captured_env`:
    no console, stdin closed, output captured, and a time limit that only
    catches a stuck command (10 min local, 30 min remote — a big repo on a
-   cold disk is just slow). A command it stops takes everything it started
-   with it (a job object on Windows, a process group on Linux): Git for
+   cold disk is just slow; the background status reads get 2 min, since
+   they share three threads, and a read skips its remaining commands once
+   one gets stuck). A command it stops takes everything it started
+   with it (a job object on Windows — the command starts suspended and is
+   resumed once it's in the job, so nothing it starts can escape it — a
+   process group on Linux): Git for
    Windows' `git.exe` is a launcher, and stopping only that leaves the real
    Git running with the repo as its working folder, which then can't be
    moved or deleted. A read a screen waits on (the Recycle Bin check, the
@@ -253,7 +257,11 @@ come from a file's contents (one per target) is a `provider`: an arm in
 Taskfile targets) — parsed, never by running the tool, since they run on every
 menu open.
 
-Elevation (Shift): an action that starts a program gets an `elevated` launch
-(`rules::elevate` / `elevate_program`) — Windows runs it through the "runas"
-verb with the folder on its command line (an elevated process doesn't reliably
-keep its working directory); Linux gives only the plain terminal a root shell.
+Elevation (Shift): building an action only notes whether it can run elevated
+(`Action.elevated`, from what was already resolved — no PATH lookups); the
+elevated launch is put together when it's used (`launch::launch_elevated`).
+Windows runs it through the "runas" verb with the folder on its command line
+(an elevated process doesn't reliably keep its working directory) — via
+PowerShell single-quoted strings, never `cmd`, whose quoting lets `&` / `%`
+in a folder or script name run as a command of its own. Linux gives only the
+plain terminal a root shell (`rules::root_shell_args`).

@@ -2,9 +2,12 @@
 //!
 //! Each reads its file and lists what can be run by name — one terminal
 //! action per target, run from the project's directory. Text parses, no
-//! subprocess: they run on every menu open.
+//! subprocess: they run on every menu open. (Finding go-task's binary asks it
+//! once per run — see [`go_task`].)
 
 use std::path::Path;
+use std::sync::Mutex;
+use std::time::Duration;
 
 /// Cap on targets surfaced from one file.
 const MAX: usize = 20;
@@ -24,6 +27,9 @@ pub fn make_targets(dir: &Path) -> Vec<String> {
     let Some(text) = read_first(dir, &["GNUmakefile", "makefile", "Makefile"]) else {
         return Vec::new();
     };
+    // A line ending in `\` goes on into the next: a `.PHONY` list or an
+    // assignment spread over several lines is one logical line.
+    let text = text.replace("\r\n", "\n").replace("\\\n", " ");
     let mut targets: Vec<String> = Vec::new();
     let mut phony: Vec<String> = Vec::new();
     let mut in_define = false;
@@ -64,6 +70,37 @@ pub fn make_targets(dir: &Path) -> Vec<String> {
     }
     targets.truncate(MAX);
     targets
+}
+
+/// go-task's binary, by the name to run it with: `go-task` where a distro ships
+/// it so, else `task` — but only once it says it's go-task, since on Linux
+/// `task` is usually Taskwarrior. Asked once per run (and again after a
+/// rescan, see [`forget`]); `None` hides the Taskfile targets.
+pub fn go_task() -> Option<String> {
+    let mut found = GO_TASK.lock().unwrap();
+    if let Some(known) = found.as_ref() {
+        return known.clone();
+    }
+    let answer = if crate::rules::which("go-task").is_some() {
+        Some("go-task".to_string())
+    } else if crate::rules::which("task").is_some() {
+        let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+        crate::provision::run_captured("task", &["--help".into()], &home, Duration::from_secs(5))
+            .ok()
+            .filter(|help| help.to_lowercase().contains("taskfile"))
+            .map(|_| "task".to_string())
+    } else {
+        None
+    };
+    *found = Some(answer.clone());
+    answer
+}
+
+static GO_TASK: Mutex<Option<Option<String>>> = Mutex::new(None);
+
+/// Forget which `task` is go-task's (a tool installed or removed since).
+pub fn forget() {
+    *GO_TASK.lock().unwrap() = None;
 }
 
 /// A justfile's recipes, in file order. Private ones (`_name`, or under a
@@ -217,6 +254,15 @@ mod tests {
              usage: make build\n\
              endef\n\
              .DEFAULT_GOAL := build\n",
+        )
+        .unwrap();
+        assert_eq!(make_targets(&d), ["build", "test", "clean"]);
+
+        // A .PHONY list continued over lines; an assignment continued onto a
+        // line with a colon isn't a rule.
+        fs::write(
+            d.join("Makefile"),
+            ".PHONY: build \\\n\ttest clean\nSRCS = a.c \\\n    b:c\nbuild test:\n\techo\nclean:\n\techo\n",
         )
         .unwrap();
         assert_eq!(make_targets(&d), ["build", "test", "clean"]);

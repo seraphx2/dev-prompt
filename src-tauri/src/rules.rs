@@ -66,30 +66,26 @@ pub struct Action {
     /// spawning. See `RuleAction::remove`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub remove: bool,
-    /// The same launch as administrator (Windows) or root (Linux), for the
-    /// actions that can have one — Shift+Enter, or Shift on a quick action's
-    /// key. The frontend only sees `elevated: true`. See [`elevate`].
+    /// Whether Shift runs it as administrator (Windows) or root (Linux), and
+    /// how. Worked out from what building the action already resolved, so it
+    /// costs nothing here; the elevated launch itself is put together only
+    /// when it's used (`launch::launch_elevated`). The frontend sees
+    /// `elevated: true`.
     #[serde(skip_serializing_if = "Option::is_none", serialize_with = "elevatable")]
-    pub elevated: Option<Elevated>,
+    pub elevated: Option<Elevation>,
 }
 
-/// How to launch an action elevated. Windows hands `params` to the "runas"
-/// verb as one command line, since it may be `cmd`'s (which quotes its own
-/// way); Linux runs `program args` like any other launch.
-#[derive(Debug, Clone)]
-pub struct Elevated {
-    pub program: String,
-    #[cfg(windows)]
-    pub params: String,
-    /// Windows: `program` is the `cmd` that starts a GUI app's script shim
-    /// (`code.cmd`), whose own console window has no business showing.
-    #[cfg(windows)]
-    pub hidden: bool,
-    #[cfg(not(windows))]
-    pub args: Vec<String>,
+/// How an action runs elevated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Elevation {
+    /// A terminal (with a command, or bare). Linux: a bare one only, with a
+    /// root shell.
+    Terminal,
+    /// A program started straight: an editor, an IDE, a Git GUI (Windows).
+    Program,
 }
 
-fn elevatable<S: serde::Serializer>(e: &Option<Elevated>, s: S) -> Result<S::Ok, S::Error> {
+fn elevatable<S: serde::Serializer>(e: &Option<Elevation>, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_bool(e.is_some())
 }
 
@@ -117,6 +113,7 @@ pub fn clear_program_cache() {
     which_cache().lock().unwrap().clear();
     #[cfg(target_os = "linux")]
     host_which_cache().lock().unwrap().clear();
+    crate::tasks::forget();
 }
 
 pub struct Resolver<'a> {
@@ -996,94 +993,51 @@ fn terminalize(
     }
 }
 
-/// [`terminalize`]'s launch again, as administrator. Windows doesn't reliably
-/// keep an elevated process's working directory, so the folder travels in the
-/// command line: the terminals that take one (`wt -d`, …) already carry it,
-/// and anything else starts from `cmd`, which `pushd`es there first.
-#[cfg(windows)]
-fn elevate(argv: &[String], cwd: &str, resolver: &Resolver) -> Option<Elevated> {
-    let (program, args, at) = terminalize(argv, cwd, resolver);
-    // The "runas" verb wants a file, not a name to look up (`wt.exe` is an
-    // App Execution Alias on PATH).
-    let program = if program.contains(['/', '\\']) {
-        program
-    } else {
-        which(&program).unwrap_or(program)
-    };
-    let line = |program: &str, args: &[String]| {
-        std::iter::once(program)
-            .chain(args.iter().map(String::as_str))
-            .map(win_quote)
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
-    Some(match at {
-        None => Elevated {
-            params: args.iter().map(|a| win_quote(a)).collect::<Vec<_>>().join(" "),
-            program,
-            hidden: false,
-        },
-        // `/s` makes `cmd` strip just the outer quotes and run the rest as is.
-        Some(dir) => Elevated {
-            params: format!("/s /c \"pushd {} && {}\"", win_quote(&dir), line(&program, &args)),
-            program: "cmd.exe".to_string(),
-            hidden: false,
-        },
-    })
-}
-
-/// A program launched straight (an editor, an IDE, a Git GUI) as
-/// administrator. An `.exe` (`devenv.exe`) runs as is; a script shim
-/// (`code.cmd`) or a bare name goes through `cmd`, as the normal launch
-/// does, with `cmd`'s own window hidden. Explorer is left out: Windows never
-/// runs it elevated, so the offer would be empty.
-#[cfg(windows)]
-fn elevate_program(program: &str, args: &[String], cwd: &str) -> Option<Elevated> {
-    let resolved = if program.contains(['/', '\\']) {
-        Some(program.to_string())
-    } else {
-        which(program)
-    };
-    let quoted = |args: &[String]| args.iter().map(|a| win_quote(a)).collect::<Vec<_>>().join(" ");
-    match resolved {
-        Some(exe) if basename(&exe).eq_ignore_ascii_case("explorer.exe") => None,
-        Some(exe) if exe.to_lowercase().ends_with(".exe") => Some(Elevated {
-            params: quoted(args),
-            program: exe,
-            hidden: false,
-        }),
-        other => {
-            let shim = other.unwrap_or_else(|| program.to_string());
-            let line = std::iter::once(win_quote(&shim)).chain(args.iter().map(|a| win_quote(a))).collect::<Vec<_>>();
-            Some(Elevated {
-                params: format!("/s /c \"pushd {} && {}\"", win_quote(cwd), line.join(" ")),
-                program: "cmd.exe".to_string(),
-                hidden: true,
-            })
-        }
+/// Whether a terminal action can run elevated. Windows: any. Linux: only a
+/// bare terminal (`argv` empty) — a project's own commands run as root leave
+/// root-owned files in the repo — in an emulator whose way of taking a command
+/// is known. No PATH lookups: `term` is what `terminalize` already picked.
+fn terminal_elevation(argv: &[String], term: &str) -> Option<Elevation> {
+    #[cfg(windows)]
+    {
+        let _ = (argv, term);
+        Some(Elevation::Terminal)
+    }
+    #[cfg(not(windows))]
+    {
+        (argv.is_empty() && root_shell_args(term, "").is_some()).then_some(Elevation::Terminal)
     }
 }
 
-/// Linux: only a terminal gets a root shell; GUI apps don't run as root.
-#[cfg(not(windows))]
-fn elevate_program(_program: &str, _args: &[String], _cwd: &str) -> Option<Elevated> {
-    None
+/// Whether a program started straight can run elevated: on Windows, all but
+/// Explorer, which Windows never runs elevated (the offer would be empty). On
+/// Linux, GUI programs don't run as root.
+fn program_elevation(program: &str) -> Option<Elevation> {
+    #[cfg(windows)]
+    {
+        let name = basename(program).to_lowercase();
+        (name != "explorer.exe" && name != "explorer").then_some(Elevation::Program)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = program;
+        None
+    }
 }
 
-/// A plain terminal in `cwd` with a root shell (`sudo -s`, else `doas -s`,
-/// both of which stay in the folder), for the emulators whose way of taking a
-/// command is known. Only the bare terminal: running a project's own commands
-/// as root leaves root-owned files in the repo (`node_modules`, `target/`).
+/// A root shell in a bare terminal at `cwd`, for the emulators whose way of
+/// taking a command is known: the arguments after `term`. The terminal itself
+/// picks `sudo -s` or `doas -s` (both stay in the folder), and says so if
+/// neither is there — nothing is looked up while building the menu.
 #[cfg(not(windows))]
-fn elevate(argv: &[String], cwd: &str, resolver: &Resolver) -> Option<Elevated> {
-    if !argv.is_empty() {
-        return None;
-    }
-    let su = ["sudo", "doas"].into_iter().find(|s| which(s).is_some())?;
-    let (term, _) = pick_terminal_binary(resolver);
-    let root = [su.to_string(), "-s".to_string()];
-    let with = |lead: Vec<String>| -> Vec<String> { lead.into_iter().chain(root.iter().cloned()).collect() };
-    let args: Vec<String> = match basename(&term).to_lowercase().as_str() {
+pub fn root_shell_args(term: &str, cwd: &str) -> Option<Vec<String>> {
+    const ROOT: &str = "if command -v sudo >/dev/null 2>&1; then exec sudo -s; \
+        elif command -v doas >/dev/null 2>&1; then exec doas -s; \
+        else echo 'Neither sudo nor doas is installed.'; exec \"${SHELL:-sh}\"; fi";
+    let with = |lead: Vec<String>| -> Vec<String> {
+        lead.into_iter().chain(["sh".into(), "-c".into(), ROOT.into()]).collect()
+    };
+    Some(match basename(term).to_lowercase().as_str() {
         "alacritty" => with(vec!["--working-directory".into(), cwd.into(), "-e".into()]),
         "kitty" => with(vec!["--directory".into(), cwd.into()]),
         "wezterm" | "wezterm-gui" => with(vec!["start".into(), "--cwd".into(), cwd.into(), "--".into()]),
@@ -1095,8 +1049,7 @@ fn elevate(argv: &[String], cwd: &str, resolver: &Resolver) -> Option<Elevated> 
         // the working directory they're given.
         "xterm" | "x-terminal-emulator" => with(vec!["-e".into()]),
         _ => return None,
-    };
-    Some(Elevated { program: term, args })
+    })
 }
 
 /// Quote one argument the way Windows programs split their command line.
@@ -1252,12 +1205,13 @@ fn build_action(
             std::iter::once(program.clone()).chain(args).collect()
         };
         let (p, a, c) = terminalize(&argv, cwd, resolver);
-        (p, a, c, elevate(&argv, cwd, resolver))
+        let elevated = terminal_elevation(&argv, &p);
+        (p, a, c, elevated)
     } else {
         if program.is_empty() {
             return None;
         }
-        let elevated = elevate_program(&program, &args, cwd);
+        let elevated = program_elevation(&program);
         (program, args, Some(cwd.to_string()), elevated)
     };
 
@@ -1302,7 +1256,7 @@ fn provider_actions(
     let term_in = |id: String, label: String, argv: Vec<String>, at: &str| -> Action {
         let hint = argv.join(" ");
         let (p, a, c) = terminalize(&argv, at, resolver);
-        let elevated = elevate(&argv, at, resolver);
+        let elevated = terminal_elevation(&argv, &p);
         Action {
             id,
             label,
@@ -1582,14 +1536,18 @@ fn provider_actions(
             .collect(),
         // Task runners: one action per target, from the project's directory.
         "make" | "just" | "task" => {
-            let targets = match name {
-                "make" => crate::tasks::make_targets(&proj.dir),
-                "just" => crate::tasks::just_recipes(&proj.dir),
-                _ => crate::tasks::taskfile_tasks(&proj.dir),
+            let (bin, targets) = match name {
+                "make" => ("make".to_string(), crate::tasks::make_targets(&proj.dir)),
+                "just" => ("just".to_string(), crate::tasks::just_recipes(&proj.dir)),
+                // Whichever name go-task goes by here; none, no targets.
+                _ => match crate::tasks::go_task() {
+                    Some(bin) => (bin, crate::tasks::taskfile_tasks(&proj.dir)),
+                    None => return Vec::new(),
+                },
             };
             targets
                 .into_iter()
-                .map(|t| term(format!("{name}:{ns}:{t}"), format!("{name} {t}"), vec![name.into(), t]))
+                .map(|t| term(format!("{name}:{ns}:{t}"), format!("{bin} {t}"), vec![bin.clone(), t]))
                 .collect()
         }
         // A Flutter app's Gradle project lives one level down, in `android/` —
@@ -2336,23 +2294,19 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn elevate_opens_a_root_shell_in_a_plain_terminal() {
-        let Some(su) = ["sudo", "doas"].into_iter().find(|s| which(s).is_some()) else {
-            return; // nothing to elevate with on this machine
-        };
-        let programs = std::collections::BTreeMap::new();
-        let pin = |p: &'static str| Resolver::new(&programs).with_terminal(Some(p), None);
-
-        let e = elevate(&[], "/repo", &pin("/usr/bin/konsole")).unwrap();
-        assert_eq!(e.program, "/usr/bin/konsole");
-        assert_eq!(e.args, ["--workdir", "/repo", "-e", su, "-s"]);
-        let e = elevate(&[], "/repo", &pin("/usr/bin/gnome-terminal")).unwrap();
-        assert_eq!(e.args, ["--working-directory=/repo", "--", su, "-s"]);
+    fn a_root_shell_in_a_plain_terminal_only() {
+        let args = root_shell_args("/usr/bin/konsole", "/repo").unwrap();
+        assert_eq!(&args[..5], &["--workdir", "/repo", "-e", "sh", "-c"]);
+        assert!(args[5].contains("sudo -s") && args[5].contains("doas -s"));
+        let args = root_shell_args("/usr/bin/gnome-terminal", "/repo").unwrap();
+        assert_eq!(&args[..2], &["--working-directory=/repo", "--"]);
 
         // A project's own command doesn't run as root, and an emulator whose
         // way of taking a command isn't known gets no elevated launch.
-        assert!(elevate(&["npm".into(), "test".into()], "/repo", &pin("/usr/bin/konsole")).is_none());
-        assert!(elevate(&[], "/repo", &pin("/opt/mystery-term")).is_none());
+        assert_eq!(terminal_elevation(&[], "/usr/bin/konsole"), Some(Elevation::Terminal));
+        assert_eq!(terminal_elevation(&["npm".into(), "test".into()], "/usr/bin/konsole"), None);
+        assert_eq!(terminal_elevation(&[], "/opt/mystery-term"), None);
+        assert_eq!(program_elevation("/usr/bin/code"), None);
     }
 
     #[cfg(windows)]
@@ -2375,47 +2329,12 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn elevate_keeps_the_folder_on_the_command_line() {
-        let programs = std::collections::BTreeMap::new();
-        let argv = vec!["cargo".to_string(), "test".to_string()];
-        let cwd = "C:\\my repo";
-        let pin = |p: &'static str| Resolver::new(&programs).with_terminal(Some(p), None);
-
-        // Windows Terminal takes the folder itself: run it straight.
-        let e = elevate(&argv, cwd, &pin("C:/x/wt.exe")).unwrap();
-        assert_eq!(e.program, "C:/x/wt.exe");
-        let split = win_split_args(&e.params);
-        assert_eq!(&split[..2], &["-d", cwd]);
-        assert_eq!(split.last().unwrap(), "& 'cargo' 'test'");
-
-        // A terminal that only gets a working directory: `cmd` goes there first.
-        let e = elevate(&argv, cwd, &pin("C:/x/kitty.exe")).unwrap();
-        assert_eq!(e.program, "cmd.exe");
-        assert_eq!(e.params, "/s /c \"pushd \"C:\\my repo\" && C:/x/kitty.exe cargo test\"");
-
-        // The plain terminal elevates too.
-        let e = elevate(&[], cwd, &pin("C:/x/wt.exe")).unwrap();
-        assert_eq!(win_split_args(&e.params), ["-d", cwd]);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn elevate_program_runs_an_exe_straight_and_a_shim_through_a_hidden_cmd() {
-        let cwd = "C:\\my repo";
-        let sln = vec!["C:\\my repo\\App.sln".to_string()];
-
-        let e = elevate_program("C:/VS/Common7/IDE/devenv.exe", &sln, cwd).unwrap();
-        assert_eq!(e.program, "C:/VS/Common7/IDE/devenv.exe");
-        assert_eq!(win_split_args(&e.params), sln);
-        assert!(!e.hidden);
-
-        let e = elevate_program("C:/Code/bin/code.cmd", &[cwd.to_string()], cwd).unwrap();
-        assert_eq!(e.program, "cmd.exe");
-        assert_eq!(e.params, "/s /c \"pushd \"C:\\my repo\" && C:/Code/bin/code.cmd \"C:\\my repo\"\"");
-        assert!(e.hidden);
-
+    fn every_launch_can_elevate_but_explorer() {
+        assert_eq!(terminal_elevation(&[], "C:/x/wt.exe"), Some(Elevation::Terminal));
+        assert_eq!(program_elevation("C:/VS/Common7/IDE/devenv.exe"), Some(Elevation::Program));
+        assert_eq!(program_elevation("code"), Some(Elevation::Program));
         // Windows won't run Explorer elevated, so it isn't offered.
-        assert!(elevate_program("C:\\Windows\\explorer.exe", &[cwd.to_string()], cwd).is_none());
+        assert_eq!(program_elevation("C:\\Windows\\explorer.exe"), None);
     }
 
     #[test]

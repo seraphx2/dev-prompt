@@ -475,10 +475,17 @@ fn cancelled() -> bool {
 /// it started) and skips the rest. For a read a screen is waiting on: leave the
 /// screen, and nothing is left running in the repo.
 pub(crate) fn cancellable<T>(token: Arc<AtomicBool>, f: impl FnOnce() -> T) -> T {
+    // Cleared however `f` ends, a panic included: the thread goes back to a
+    // pool, and a token left on it would cancel whatever runs there next.
+    struct Clear;
+    impl Drop for Clear {
+        fn drop(&mut self) {
+            CANCEL.with(|c| *c.borrow_mut() = None);
+        }
+    }
     CANCEL.with(|c| *c.borrow_mut() = Some(token));
-    let out = f();
-    CANCEL.with(|c| *c.borrow_mut() = None);
-    out
+    let _clear = Clear;
+    f()
 }
 
 /// The reads screens are waiting on, by kind ("removal", "branches",
@@ -601,21 +608,46 @@ impl ProcessTree {
         use std::os::windows::io::AsRawHandle;
         use windows::Win32::Foundation::{CloseHandle, HANDLE};
         use windows::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW};
-        // What the launcher starts joins the job with it. It's assigned right
-        // after starting — before it has loaded far enough to start anything.
+        // It starts suspended (see `command_for`): in the job before it runs a
+        // single instruction, so nothing it starts can be outside it. Then off
+        // it goes — whether or not the job could be had.
         let job = unsafe { CreateJobObjectW(None, None) }.ok().filter(|job| unsafe {
             AssignProcessToJobObject(*job, HANDLE(child.as_raw_handle())).is_ok() || {
                 let _ = CloseHandle(*job);
                 false
             }
         });
+        resume(child.id());
         Self { job }
     }
 
     #[cfg(windows)]
+    /// Terminating a job only starts it: wait (a few seconds at most) until
+    /// none of its processes are left, so they've let go of the folder before
+    /// anyone tries to remove it.
     fn stop(&self) {
-        if let Some(job) = self.job {
-            let _ = unsafe { windows::Win32::System::JobObjects::TerminateJobObject(job, 1) };
+        use windows::Win32::System::JobObjects::{
+            JobObjectBasicAccountingInformation, QueryInformationJobObject, TerminateJobObject,
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+        };
+        let Some(job) = self.job else { return };
+        let _ = unsafe { TerminateJobObject(job, 1) };
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(5) {
+            let mut info = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+            let asked = unsafe {
+                QueryInformationJobObject(
+                    Some(job),
+                    JobObjectBasicAccountingInformation,
+                    &mut info as *mut _ as *mut std::ffi::c_void,
+                    std::mem::size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                    None,
+                )
+            };
+            if asked.is_err() || info.ActiveProcesses == 0 {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(25));
         }
     }
 
@@ -639,6 +671,33 @@ impl ProcessTree {
     }
 }
 
+/// Resume the threads of process `pid` (one, for a process started
+/// suspended). The standard library doesn't hand out a child's thread, so it's
+/// found in Windows' own list of them.
+#[cfg(windows)]
+fn resume(pid: u32) {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+    };
+    use windows::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) else { return };
+        let mut t = THREADENTRY32 { dwSize: std::mem::size_of::<THREADENTRY32>() as u32, ..Default::default() };
+        let mut more = Thread32First(snap, &mut t).is_ok();
+        while more {
+            if t.th32OwnerProcessID == pid {
+                if let Ok(thread) = OpenThread(THREAD_SUSPEND_RESUME, false, t.th32ThreadID) {
+                    ResumeThread(thread);
+                    let _ = CloseHandle(thread);
+                }
+            }
+            more = Thread32Next(snap, &mut t).is_ok();
+        }
+        let _ = CloseHandle(snap);
+    }
+}
+
 #[cfg(windows)]
 impl Drop for ProcessTree {
     fn drop(&mut self) {
@@ -652,8 +711,13 @@ impl Drop for ProcessTree {
 fn command_for(program: &str, args: &[String], cwd: &Path, env: &[(&str, &str)]) -> Command {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    // Suspended until `ProcessTree::adopt` has it in its job and resumes it.
+    const CREATE_SUSPENDED: u32 = 0x0000_0004;
     let mut c = Command::new(program);
-    c.args(args).current_dir(cwd).envs(env.iter().copied()).creation_flags(CREATE_NO_WINDOW);
+    c.args(args)
+        .current_dir(cwd)
+        .envs(env.iter().copied())
+        .creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
     c
 }
 
@@ -753,6 +817,11 @@ mod tests {
         assert_eq!(first.unwrap_err(), "cancelled.");
         assert_eq!(second.unwrap_err(), "cancelled.");
         assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
+        // A panic inside clears the token all the same, so it can't cancel
+        // whatever runs on this thread next.
+        let set = Arc::new(AtomicBool::new(true));
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cancellable(set, || panic!("boom"))));
+        assert!(!cancelled());
         // A new read of the same kind cancels the one before it.
         let a = reads.start("details");
         let _b = reads.start("details");

@@ -892,8 +892,10 @@ dependencies = [
  "tauri-plugin-updater",
  "thiserror 2.0.21",
  "trash",
+ "webview2-com",
  "window-vibrancy",
  "windows 0.61.3",
+ "windows-core 0.62.2",
  "winreg 0.55.0",
 ]
 

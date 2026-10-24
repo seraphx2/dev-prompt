@@ -186,7 +186,7 @@ fn due_at(now: Instant, first: Instant, debounce: bool) -> Instant {
 fn read_for(dir: &Path) -> Option<RepoStatus> {
     let label = vcs_state::detect(dir)?;
     which(vcs_state::tool_for(label))?;
-    Some(vcs_state::read(dir))
+    Some(vcs_state::read_background(dir))
 }
 
 fn worker(app: &AppHandle) {

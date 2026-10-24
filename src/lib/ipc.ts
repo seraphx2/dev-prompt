@@ -205,10 +205,6 @@ export function checkNewRepo(root: string, name: string): Promise<string | null>
   return invoke<string | null>("check_new_repo", { root, name });
 }
 
-/**
- * Create `<root>/<name>` and run version-control setup `tool` in it. Resolves to
- * the new repo (already added to the list); rejects with the tool's error.
- */
 /** What `url` is (asking the installed tools when its shape doesn't say), its
  *  folder name, and the tools that can clone it. Rejects when nothing can. */
 export function clonePlan(url: string): Promise<ClonePlan> {
@@ -221,6 +217,10 @@ export function cloneRepo(root: string, name: string, url: string, tool: string)
   return invoke<Repo>("clone_repo", { root, name, url, tool });
 }
 
+/**
+ * Create `<root>/<name>` and run version-control setup `tool` in it. Resolves to
+ * the new repo (already added to the list); rejects with the tool's error.
+ */
 export function createRepo(
   root: string,
   name: string,
@@ -293,18 +293,17 @@ export function assessRemoval(path: string): Promise<RemovalAssessment> {
   return invoke<RemovalAssessment>("assess_removal", { path });
 }
 
-/** Move a listed folder to the Recycle Bin / Trash. Resolves to whether Undo
- *  is available. */
-/** The screen waiting on a read ("removal", "branches", "details") was
- *  left: stop it, so nothing keeps running in the repo. */
-export function cancelRead(kind: "removal" | "branches" | "details" | "clone"): Promise<void> {
+/** The screen waiting on a read ("removal", "branches", "details", the clone
+ *  form's "plan") was left, or the clone banner's Cancel ("clone"): stop it,
+ *  so nothing keeps running in the repo. */
+export function cancelRead(kind: "removal" | "branches" | "details" | "clone" | "plan"): Promise<void> {
   return invoke<void>("cancel_read", { kind });
 }
 
-/** Move `path` to the bin; `shellsClosed`: shells of ours in it were just
- *  closed, so wait a moment for them to let go. */
-export function removeFolder(path: string, shellsClosed = false): Promise<boolean> {
-  return invoke<boolean>("remove_folder", { path, shellsClosed });
+/** Move a listed folder to the Recycle Bin / Trash. Resolves to whether Undo
+ *  is available. */
+export function removeFolder(path: string): Promise<boolean> {
+  return invoke<boolean>("remove_folder", { path });
 }
 
 /** Put the folder last moved to the bin back. Resolves to its path. */

@@ -353,10 +353,11 @@ rules:
     provider: just
     requires: [just]
 
+  # No `requires`: go-task is `go-task` on some distros, and a `task` on PATH
+  # may be Taskwarrior — the provider finds the right one, or offers nothing.
   - id: task
     match: [Taskfile.yml, taskfile.yml, Taskfile.yaml, taskfile.yaml, Taskfile.dist.yml, taskfile.dist.yml, Taskfile.dist.yaml, taskfile.dist.yaml]
     provider: task
-    requires: [task]
 
   - id: maven
     match: pom.xml

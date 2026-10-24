@@ -191,8 +191,14 @@
       .catch((e) => {
         const message = `${e}`;
         if (message.startsWith("Clone cancelled")) {
-          cloneJob = null;
-          status = `Stopped cloning ${req.name}.`;
+          // What's after it is why the half-cloned folder is still there.
+          const left = message.slice("Clone cancelled.".length).trim();
+          if (left) {
+            cloneJob = { ...job, state: "failed", error: left, cancelled: true };
+          } else {
+            cloneJob = null;
+            status = `Stopped cloning ${req.name}.`;
+          }
           return;
         }
         cloneJob = { ...job, state: "failed", error: message };
@@ -1286,13 +1292,13 @@
       if (activeRepo) openBranches(activeRepo, false);
       return;
     }
-    // A quick action's key; with Shift too, as administrator / root where the
-    // action can be (Ctrl+Shift+T), and as itself where it can't.
+    // A quick action's key; with Shift too, as administrator / root — only
+    // for one that can be (Ctrl+Shift+T). Another Ctrl+Shift chord isn't ours.
     if (e.ctrlKey && !e.altKey) {
       const hit = quickActions.find(
         (q) => q.key.toLowerCase() === `ctrl+${e.key.toLowerCase()}`,
       );
-      if (hit) {
+      if (hit && (!e.shiftKey || hit.action.elevated)) {
         e.preventDefault();
         runQuickAction(hit.action, e.shiftKey);
         return;
@@ -1937,7 +1943,7 @@
       ondone={(undoable) => removeTarget && removed(removeTarget.repo.name, undoable)}
       onback={removeBack}
       shells={shellsUnder(removeTarget.repo.path).length}
-      oncloseshells={() => removeTarget && closeShellsUnder(removeTarget.repo.path)}
+      oncloseshells={() => (removeTarget ? closeShellsUnder(removeTarget.repo.path) : Promise.resolve())}
     />
   {:else if mode === "settings"}
     <Settings
@@ -2002,7 +2008,11 @@
           { label: "Dismiss", onclick: () => (cloneJob = null) },
         ]}
       >
-        Couldn't clone {job.name}: {job.error?.split("\n")[0]}
+        {#if job.cancelled}
+          Stopped cloning {job.name}, but its folder is still there: {job.error?.split("\n")[0]}
+        {:else}
+          Couldn't clone {job.name}: {job.error?.split("\n")[0]}
+        {/if}
       </Banner>
     {/if}
   {/if}
