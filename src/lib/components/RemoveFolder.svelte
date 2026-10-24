@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
-  import { assessRemoval, removeFolder } from "../ipc";
+  import { onDestroy, onMount, tick } from "svelte";
+  import { assessRemoval, cancelRead, removeFolder } from "../ipc";
   import type { RemovalAssessment } from "../types";
 
   let {
@@ -8,9 +8,15 @@
     path,
     ondone,
     onback,
+    shells = 0,
+    oncloseshells,
   }: {
     name: string;
     path: string;
+    /** dev-prompt's own shells running in it — closed before the move,
+     *  since a terminal working in a folder keeps it from moving. */
+    shells?: number;
+    oncloseshells?: () => void;
     /** Moved; `undoable` says whether Undo can bring it back. */
     ondone: (undoable: boolean) => void;
     onback: () => void;
@@ -21,6 +27,14 @@
 
   let assessment = $state<RemovalAssessment | null>(null);
   let checkError = $state("");
+  /** The check has run a while: say it's still going, not stuck. */
+  let slow = $state(false);
+  let checking = true;
+  // Left before the check finished: stop it, so it isn't still working in the
+  // folder (which would keep it from being moved or deleted some other way).
+  onDestroy(() => {
+    if (checking) void cancelRead("removal");
+  });
   let typed = $state("");
   let busy = $state(false);
   let error = $state("");
@@ -32,11 +46,14 @@
   );
 
   onMount(async () => {
+    const timer = setTimeout(() => (slow = true), 3000);
     try {
       assessment = await assessRemoval(path);
     } catch (e) {
       checkError = `${e}`;
     }
+    clearTimeout(timer);
+    checking = false;
     await tick();
     if (assessment?.needsTyped) typeInput?.focus();
     else confirmButton?.focus();
@@ -47,7 +64,9 @@
     busy = true;
     error = "";
     try {
-      ondone(await removeFolder(path));
+      const closing = shells > 0;
+      if (closing) oncloseshells?.();
+      ondone(await removeFolder(path, closing));
     } catch (e) {
       error = `${e}`;
       busy = false;
@@ -97,6 +116,11 @@
     <p class="mt-4 text-red-300">{checkError}</p>
   {:else if !assessment}
     <p class="mt-4 text-white/40">Checking what's in it…</p>
+    {#if slow}
+      <p class="mt-1 text-[12px] text-white/45">
+        Still checking. The first look at a big repository can take a while.
+      </p>
+    {/if}
   {:else}
     {#if assessment.needsTyped}
       <div class="mt-4 space-y-2 rounded-sm border border-amber-400/40 bg-amber-500/10 px-3 py-2.5">
@@ -128,6 +152,11 @@
       <p class="mt-4 text-white/70">
         Everything in it is committed{assessment.vcs ? ` (${assessment.vcs})` : ""} and on a
         remote, so nothing exists only here.
+      </p>
+    {/if}
+    {#if shells}
+      <p class="mt-3 text-[12px] text-amber-200/80">
+        {shells === 1 ? "The shell" : `The ${shells} shells`} open in it will be closed first.
       </p>
     {/if}
     <p class="mt-3 text-[12px] text-white/40">

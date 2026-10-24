@@ -7,6 +7,8 @@
   import Shell from "./lib/components/Shell.svelte";
   import ShellList from "./lib/components/ShellList.svelte";
   import NewRepo from "./lib/components/NewRepo.svelte";
+  import Banner from "./lib/components/Banner.svelte";
+  import CloneOffer from "./lib/components/CloneOffer.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
   import RemoveFolder from "./lib/components/RemoveFolder.svelte";
   import BranchSwitcher from "./lib/components/BranchSwitcher.svelte";
@@ -16,6 +18,8 @@
     buildActions,
     buildDetectedActions,
     buildUniversalActions,
+    cancelRead,
+    cloneRepo,
     copyPath,
     copyText,
     getConfig,
@@ -61,7 +65,8 @@
   } from "./lib/types";
   import { fuzzyScore } from "./lib/fuzzy";
   import { attention, VCS_ACTION, vcsActions, vocab } from "./lib/vcsStatus";
-  import { cloneLabel, cloneSource } from "./lib/clone";
+  import { cloneSource, type CloneJob, type CloneRequest } from "./lib/clone";
+  import { notify } from "./lib/notify";
   import { followStatuses, loadStatuses, setStatus, statuses } from "./lib/statuses.svelte";
   import { stepZoom, zoomKey, zoomLabel } from "./lib/zoom";
   import { icons } from "./lib/icons";
@@ -159,6 +164,53 @@
   );
   /** Set while the New repository form is in clone mode. */
   let cloneUrl = $state<string | null>(null);
+  /** The clone under way (one at a time) or the last that failed. Run here,
+   *  not by the form, so leaving the form — or the overlay hiding — doesn't
+   *  stop it; the banner shows it meanwhile. */
+  let cloneJob = $state<CloneJob | null>(null);
+  /** The form open is the one that started the clone. */
+  const onCloneForm = () => mode === "new-repo" && cloneJob !== null && cloneUrl === cloneJob.source;
+
+  function startClone(req: CloneRequest) {
+    const job: CloneJob = { ...req, state: "running" };
+    cloneJob = job;
+    cloneRepo(req.root, req.name, req.url, req.tool)
+      .then((repo) => {
+        const watching = onCloneForm();
+        cloneJob = null;
+        if (away()) void notify(`Cloned ${repo.name}`, `${repo.path} — its actions are up in dev-prompt.`);
+        if (watching) {
+          // Still on its form: on to the new repo, as a create does.
+          if (overlayHidden) resumeOnShow = true;
+          query = "";
+          void openActions({ repo, score: 0, matchIndices: [] });
+        } else {
+          status = `Cloned ${repo.name} into ${req.root}.`;
+        }
+      })
+      .catch((e) => {
+        const message = `${e}`;
+        if (message.startsWith("Clone cancelled")) {
+          cloneJob = null;
+          status = `Stopped cloning ${req.name}.`;
+          return;
+        }
+        cloneJob = { ...job, state: "failed", error: message };
+        if (away()) void notify(`Couldn't clone ${req.name}`, message.split("\n")[0]);
+      });
+  }
+
+  /** The banner asks before stopping a clone. */
+  let confirmingCancel = $state(false);
+  $effect(() => {
+    if (cloneJob?.state !== "running") confirmingCancel = false;
+  });
+
+  /** Stop cloning, confirmed: stops Git (and all it started), and the folder goes. */
+  function cancelClone() {
+    confirmingCancel = false;
+    void cancelRead("clone");
+  }
   $effect(() => {
     if (mode !== "new-repo") cloneUrl = null;
   });
@@ -259,8 +311,8 @@
   let openedFromList = $state(false);
   /** The folder the "Move to Recycle Bin / Trash" screen is for. */
   let removeTarget = $state<ScoredRepo | null>(null);
-  /** The folder just moved to the bin, while Undo is offered. */
-  let undoToast = $state<{ name: string } | null>(null);
+  /** The folder just moved to the bin, while Undo is offered — until `until`. */
+  let undoToast = $state<{ name: string; until: number } | null>(null);
   let undoTimer: ReturnType<typeof setTimeout> | undefined;
   const UNDO_MS = 20_000;
   const bin =
@@ -278,7 +330,7 @@
     backToList();
     clearTimeout(undoTimer);
     if (undoable) {
-      undoToast = { name };
+      undoToast = { name, until: Date.now() + UNDO_MS };
       undoTimer = setTimeout(() => (undoToast = null), UNDO_MS);
     } else {
       status = `Moved ${name} to the ${bin}. Restore it from there if you need it.`;
@@ -787,6 +839,10 @@
   );
 
   let searchSeq = 0;
+  /** The search `results` answer. A refresh keeps the highlight only within
+   *  the same search: after the box changed, the highlighted row belongs to
+   *  results for the old text, and the new list starts at the top. */
+  let resultsFor: string | null = null;
 
   /**
    * Re-run the repo search for the current query. `keepSelection` is for the
@@ -801,15 +857,18 @@
     // (the query $effect, loadInitial, rescan, onReposUpdated) is covered.
     if (appScope || shellScope) return;
     const seq = ++searchSeq;
-    const keep = keepSelection ? listed[selected]?.repo.path : undefined;
     // "!" scope: search what follows it, over every repo — the attention
     // filter then picks from all of them, not from a first page.
-    const scored = await searchRepos(attentionScope ? term : query, attentionScope ? 100_000 : 200);
+    const q = attentionScope ? term : query;
+    const stay = keepSelection && q === resultsFor;
+    const keep = stay ? listed[selected]?.repo.path : undefined;
+    const scored = await searchRepos(q, attentionScope ? 100_000 : 200);
     if (seq !== searchSeq) return; // a newer query already answered
     results = scored;
+    resultsFor = q;
     const same = keep ? listed.findIndex((r) => r.repo.path === keep) : -1;
     if (same >= 0) selected = same;
-    else if (!keepSelection) selected = 0;
+    else if (!stay) selected = 0;
     else if (selected >= listed.length) selected = Math.max(0, listed.length - 1);
   }
 
@@ -929,11 +988,38 @@
     void refreshRepoContext(entry.repo.path);
   }
 
+  /** The overlay is off-screen: work that finishes now gets a notification. */
+  let overlayHidden = false;
+  /** A create / clone finished while hidden and left its screen up (the new
+   *  repo's actions, or the error): the next show returns to it. */
+  let resumeOnShow = false;
+
+  /** What the New repository form is doing, for its notifications. */
+  const formDid = () => (cloneUrl !== null ? "Cloned" : setupTarget ? "Set up version control in" : "Created");
+  const formFailed = () =>
+    cloneUrl !== null ? "Clone failed" : setupTarget ? "Setup failed" : "Couldn't create the repository";
+
+  /** Nobody's looking: the overlay is hidden, or still up but another window
+   *  has the focus (a dismiss setting that keeps it open). */
+  const away = () => overlayHidden || !document.hasFocus();
+
+  // It failed: the form says why. Someone who looked away meanwhile gets a
+  // notification — and, if the overlay was hidden, the form on the next show.
+  function newRepoFailed(message: string) {
+    if (!away()) return;
+    if (overlayHidden) resumeOnShow = true;
+    void notify(formFailed(), message.split("\n")[0]);
+  }
+
   // A repo the "New repository" screen just made — already in the list and
   // cache backend-side, so go straight to its action menu.
   function openCreated(repo: Repo) {
-    // The user may have left the form (mouse back, hidden overlay) while it ran.
+    // The user may have left the form (mouse back) while it ran.
     if (mode !== "new-repo") return;
+    if (away()) {
+      if (overlayHidden) resumeOnShow = true;
+      void notify(`${formDid()} ${repo.name}`, `${repo.path} — its actions are up in dev-prompt.`);
+    }
     if (!setupTarget) query = "";
     setupTarget = null;
     void openActions({ repo, score: 0, matchIndices: [] });
@@ -1058,6 +1144,8 @@
   }
 
   function backToList() {
+    // Left the menu before its details arrived: stop reading them.
+    if (activeRepo && !vcsInfo) void cancelRead("details");
     mode = "repo-list";
     setupTarget = null;
     removeTarget = null;
@@ -1583,6 +1671,11 @@
     const unlisteners: Array<Promise<() => void>> = [];
     unlisteners.push(
       onOverlayShown((scope) => {
+        overlayHidden = false;
+        // A create / clone that ran (or still runs) while hidden: back to it.
+        const resume = resumeOnShow || (mode === "new-repo" && !!newRepoEl?.working());
+        resumeOnShow = false;
+        if (resume && scope !== "apps") return;
         // Hidden from a shell: the repo hotkey brings that shell straight back,
         // like a drop-down terminal. The app hotkey still means the app list.
         if (mode === "shell" && activeShell && scope !== "apps") {
@@ -1601,8 +1694,10 @@
     );
     unlisteners.push(
       onOverlayHidden(() => {
+        overlayHidden = true;
         // A shell stays on screen while hidden — the next show returns to it.
-        if (mode === "shell" && activeShell) {
+        // So does a create / clone still running: its result lands there.
+        if ((mode === "shell" && activeShell) || (mode === "new-repo" && newRepoEl?.working())) {
           closeCtx();
           return;
         }
@@ -1770,23 +1865,11 @@
         </p>
       </div>
     {:else if cloneOffer}
-      <div class="px-2 py-2">
-        <button
-          type="button"
-          onclick={() => cloneOffer && openClone(cloneOffer)}
-          class="flex w-full items-center gap-3 rounded-lg bg-white/10 px-3 py-2 text-left"
-        >
-          <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            {@html icons.branch.raw}
-          </svg>
-          <span class="min-w-0 flex-1">
-            <span class="block truncate text-[15px] text-white/90">Clone {cloneLabel(cloneOffer)}</span>
-            <span class="block truncate text-[12px] text-white/50"
-              >{cloneKind === "shorthand" ? "From GitHub. " : ""}Pick where it goes and what clones it next.</span
-            >
-          </span>
-        </button>
-      </div>
+      <CloneOffer
+        source={cloneOffer}
+        fromGitHub={cloneKind === "shorthand"}
+        onclone={() => cloneOffer && openClone(cloneOffer)}
+      />
     {:else}
       <ResultList
         entries={listed}
@@ -1839,7 +1922,11 @@
         ? { path: setupTarget.repo.path, name: setupTarget.repo.name }
         : null}
       clone={cloneUrl}
+      job={cloneJob}
+      onclone={startClone}
+      oncancelclone={cancelClone}
       oncreated={openCreated}
+      onfailed={newRepoFailed}
       onback={newRepoBack}
     />
   {:else if mode === "remove" && removeTarget}
@@ -1849,6 +1936,8 @@
       path={removeTarget.repo.path}
       ondone={(undoable) => removeTarget && removed(removeTarget.repo.name, undoable)}
       onback={removeBack}
+      shells={shellsUnder(removeTarget.repo.path).length}
+      oncloseshells={() => removeTarget && closeShellsUnder(removeTarget.repo.path)}
     />
   {:else if mode === "settings"}
     <Settings
@@ -1883,22 +1972,47 @@
     onend={endShell}
   />
 
-  {#if undoToast && mode === "repo-list"}
-    <div
-      class="flex items-center gap-3 border-t border-hair bg-white/4 px-4 py-2 text-[12px] text-white/70"
-    >
-      <span class="min-w-0 flex-1 truncate">
-        Moved <span class="text-white/90">{undoToast.name}</span> to the {bin}.
-      </span>
-      <button
-        type="button"
-        onclick={() => void undoRemove()}
-        class="inline-flex shrink-0 items-center gap-1.5 rounded-sm border border-sky-400/50 bg-sky-400/10
-               px-2 py-0.5 text-[12px] text-sky-200 hover:bg-sky-400/20"
+  {#if cloneJob && (mode === "repo-list" || mode === "action-menu" || (mode === "new-repo" && !onCloneForm()))}
+    {@const job = cloneJob}
+    {#if job.state === "running" && confirmingCancel}
+      <Banner
+        busy
+        actions={[
+          { label: "Keep cloning", onclick: () => (confirmingCancel = false) },
+          { label: "Stop cloning", onclick: cancelClone, danger: true },
+        ]}
       >
-        Undo <kbd>Ctrl+Z</kbd>
-      </button>
-    </div>
+        Stop cloning <span class="text-white/90">{job.name}</span>? The half-cloned folder will be removed.
+      </Banner>
+    {:else if job.state === "running"}
+      <Banner
+        busy
+        actions={[
+          { label: "Show", onclick: () => openClone(job.source) },
+          { label: "Cancel cloning", onclick: () => (confirmingCancel = true), danger: true },
+        ]}
+      >
+        Cloning <span class="text-white/90">{job.name}</span> into {job.root}…
+      </Banner>
+    {:else}
+      <Banner
+        tone="error"
+        actions={[
+          { label: "Show", onclick: () => openClone(job.source), primary: true },
+          { label: "Dismiss", onclick: () => (cloneJob = null) },
+        ]}
+      >
+        Couldn't clone {job.name}: {job.error?.split("\n")[0]}
+      </Banner>
+    {/if}
+  {/if}
+  {#if undoToast && mode === "repo-list"}
+    <Banner
+      countdown={{ until: undoToast.until, total: UNDO_MS }}
+      actions={[{ label: "Undo", kbd: "Ctrl+Z", onclick: () => void undoRemove(), primary: true }]}
+    >
+      Moved <span class="text-white/90">{undoToast.name}</span> to the {bin}.
+    </Banner>
   {/if}
 
   <footer
@@ -2032,6 +2146,7 @@
 {/if}
 
 <style>
+
   /* Pulsing ring on the settings gear while no folders are configured. */
   @keyframes settings-glow {
     0%,

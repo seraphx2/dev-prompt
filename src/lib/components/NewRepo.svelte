@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { checkNewRepo, clonePlan, cloneRepo, createRepo, initRepo, newRepoOptions } from "../ipc";
+  import { checkNewRepo, clonePlan, createRepo, initRepo, newRepoOptions } from "../ipc";
+  import type { CloneJob, CloneRequest } from "../clone";
   import type { ClonePlan, NewRepoOptions, ProvisionTool, Repo } from "../types";
   import { middleTruncate } from "../text";
 
@@ -9,12 +10,26 @@
     existing = null,
     /** Clone this (a URL, or GitHub's owner/repo) instead of creating a folder. */
     clone = null,
+    job = null,
+    onclone,
+    oncancelclone,
     oncreated,
+    onfailed,
     onback,
   }: {
     existing?: { path: string; name: string } | null;
     clone?: string | null;
+    /** The clone under way or last failed (App runs it, so it outlives this
+     *  form): this form's own when its `source` is `clone`. */
+    job?: CloneJob | null;
+    /** Start the clone — App runs it in the background. */
+    onclone?: (req: CloneRequest) => void;
+    /** Stop this form's clone (confirmed here first). */
+    oncancelclone?: () => void;
     oncreated: (repo: Repo) => void;
+    /** It failed — the form shows why; this is for telling someone who
+     *  isn't looking (the overlay was hidden meanwhile). */
+    onfailed?: (message: string) => void;
     onback: () => void;
   } = $props();
 
@@ -61,6 +76,22 @@
   /** Enter came before the plan did: clone as soon as it's in. */
   let submitWhenPlanned = false;
 
+  /** The clone this form started is under way: it's shown here, the fields
+   *  are locked, and Back leaves it running. */
+  const ownJob = $derived(clone !== null && !!job && job.source === clone ? job : null);
+  const cloning = $derived(ownJob?.state === "running");
+  /** "Cancel cloning" was pressed: ask before stopping it. */
+  let confirmingCancel = $state(false);
+  $effect(() => {
+    if (!cloning) confirmingCancel = false;
+  });
+  /** Another clone is running — one at a time. */
+  const otherClone = $derived(clone !== null && job?.state === "running" && !ownJob ? job : null);
+  /** Inputs locked: a create / setup in flight, or this form's clone. */
+  const locked = $derived(busy || cloning);
+  /** What went wrong: this form's create / setup, or its clone. */
+  const shownError = $derived(ownJob?.state === "failed" ? (ownJob.error ?? "") : createError);
+
   /** The tools on offer: the installed setups, or in clone mode the ones that
    *  can clone this URL. */
   const tools = $derived<ProvisionTool[]>(clone !== null ? (plan?.tools ?? []) : (options?.tools ?? []));
@@ -70,7 +101,8 @@
     tool?.fields.find((f) => !(toolValues[f.id] ?? "").trim()),
   );
   const canCreate = $derived(
-    !busy &&
+    !locked &&
+      !otherClone &&
       !!tool &&
       !missingField &&
       (clone === null || (!planning && !!plan)) &&
@@ -124,7 +156,12 @@
 
   onMount(async () => {
     // The field starts with what was pasted, then it's the user's to edit.
+    // Reopened for a clone that ran: its own name and location too.
     if (clone !== null) url = clone;
+    if (ownJob) {
+      name = ownJob.name;
+      nameEdited = true;
+    }
     try {
       const o = await newRepoOptions();
       const wantRoot = recall(LAST_ROOT);
@@ -137,7 +174,8 @@
             .filter((r) => isInside(existing!.path, r))
             .sort((a, b) => b.length - a.length)[0] ?? "";
       } else {
-        root = o.roots.find((r) => r === wantRoot) ?? o.roots[0] ?? "";
+        const want = ownJob?.root ?? wantRoot;
+        root = o.roots.find((r) => r === want) ?? o.roots[0] ?? "";
       }
       if (clone === null) {
         toolId = o.tools.find((t) => t.id === wantTool)?.id ?? o.tools[0]?.id ?? "";
@@ -206,7 +244,7 @@
           if (seq !== planSeq) return;
           plan = p;
           if (!nameEdited) name = p.name;
-          const want = recall(LAST_CLONE_TOOL);
+          const want = ownJob?.tool ?? recall(LAST_CLONE_TOOL);
           toolId = p.tools.find((t) => t.id === want)?.id ?? p.tools[0]?.id ?? "";
         })
         .catch((e) => {
@@ -239,29 +277,42 @@
       return;
     }
     if (!canCreate || !tool) return;
+    if (clone !== null && plan) {
+      // App runs it, so leaving this form doesn't stop it.
+      remember(LAST_ROOT, root);
+      remember(LAST_CLONE_TOOL, tool.id);
+      onclone?.({ root, name, url: plan.url, tool: tool.id, source: clone });
+      return;
+    }
     busy = true;
     createError = "";
     try {
       const repo = existing
         ? await initRepo(existing.path, tool.id, { ...toolValues })
-        : clone !== null && plan
-          ? await cloneRepo(root, name, plan.url, tool.id)
-          : await createRepo(root, name, tool.id, { ...toolValues });
+        : await createRepo(root, name, tool.id, { ...toolValues });
       if (!existing) remember(LAST_ROOT, root);
-      remember(clone !== null ? LAST_CLONE_TOOL : LAST_TOOL, tool.id);
+      remember(LAST_TOOL, tool.id);
       oncreated(repo);
     } catch (e) {
       createError = `${e}`;
       busy = false;
+      onfailed?.(createError);
       await tick();
       if (existing) focusFirst();
       else nameInput?.focus();
     }
   }
 
+  /** A create / clone / setup is running — App keeps the form through a hide. */
+  export function working(): boolean {
+    return locked;
+  }
+
   /** Leave the form, unless a create is in flight. Also App's Escape fallback
    *  for when focus sits outside the form. */
   export function back() {
+    // A clone carries on without the form (the banner shows it); a create
+    // or setup is quick, and finishes here.
     if (!busy) onback();
   }
 
@@ -301,6 +352,10 @@
     "rounded-sm border px-2.5 py-1 text-[12px] focus:outline-hidden focus-visible:ring-1 focus-visible:ring-sky-400/70";
   const chipOn = "border-sky-400/50 bg-sky-500/15 text-white";
   const chipOff = "border-hair text-white/55 hover:bg-white/10 hover:text-white/85";
+  const quiet =
+    "rounded-sm border border-hair px-3.5 py-1.5 text-[12px] text-white/70 hover:bg-white/10 hover:text-white/90";
+  const danger =
+    "rounded-sm border border-red-400/50 bg-red-500/15 px-3.5 py-1.5 text-[12px] font-medium text-red-200 hover:bg-red-500/25";
   const field =
     "rounded-sm border border-hair bg-white/4 px-2 py-1.5 font-mono text-[12px] text-white/90 placeholder:text-white/25 focus:border-white/25 focus:outline-hidden disabled:opacity-60";
 </script>
@@ -349,45 +404,49 @@
           </p>
         </div>
       {:else}
-        {#if clone !== null}
-          <label class="block space-y-1.5">
-            <span class="text-orange-400">From</span>
+        <!-- From and Name side by side, headings on one line; they wrap under
+             each other when there isn't room. -->
+        <div class="flex flex-wrap items-start gap-4">
+          {#if clone !== null}
+            <label class="block min-w-64 flex-[2] space-y-1.5">
+              <span class="block text-orange-400">From</span>
+              <input
+                bind:value={url}
+                disabled={locked}
+                spellcheck="false"
+                autocomplete="off"
+                placeholder="https://github.com/owner/repo"
+                class="w-full {field}"
+              />
+              {#if planning}
+                <span class="block text-[12px] text-white/50">Checking what's there…</span>
+              {:else if planError}
+                <span class="block whitespace-pre-wrap text-[12px] text-red-300">{planError}</span>
+              {:else if plan && plan.url !== url.trim()}
+                <span class="block font-mono text-[12px] text-white/50">{plan.url}</span>
+              {/if}
+            </label>
+          {/if}
+
+          <label class="block min-w-48 flex-1 space-y-1.5">
+            <span class="block text-orange-400">Name</span>
             <input
-              bind:value={url}
-              disabled={busy}
+              bind:this={nameInput}
+              bind:value={name}
+              oninput={() => (nameEdited = true)}
+              disabled={locked}
               spellcheck="false"
               autocomplete="off"
-              placeholder="https://github.com/owner/repo"
+              placeholder="my-new-thing"
               class="w-full {field}"
             />
-            {#if planning}
-              <span class="block text-[12px] text-white/50">Checking what's there…</span>
-            {:else if planError}
-              <span class="block whitespace-pre-wrap text-[12px] text-red-300">{planError}</span>
-            {:else if plan && plan.url !== url.trim()}
-              <span class="block font-mono text-[12px] text-white/50">{plan.url}</span>
+            {#if nameProblem && (name || attempted)}
+              <span class="block text-[12px] text-red-300">{nameProblem}</span>
+            {:else if attempted && !name}
+              <span class="block text-[12px] text-red-300">Enter a folder name.</span>
             {/if}
           </label>
-        {/if}
-
-        <label class="block space-y-1.5">
-          <span class="text-orange-400">Name</span>
-          <input
-            bind:this={nameInput}
-            bind:value={name}
-            oninput={() => (nameEdited = true)}
-            disabled={busy}
-            spellcheck="false"
-            autocomplete="off"
-            placeholder="my-new-thing"
-            class="w-full {field}"
-          />
-          {#if nameProblem && (name || attempted)}
-            <span class="block text-[12px] text-red-300">{nameProblem}</span>
-          {:else if attempted && !name}
-            <span class="block text-[12px] text-red-300">Enter a folder name.</span>
-          {/if}
-        </label>
+        </div>
 
         <div class="space-y-1.5">
           <span class="block text-orange-400">Location</span>
@@ -412,7 +471,7 @@
                   role="radio"
                   aria-checked={r === root}
                   tabindex={r === root ? 0 : -1}
-                  disabled={busy}
+                  disabled={locked}
                   onclick={() => (root = r)}
                   class="{chip} font-mono {r === root ? chipOn : chipOff}">{r}</button
                 >
@@ -452,7 +511,7 @@
                 role="radio"
                 aria-checked={t.id === toolId}
                 tabindex={t.id === toolId ? 0 : -1}
-                disabled={busy}
+                disabled={locked}
                 onclick={() => (toolId = t.id)}
                 class="{chip} {t.id === toolId ? chipOn : chipOff}">{t.label}</button
               >
@@ -468,7 +527,7 @@
               <span class="text-orange-400">{f.label}</span>
               <input
                 bind:value={values[toolId][f.id]}
-                disabled={busy}
+                disabled={locked}
                 spellcheck="false"
                 autocomplete="off"
                 class="w-full {field}"
@@ -492,28 +551,46 @@
         </div>
       {/if}
 
-      {#if createError}
+      {#if shownError}
         <pre
-          class="max-h-32 overflow-auto whitespace-pre-wrap rounded-sm border border-red-400/40 bg-red-500/10 px-3 py-2 font-mono text-[11px] text-red-200">{createError}</pre>
+          class="max-h-32 overflow-auto whitespace-pre-wrap rounded-sm border border-red-400/40 bg-red-500/10 px-3 py-2 font-mono text-[11px] text-red-200">{shownError}</pre>
       {/if}
     </div>
 
-    <div class="mt-auto flex justify-end pt-4">
+    <div class="mt-auto flex items-center justify-end gap-3 pt-4">
+      {#if cloning && confirmingCancel}
+        <span class="text-[12px] text-white/70">Stop cloning? The half-cloned folder will be removed.</span>
+        <button type="button" onclick={() => (confirmingCancel = false)} class={quiet}>Keep cloning</button>
+        <button
+          type="button"
+          onclick={() => {
+            confirmingCancel = false;
+            oncancelclone?.();
+          }}
+          class={danger}>Stop cloning</button
+        >
+      {:else if cloning}
+        <span class="text-[12px] text-white/50"
+          >A big repository can take a few minutes. Esc goes back — it keeps going.</span
+        >
+        <button type="button" onclick={() => (confirmingCancel = true)} class={danger}>Cancel cloning</button>
+      {:else if otherClone}
+        <span class="text-[12px] text-amber-200/80"
+          >{otherClone.name} is still cloning. Wait for it, or cancel it below.</span
+        >
+      {/if}
       <button
         type="button"
         disabled={!canCreate}
         onclick={() => void submit()}
         class="rounded-sm bg-sky-500/80 px-3.5 py-1.5 text-[12px] font-medium text-white hover:bg-sky-500 disabled:opacity-40"
       >
-        {#if existing}{busy ? "Setting up…" : "Set up"}{:else if clone !== null}{busy
+        {#if existing}{busy ? "Setting up…" : "Set up"}{:else if clone !== null}{cloning
             ? "Cloning…"
             : "Clone"}{:else}{busy
             ? "Creating…"
             : "Create"}{/if}
       </button>
     </div>
-    {#if busy && clone !== null}
-      <p class="pt-2 text-right text-[12px] text-white/50">A big repository can take a few minutes.</p>
-    {/if}
   {/if}
 </div>

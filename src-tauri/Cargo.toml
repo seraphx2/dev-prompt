@@ -68,6 +68,8 @@ windows = { version = "0.61", features = [
     "Win32_Security", # CreateEventW takes SECURITY_ATTRIBUTES
     "Win32_System_Registry",
     "Win32_System_Threading",
+    # Stop a timed-out command with everything it started (provision.rs).
+    "Win32_System_JobObjects",
     # Run as administrator: ShellExecuteEx with the "runas" verb (launch.rs).
     "Win32_System_Com",
     "Win32_UI_Shell",

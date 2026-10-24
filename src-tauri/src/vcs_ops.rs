@@ -21,10 +21,12 @@ use crate::provision::run_captured_env;
 use crate::rules::which;
 use crate::vcs_state::{self, RepoStatus};
 
-/// Local queries and branch switches.
-pub(crate) const LOCAL_TIMEOUT: Duration = Duration::from_secs(30);
-/// Anything that talks to a remote.
-pub(crate) const NETWORK_TIMEOUT: Duration = Duration::from_secs(120);
+/// Local queries and branch switches. Like the status reads, only a stuck
+/// command is stopped; a big repository on a cold disk is just slow.
+pub(crate) const LOCAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// Anything that talks to a remote: a big fetch over a slow link takes as
+/// long as a clone does.
+pub(crate) const NETWORK_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// Run `program args` in `dir`; its own error words on failure (see [`tidy`]).
 pub(crate) fn run(program: &str, dir: &Path, args: &[&str], timeout: Duration, env: &[(&str, &str)]) -> Result<String, String> {

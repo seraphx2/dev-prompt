@@ -58,6 +58,8 @@ pub struct AppState {
     pub scan_gate: Mutex<()>,
     /// The built-in shell's live sessions (see `pty.rs`).
     pub shells: std::sync::Arc<crate::pty::Sessions>,
+    /// Reads a screen is waiting on, cancelled when it's left.
+    pub reads: crate::provision::Reads,
     /// Each repo's working-copy state — branch, uncommitted work, unpushed
     /// commits — kept current in the background (see `status.rs`).
     pub statuses: crate::status::Statuses,
@@ -100,6 +102,7 @@ impl AppState {
             watcher: Mutex::new(None),
             scan_gate: Mutex::new(()),
             shells: Default::default(),
+            reads: Default::default(),
             statuses: crate::status::Statuses::load(),
             overlay_large: Mutex::new(false),
         }
@@ -290,8 +293,10 @@ pub async fn clone_repo(
     tool: String,
 ) -> AppResult<Repo> {
     let cfg = state.config.lock().unwrap().clone();
+    // One clone at a time; `cancel_read("clone")` stops it (the banner's Cancel).
+    let token = state.reads.start("clone");
     tauri::async_runtime::spawn_blocking(move || {
-        let repo = crate::clone::clone(&cfg, &root, &name, &url, &tool)?;
+        let repo = crate::provision::cancellable(token, || crate::clone::clone(&cfg, &root, &name, &url, &tool))?;
         let ctx = inspect_cold(&repo.path, &cfg);
         put_repo(&app, &repo, ctx);
         Ok::<_, AppError>(repo)
@@ -417,7 +422,8 @@ fn same_file(a: &Path, b: &Path) -> bool {
 #[tauri::command]
 pub async fn vcs_branches(state: State<'_, AppState>, path: String) -> AppResult<crate::vcs_ops::BranchList> {
     let dir = vcs_dir_for(&state, &path)?;
-    tauri::async_runtime::spawn_blocking(move || crate::vcs_ops::branches(&dir))
+    let token = state.reads.start("branches");
+    tauri::async_runtime::spawn_blocking(move || crate::provision::cancellable(token, || crate::vcs_ops::branches(&dir)))
         .await
         .map_err(|e| AppError::msg(format!("branch list task failed: {e}")))?
         .map_err(AppError::msg)
@@ -429,9 +435,12 @@ pub async fn vcs_branches(state: State<'_, AppState>, path: String) -> AppResult
 pub async fn vcs_details(state: State<'_, AppState>, path: String) -> AppResult<crate::vcs_ops::Details> {
     let dir = vcs_dir_for(&state, &path)?;
     let known = state.statuses.get(&path);
+    let token = state.reads.start("details");
     tauri::async_runtime::spawn_blocking(move || {
-        let s = known.unwrap_or_else(|| crate::vcs_state::read(&dir));
-        crate::vcs_ops::details(&dir, &s)
+        crate::provision::cancellable(token, || {
+            let s = known.unwrap_or_else(|| crate::vcs_state::read(&dir));
+            crate::vcs_ops::details(&dir, &s)
+        })
     })
     .await
     .map_err(|e| AppError::msg(format!("details task failed: {e}")))?
@@ -532,9 +541,18 @@ pub async fn assess_removal(
         let repos = state.repos.lock().unwrap();
         crate::removal::check_removable(&cfg, &repos, &path).map_err(AppError::msg)?
     };
-    tauri::async_runtime::spawn_blocking(move || crate::removal::assess(&dir))
+    let token = state.reads.start("removal");
+    tauri::async_runtime::spawn_blocking(move || crate::provision::cancellable(token, || crate::removal::assess(&dir)))
         .await
         .map_err(|e| AppError::msg(format!("checking the folder failed: {e}")))
+}
+
+/// The screen waiting on a read ("removal", "branches", "details") was left,
+/// or the clone banner's Cancel ("clone"):
+/// stop it, and whatever it started, so nothing keeps running in the repo.
+#[tauri::command]
+pub fn cancel_read(state: State<'_, AppState>, kind: String) {
+    state.reads.cancel(&kind);
 }
 
 /// Move a listed folder to the Recycle Bin / Trash and take it out of the
@@ -546,7 +564,10 @@ pub async fn remove_folder(
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     path: String,
+    shells_closed: Option<bool>,
 ) -> AppResult<bool> {
+    // Shells of ours in it were just closed: give them a moment to exit.
+    let settle = if shells_closed == Some(true) { std::time::Duration::from_secs(5) } else { Default::default() };
     let dir = {
         let cfg = state.config.lock().unwrap();
         let repos = state.repos.lock().unwrap();
@@ -556,7 +577,7 @@ pub async fn remove_folder(
     // drive without one); that prompt must not open behind the overlay.
     let _ = window.set_always_on_top(false);
     let item = tauri::async_runtime::spawn_blocking(move || {
-        let item = crate::removal::move_to_trash(&dir)?;
+        let item = crate::removal::move_to_trash(&dir, settle)?;
         drop_from_list(&app, &dir);
         Ok::<_, AppError>(item)
     })

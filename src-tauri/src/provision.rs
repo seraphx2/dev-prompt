@@ -11,6 +11,8 @@ use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -456,6 +458,51 @@ pub(crate) fn run_captured(program: &str, args: &[String], cwd: &Path, timeout: 
     run_captured_env(program, args, cwd, timeout, &[])
 }
 
+// --- reads a screen is waiting on ------------------------------------------
+
+thread_local! {
+    /// Set while this thread runs a read some screen is waiting on (see
+    /// [`cancellable`]); every captured command checks it.
+    static CANCEL: std::cell::RefCell<Option<Arc<AtomicBool>>> = const { std::cell::RefCell::new(None) };
+}
+
+fn cancelled() -> bool {
+    CANCEL.with(|c| c.borrow().as_ref().is_some_and(|t| t.load(Ordering::Relaxed)))
+}
+
+/// Run `f` — a read whose every command goes through [`run_captured_env`] on
+/// this thread — so that setting `token` stops the command under way (and all
+/// it started) and skips the rest. For a read a screen is waiting on: leave the
+/// screen, and nothing is left running in the repo.
+pub(crate) fn cancellable<T>(token: Arc<AtomicBool>, f: impl FnOnce() -> T) -> T {
+    CANCEL.with(|c| *c.borrow_mut() = Some(token));
+    let out = f();
+    CANCEL.with(|c| *c.borrow_mut() = None);
+    out
+}
+
+/// The reads screens are waiting on, by kind ("removal", "branches",
+/// "details"): starting one cancels the last of its kind, and leaving the
+/// screen cancels it.
+#[derive(Default)]
+pub struct Reads(Mutex<std::collections::HashMap<&'static str, Arc<AtomicBool>>>);
+
+impl Reads {
+    pub fn start(&self, kind: &'static str) -> Arc<AtomicBool> {
+        let token = Arc::new(AtomicBool::new(false));
+        if let Some(old) = self.0.lock().unwrap().insert(kind, token.clone()) {
+            old.store(true, Ordering::Relaxed);
+        }
+        token
+    }
+
+    pub fn cancel(&self, kind: &str) {
+        if let Some(t) = self.0.lock().unwrap().remove(kind) {
+            t.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
 /// [`run_captured`] with extra environment variables set for the command.
 pub(crate) fn run_captured_env(
     program: &str,
@@ -464,9 +511,13 @@ pub(crate) fn run_captured_env(
     timeout: Duration,
     env: &[(&str, &str)],
 ) -> Result<String, String> {
+    if cancelled() {
+        return Err("cancelled.".into());
+    }
     let mut cmd = command_for(program, args, cwd, env);
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| format!("couldn't start it ({e})"))?;
+    let tree = ProcessTree::adopt(&child);
 
     // Drain both pipes on their own threads so a chatty command can't fill one
     // and block while we wait on it.
@@ -489,9 +540,16 @@ pub(crate) fn run_captured_env(
         match child.try_wait() {
             Ok(Some(s)) => break s,
             Ok(None) if started.elapsed() >= timeout => {
+                tree.stop();
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(format!("it was still running after {}s and was stopped.", timeout.as_secs()));
+            }
+            Ok(None) if cancelled() => {
+                tree.stop();
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("cancelled.".into());
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(20)),
             Err(e) => return Err(format!("couldn't wait for it ({e})")),
@@ -507,6 +565,7 @@ pub(crate) fn run_captured_env(
         rx.recv_timeout(left).ok()
     };
     let (Some(out), Some(err)) = (collect(out), collect(err)) else {
+        tree.stop();
         return Err("it finished, but a process it started kept its output open past the time limit.".into());
     };
     let stdout = String::from_utf8_lossy(&out).into_owned();
@@ -522,6 +581,73 @@ pub(crate) fn run_captured_env(
     Err(if tail.is_empty() { format!("{code}.") } else { format!("{code}.\n{tail}") })
 }
 
+/// A captured command and everything it starts in turn, so a time limit
+/// stops all of it. Git for Windows' `git.exe` on PATH is a launcher that runs
+/// the real one: stopping only the launcher leaves the real Git running, its
+/// working folder inside the repo — which then can't be moved to the Recycle
+/// Bin or deleted. Windows groups them in a job object; Linux in a process
+/// group (see `command_for`). Best effort: where neither can be had, the
+/// command itself is still stopped.
+struct ProcessTree {
+    #[cfg(windows)]
+    job: Option<windows::Win32::Foundation::HANDLE>,
+    #[cfg(unix)]
+    group: i32,
+}
+
+impl ProcessTree {
+    #[cfg(windows)]
+    fn adopt(child: &std::process::Child) -> Self {
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW};
+        // What the launcher starts joins the job with it. It's assigned right
+        // after starting — before it has loaded far enough to start anything.
+        let job = unsafe { CreateJobObjectW(None, None) }.ok().filter(|job| unsafe {
+            AssignProcessToJobObject(*job, HANDLE(child.as_raw_handle())).is_ok() || {
+                let _ = CloseHandle(*job);
+                false
+            }
+        });
+        Self { job }
+    }
+
+    #[cfg(windows)]
+    fn stop(&self) {
+        if let Some(job) = self.job {
+            let _ = unsafe { windows::Win32::System::JobObjects::TerminateJobObject(job, 1) };
+        }
+    }
+
+    #[cfg(unix)]
+    fn adopt(child: &std::process::Child) -> Self {
+        Self { group: child.id() as i32 }
+    }
+
+    /// The whole group: asked first (`flatpak-spawn` passes that on to the
+    /// host side), then made.
+    #[cfg(unix)]
+    fn stop(&self) {
+        extern "C" {
+            fn kill(pid: i32, sig: i32) -> i32;
+        }
+        const SIGTERM: i32 = 15;
+        const SIGKILL: i32 = 9;
+        unsafe { kill(-self.group, SIGTERM) };
+        std::thread::sleep(Duration::from_millis(200));
+        unsafe { kill(-self.group, SIGKILL) };
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ProcessTree {
+    fn drop(&mut self) {
+        if let Some(job) = self.job {
+            let _ = unsafe { windows::Win32::Foundation::CloseHandle(job) };
+        }
+    }
+}
+
 #[cfg(windows)]
 fn command_for(program: &str, args: &[String], cwd: &Path, env: &[(&str, &str)]) -> Command {
     use std::os::windows::process::CommandExt;
@@ -533,6 +659,7 @@ fn command_for(program: &str, args: &[String], cwd: &Path, env: &[(&str, &str)])
 
 #[cfg(not(windows))]
 fn command_for(program: &str, args: &[String], cwd: &Path, env: &[(&str, &str)]) -> Command {
+    use std::os::unix::process::CommandExt;
     // Inside Flatpak the version-control tools live on the host — same route
     // `launch.rs` takes, but waited on rather than detached. The sandbox's own
     // environment doesn't reach the host, so the variables go as flags.
@@ -543,10 +670,12 @@ fn command_for(program: &str, args: &[String], cwd: &Path, env: &[(&str, &str)])
             c.arg(format!("--env={k}={v}"));
         }
         c.arg("--").arg(program).args(args);
+        c.process_group(0);
         return c;
     }
     let mut c = Command::new(program);
-    c.args(args).current_dir(cwd).envs(env.iter().copied());
+    // Its own process group, so a time limit can stop what it started too.
+    c.args(args).current_dir(cwd).envs(env.iter().copied()).process_group(0);
     c
 }
 
@@ -567,6 +696,67 @@ mod tests {
         let got = run_captured(program, &args, &std::env::temp_dir(), Duration::from_secs(2));
         assert!(got.is_err(), "{got:?}");
         assert!(started.elapsed() < Duration::from_secs(8), "took {:?}", started.elapsed());
+    }
+
+    /// A command that's only a launcher (Git for Windows' `git.exe` on PATH)
+    /// waits on what it started; the time limit stops that too, so nothing is
+    /// left holding the folder it ran in.
+    #[test]
+    fn the_time_limit_stops_what_the_command_started() {
+        let dir = std::env::temp_dir().join(format!(
+            "dp-tree-{}",
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        #[cfg(windows)]
+        let (program, args) = ("cmd", vec!["/c".to_string(), "ping -n 37 127.0.0.1 >nul".to_string()]);
+        #[cfg(not(windows))]
+        let (program, args) = ("sh", vec!["-c".to_string(), "sleep 37; true".to_string()]);
+        let got = run_captured(program, &args, &dir, Duration::from_secs(1));
+        assert!(got.unwrap_err().contains("stopped"));
+
+        // Windows: a process left behind would keep the folder from going.
+        #[cfg(windows)]
+        assert!(std::fs::remove_dir_all(&dir).is_ok(), "something still holds {}", dir.display());
+        // Linux: the folder could go regardless — look for the process.
+        #[cfg(not(windows))]
+        {
+            std::thread::sleep(Duration::from_millis(300));
+            let left = std::process::Command::new("pgrep").args(["-f", "sleep 37"]).output().unwrap();
+            assert!(left.stdout.is_empty(), "sleep 37 is still running");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// Leaving the screen a read was for stops it at once — and what it
+    /// started — and the read's later commands don't start.
+    #[test]
+    fn a_cancelled_read_stops_its_command_and_skips_the_rest() {
+        #[cfg(windows)]
+        let (program, args) = ("cmd", vec!["/c".to_string(), "ping -n 38 127.0.0.1 >nul".to_string()]);
+        #[cfg(not(windows))]
+        let (program, args) = ("sh", vec!["-c".to_string(), "sleep 38; true".to_string()]);
+        let reads = Reads::default();
+        let token = reads.start("removal");
+        let started = Instant::now();
+        let (first, second) = std::thread::scope(|s| {
+            s.spawn(|| {
+                std::thread::sleep(Duration::from_millis(300));
+                reads.cancel("removal");
+            });
+            cancellable(token, || {
+                let dir = std::env::temp_dir();
+                let long = Duration::from_secs(60);
+                (run_captured(program, &args, &dir, long), run_captured(program, &args, &dir, long))
+            })
+        });
+        assert_eq!(first.unwrap_err(), "cancelled.");
+        assert_eq!(second.unwrap_err(), "cancelled.");
+        assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
+        // A new read of the same kind cancels the one before it.
+        let a = reads.start("details");
+        let _b = reads.start("details");
+        assert!(a.load(Ordering::Relaxed));
     }
 
     fn vars(pairs: &[(&'static str, &str)]) -> HashMap<&'static str, String> {

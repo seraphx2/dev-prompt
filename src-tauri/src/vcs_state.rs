@@ -16,8 +16,11 @@ use serde::{Deserialize, Serialize};
 use crate::provision::run_captured_env;
 use crate::rules::which;
 
-/// Each version-control query gets this long; a slower answer counts as "couldn't check".
-const CHECK_TIMEOUT: Duration = Duration::from_secs(10);
+/// Only a command that's stuck (a network drive gone, a lock held elsewhere)
+/// is stopped, and then counts as "couldn't check". A slow answer is waited
+/// for: the first look at a big repository on a cold disk can take minutes,
+/// and these reads run in the background anyway.
+const CHECK_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// Reads must never write. Without this `git status` refreshes the index as a
 /// side effect, which the watcher would see as a change and read again.

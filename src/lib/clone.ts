@@ -22,3 +22,19 @@ export function cloneLabel(text: string): string {
     .replace(/\.git\/?$/, "")
     .replace(/\/$/, "");
 }
+
+/** What the clone form asks for: clone `url` into `<root>/<name>` with `tool`.
+ *  `source` is the address as typed — the form it came from is reopened by it. */
+export interface CloneRequest {
+  root: string;
+  name: string;
+  url: string;
+  tool: string;
+  source: string;
+}
+
+/** The clone under way (one at a time), or the last one that failed. */
+export interface CloneJob extends CloneRequest {
+  state: "running" | "failed";
+  error?: string;
+}

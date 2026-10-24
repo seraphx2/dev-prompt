@@ -282,7 +282,13 @@ Breezy in turn — and offers the installed tools that can clone it: Git or
 Jujutsu (colocated) for a Git repository, Mercurial, Subversion, Fossil or
 Breezy for theirs. Nothing waits on a password prompt you can't see: Git's
 credential manager still asks in its own window, and an SSH key needs to be
-in your agent. If the clone fails, its folder is removed again.
+in your agent. If the clone fails, the form says why in plain words (a
+private repository you're not signed in to, an SSH key that isn't loaded, a
+server that can't be reached) and its folder is removed again. A big clone
+can take a while, and it doesn't hold you up: press `Esc` and carry on, or
+hide the overlay. A bar above the footer shows it's still going, with **Show**
+to watch it and **Cancel** to stop it (the half-cloned folder goes too). When
+it's done, or if it fails, a notification says so if you're not looking.
 
 A folder that isn't under version control yet (notes, documents, a project you
 haven't set up) shows up without a branch, and its action menu offers **Set up

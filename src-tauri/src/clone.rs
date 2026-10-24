@@ -18,6 +18,9 @@ use crate::error::{AppError, AppResult};
 use crate::provision::{self, ToolView};
 use crate::scan::{self, Repo};
 
+/// What a cancelled clone answers, so the frontend can tell it from a failure.
+pub const CANCELLED: &str = "Clone cancelled.";
+
 /// A big repository over a slow link takes minutes; past this it's stuck.
 const CLONE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// Asking a tool whether it can read the URL, while the form waits.
@@ -220,8 +223,13 @@ pub fn clone(cfg: &Config, root: &str, name: &str, url: &str, tool: &str) -> App
             .ok_or_else(|| AppError::msg(format!("`{}` isn't on PATH.", argv[0])))?;
         if let Err(e) = provision::run_captured_env(&program, &argv[1..], &root_dir, CLONE_TIMEOUT, ENV) {
             let cleanup = remove(&dir);
+            // Cancelled from the banner: that's the answer, not a failure.
+            if e == "cancelled." {
+                return Err(AppError::msg(format!("{CANCELLED}{cleanup}")));
+            }
+            let why = explain(&e).map(|w| format!("{w}\n\n")).unwrap_or_default();
             return Err(AppError::msg(format!(
-                "`{}` failed: {e}{cleanup}",
+                "{why}`{}` failed: {e}{cleanup}",
                 provision::display_command(&argv)
             )));
         }
@@ -231,6 +239,53 @@ pub fn clone(cfg: &Config, root: &str, name: &str, url: &str, tool: &str) -> App
         _ => Err(AppError::msg(format!(
             "{label} finished, but the folder isn't a checkout dev-prompt recognizes. It was kept: {at}"
         ))),
+    }
+}
+
+/// The plain-language reason behind a failed clone's output, for the usual
+/// ones — the tool's own words follow it on the form. A private repository
+/// you can't see looks the same as a missing one: GitHub answers "not found".
+fn explain(output: &str) -> Option<&'static str> {
+    let o = output.to_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|n| o.contains(n));
+    if has(&["permission denied (publickey", "host key verification failed"]) {
+        Some(
+            "The server didn't accept your SSH key. Load it into your SSH agent \
+             (ssh-add), or clone the https:// address instead.",
+        )
+    } else if has(&[
+        "could not resolve host",
+        "could not resolve hostname",
+        "name or service not known",
+        "failed to connect",
+        "connection timed out",
+        "connection refused",
+        "network is unreachable",
+        "e170013",
+    ]) {
+        Some("Couldn't reach that server. Check the address and your connection.")
+    } else if has(&[
+        "repository not found",
+        "not found",
+        "error: 404",
+        "error 404",
+        "could not read username",
+        "authentication failed",
+        "authorization failed",
+        "authorization required",
+        "e170001",
+        "login failed",
+        "access denied",
+        "error: 403",
+        "error 403",
+    ]) {
+        Some(
+            "Not found, or it's private and you're not signed in to it. Check the \
+             address; for a private repository, sign in when Git's credential \
+             manager asks, or use an address your SSH key can reach.",
+        )
+    } else {
+        None
     }
 }
 
@@ -279,6 +334,19 @@ mod tests {
         assert_eq!(kind_from_url("https://example.com/some/repo"), None);
     }
 
+    #[test]
+    fn the_usual_failures_get_a_plain_reason() {
+        let ssh = "exit code 128.\ngit@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.";
+        assert!(explain(ssh).unwrap().contains("SSH key"));
+        let private = "exit code 128.\nremote: Repository not found.\nfatal: repository 'https://github.com/a/b/' not found";
+        assert!(explain(private).unwrap().contains("private"));
+        let no_prompt = "fatal: could not read Username for 'https://github.com': terminal prompts disabled";
+        assert!(explain(no_prompt).unwrap().contains("signed in"));
+        let offline = "fatal: unable to access 'https://nowhere.invalid/x/': Could not resolve host: nowhere.invalid";
+        assert!(explain(offline).unwrap().contains("reach"));
+        assert!(explain("exit code 1.\nsomething nobody planned for").is_none());
+    }
+
     /// End to end against a local Git repository, when Git is installed: the
     /// plan asks Git (a plain path says nothing), the clone lands in the root,
     /// and a second clone to the same name is refused before running.
@@ -315,6 +383,12 @@ mod tests {
         assert!(repo.vcs.is_some());
         assert!(root.join("copy").join("a.txt").is_file());
         assert!(clone(&cfg, &r, "copy", &url, "git").is_err(), "the folder exists now");
+
+        // Cancelled (the banner's Cancel): says so, and leaves no folder.
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let got = provision::cancellable(stop, || clone(&cfg, &r, "cancelled", &url, "git"));
+        assert!(got.unwrap_err().to_string().starts_with(CANCELLED));
+        assert!(!root.join("cancelled").exists());
 
         // A failed clone leaves nothing behind (Fossil's makes its folder first).
         if provision::resolve_program("fossil").is_some() {

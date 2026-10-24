@@ -488,6 +488,7 @@ pub fn run() {
             commands::create_repo,
             commands::init_repo,
             commands::clone_plan,
+            commands::cancel_read,
             commands::clone_repo,
             commands::list_statuses,
             commands::refresh_statuses,

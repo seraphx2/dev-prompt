@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import type { Branch, BranchList, Repo, RepoStatus, SwitchTarget, VcsOutcome, Worktree } from "../types";
-  import { vcsAddCopy, vcsBranches, vcsSwitch } from "../ipc";
+  import { cancelRead, vcsAddCopy, vcsBranches, vcsSwitch } from "../ipc";
   import { fuzzyScore } from "../fuzzy";
   import { ago, plural, vocab } from "../vcsStatus";
   import { icons } from "../icons";
@@ -50,6 +50,11 @@
     vcsBranches(repo.path)
       .then((l) => (list = l))
       .catch((e) => (loadError = `${e}`));
+  });
+  // Left before the list arrived: stop reading it, so nothing keeps running in
+  // the repo.
+  onDestroy(() => {
+    if (!list && !loadError) void cancelRead("branches");
   });
 
   const base = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;

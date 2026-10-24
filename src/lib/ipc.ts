@@ -295,8 +295,16 @@ export function assessRemoval(path: string): Promise<RemovalAssessment> {
 
 /** Move a listed folder to the Recycle Bin / Trash. Resolves to whether Undo
  *  is available. */
-export function removeFolder(path: string): Promise<boolean> {
-  return invoke<boolean>("remove_folder", { path });
+/** The screen waiting on a read ("removal", "branches", "details") was
+ *  left: stop it, so nothing keeps running in the repo. */
+export function cancelRead(kind: "removal" | "branches" | "details" | "clone"): Promise<void> {
+  return invoke<void>("cancel_read", { kind });
+}
+
+/** Move `path` to the bin; `shellsClosed`: shells of ours in it were just
+ *  closed, so wait a moment for them to let go. */
+export function removeFolder(path: string, shellsClosed = false): Promise<boolean> {
+  return invoke<boolean>("remove_folder", { path, shellsClosed });
 }
 
 /** Put the folder last moved to the bin back. Resolves to its path. */

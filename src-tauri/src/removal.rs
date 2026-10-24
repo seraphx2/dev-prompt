@@ -216,11 +216,23 @@ fn plural<'a>(n: usize, one: &'a str, many: &'a str) -> &'a str {
 
 /// Move `dir` to the Recycle Bin / Trash. Returns the trash entry it became,
 /// for Undo — `None` when it went but can't be found again in the bin.
-pub fn move_to_trash(dir: &Path) -> AppResult<Option<trash::TrashItem>> {
+/// `settle`: how long to keep trying while something lets go of the folder —
+/// a shell of dev-prompt's own that was just closed takes a moment to exit.
+/// Zero tries once: a retry could repeat Windows' "permanently delete?" prompt.
+pub fn move_to_trash(dir: &Path, settle: std::time::Duration) -> AppResult<Option<trash::TrashItem>> {
     let before: HashSet<OsString> = trashed_at(dir).into_iter().map(|i| i.id).collect();
-    trash::delete(dir).map_err(|e| {
+    let started = std::time::Instant::now();
+    let moved = loop {
+        match trash::delete(dir) {
+            Err(_) if started.elapsed() < settle && dir.exists() => {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            other => break other,
+        }
+    };
+    moved.map_err(|e| {
         AppError::msg(format!(
-            "Couldn't move {} to the {}: {e}. If a program has files in it open, close it and try again.",
+            "Couldn't move {} to the {}: {e}. If a program has files in it open, or a terminal is working in it, close it and try again.",
             dir.display(),
             bin_name()
         ))
@@ -530,7 +542,7 @@ mod tests {
         #[cfg(not(target_os = "linux"))]
         let dir = tmp("bin");
         std::fs::write(dir.join("keep.txt"), "precious").unwrap();
-        let item = move_to_trash(&dir).unwrap().expect("found again in the bin");
+        let item = move_to_trash(&dir, Default::default()).unwrap().expect("found again in the bin");
         assert!(!dir.exists());
         let back = restore(item).unwrap();
         assert!(same_path(&back, &dir));
