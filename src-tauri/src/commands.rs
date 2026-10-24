@@ -736,12 +736,14 @@ pub async fn refresh_repo_context(
 
 /// `async` + `spawn_blocking` for the same reason as [`build_actions`], plus the
 /// `CreateProcess` in `launch::launch` — the overlay `await`s this before it
-/// dismisses.
+/// dismisses. `elevated`: as administrator / root (Shift), for an action that
+/// has such a launch.
 #[tauri::command]
 pub async fn run_action(
     state: State<'_, AppState>,
     action_id: String,
     path: String,
+    elevated: Option<bool>,
 ) -> AppResult<()> {
     let repo = repo_for_path(&state, &path);
     let cached = state.contexts.lock().unwrap().get(&repo.path).cloned();
@@ -750,7 +752,11 @@ pub async fn run_action(
         let ctx = cached.unwrap_or_else(|| inspect_cold(&repo.path, &cfg));
         let action = find_action(&repo, &ctx, &cfg, &action_id)
             .ok_or_else(|| AppError::msg(format!("unknown action: {action_id}")))?;
-        launch::launch(&action, &repo)?;
+        if elevated == Some(true) {
+            launch::launch_elevated(&action, &repo)?;
+        } else {
+            launch::launch(&action, &repo)?;
+        }
         // Only the reorderable universal tier benefits from usage history — the
         // fixed-hotkey quick actions (their `hotkey` comes straight from
         // `default_config.yaml`, see `RuleAction::hotkey`) never move in the
@@ -1434,13 +1440,15 @@ fn store_apps(app: &AppHandle, state: &AppState, index: apps::Index) -> AppsPayl
 /// Launch an installed app, bumping its frecency count only if the launch
 /// actually starts (a stale entry whose exe is gone shouldn't climb the list).
 /// `async` + `spawn_blocking`: keeps the spawn and the frecency file write off
-/// the UI thread, which is about to dismiss the overlay.
+/// the UI thread, which is about to dismiss the overlay. `elevated`: Run as
+/// administrator (Shift) — Windows desktop apps only.
 #[tauri::command]
 pub async fn run_app(
     exec: String,
     kind: String,
     args: Option<Vec<String>>,
     terminal: Option<bool>,
+    elevated: Option<bool>,
 ) -> AppResult<()> {
     let kind = match kind.as_str() {
         "aumid" => crate::apps::AppKind::Aumid,
@@ -1456,7 +1464,14 @@ pub async fn run_app(
         terminal: terminal.unwrap_or(false),
         source: String::new(),
     };
-    tauri::async_runtime::spawn_blocking(move || apps::launch(&entry))
+    let elevated = elevated == Some(true);
+    tauri::async_runtime::spawn_blocking(move || {
+        if elevated {
+            apps::launch_elevated(&entry)
+        } else {
+            apps::launch(&entry)
+        }
+    })
         .await
         .map_err(|e| AppError::msg(format!("launch task failed: {e}")))??;
     // Frecency write stays off the UI thread but is still awaited: it's a

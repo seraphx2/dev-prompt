@@ -66,6 +66,27 @@ pub struct Action {
     /// spawning. See `RuleAction::remove`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub remove: bool,
+    /// The same launch as administrator (Windows) or root (Linux), for the
+    /// actions that can have one — Shift+Enter, or Shift on a quick action's
+    /// key. The frontend only sees `elevated: true`. See [`elevate`].
+    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "elevatable")]
+    pub elevated: Option<Elevated>,
+}
+
+/// How to launch an action elevated. Windows hands `params` to the "runas"
+/// verb as one command line, since it may be `cmd`'s (which quotes its own
+/// way); Linux runs `program args` like any other launch.
+#[derive(Debug, Clone)]
+pub struct Elevated {
+    pub program: String,
+    #[cfg(windows)]
+    pub params: String,
+    #[cfg(not(windows))]
+    pub args: Vec<String>,
+}
+
+fn elevatable<S: serde::Serializer>(e: &Option<Elevated>, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_bool(e.is_some())
 }
 
 // --- program resolution (process-global memo) -----------------------------
@@ -870,8 +891,13 @@ fn pick_terminal_binary(resolver: &Resolver) -> (String, bool) {
 
 #[cfg(not(windows))]
 fn pick_terminal_binary(resolver: &Resolver) -> (String, bool) {
+    let pinned = resolver
+        .terminal
+        .and_then(|t| if t.contains('/') { Some(t.to_string()) } else { which(t) });
     (
-        resolver.resolve("terminal").unwrap_or_else(|| "xterm".to_string()),
+        pinned
+            .or_else(|| resolver.resolve("terminal"))
+            .unwrap_or_else(|| "xterm".to_string()),
         false,
     )
 }
@@ -966,6 +992,92 @@ fn terminalize(
     }
 }
 
+/// [`terminalize`]'s launch again, as administrator. Windows doesn't reliably
+/// keep an elevated process's working directory, so the folder travels in the
+/// command line: the terminals that take one (`wt -d`, …) already carry it,
+/// and anything else starts from `cmd`, which `pushd`es there first.
+#[cfg(windows)]
+fn elevate(argv: &[String], cwd: &str, resolver: &Resolver) -> Option<Elevated> {
+    let (program, args, at) = terminalize(argv, cwd, resolver);
+    // The "runas" verb wants a file, not a name to look up (`wt.exe` is an
+    // App Execution Alias on PATH).
+    let program = if program.contains(['/', '\\']) {
+        program
+    } else {
+        which(&program).unwrap_or(program)
+    };
+    let line = |program: &str, args: &[String]| {
+        std::iter::once(program)
+            .chain(args.iter().map(String::as_str))
+            .map(win_quote)
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    Some(match at {
+        None => Elevated {
+            params: args.iter().map(|a| win_quote(a)).collect::<Vec<_>>().join(" "),
+            program,
+        },
+        // `/s` makes `cmd` strip just the outer quotes and run the rest as is.
+        Some(dir) => Elevated {
+            params: format!("/s /c \"pushd {} && {}\"", win_quote(&dir), line(&program, &args)),
+            program: "cmd.exe".to_string(),
+        },
+    })
+}
+
+/// A plain terminal in `cwd` with a root shell (`sudo -s`, else `doas -s`,
+/// both of which stay in the folder), for the emulators whose way of taking a
+/// command is known. Only the bare terminal: running a project's own commands
+/// as root leaves root-owned files in the repo (`node_modules`, `target/`).
+#[cfg(not(windows))]
+fn elevate(argv: &[String], cwd: &str, resolver: &Resolver) -> Option<Elevated> {
+    if !argv.is_empty() {
+        return None;
+    }
+    let su = ["sudo", "doas"].into_iter().find(|s| which(s).is_some())?;
+    let (term, _) = pick_terminal_binary(resolver);
+    let root = [su.to_string(), "-s".to_string()];
+    let with = |lead: Vec<String>| -> Vec<String> { lead.into_iter().chain(root.iter().cloned()).collect() };
+    let args: Vec<String> = match basename(&term).to_lowercase().as_str() {
+        "alacritty" => with(vec!["--working-directory".into(), cwd.into(), "-e".into()]),
+        "kitty" => with(vec!["--directory".into(), cwd.into()]),
+        "wezterm" | "wezterm-gui" => with(vec!["start".into(), "--cwd".into(), cwd.into(), "--".into()]),
+        "foot" => with(vec![format!("--working-directory={cwd}")]),
+        "gnome-terminal" => with(vec![format!("--working-directory={cwd}"), "--".into()]),
+        "konsole" => with(vec!["--workdir".into(), cwd.into(), "-e".into()]),
+        "xfce4-terminal" => with(vec![format!("--working-directory={cwd}"), "-x".into()]),
+        // Debian requires `x-terminal-emulator` to take `-e`; both start in
+        // the working directory they're given.
+        "xterm" | "x-terminal-emulator" => with(vec!["-e".into()]),
+        _ => return None,
+    };
+    Some(Elevated { program: term, args })
+}
+
+/// Quote one argument the way Windows programs split their command line.
+#[cfg(windows)]
+pub(crate) fn win_quote(arg: &str) -> String {
+    if !arg.is_empty() && !arg.contains([' ', '\t', '"']) {
+        return arg.to_string();
+    }
+    let mut out = String::from('"');
+    let mut slashes = 0;
+    for c in arg.chars() {
+        if c == '\\' {
+            slashes += 1;
+            continue;
+        }
+        // Backslashes are literal unless they end up before a quote.
+        out.push_str(&"\\".repeat(if c == '"' { slashes * 2 + 1 } else { slashes }));
+        slashes = 0;
+        out.push(c);
+    }
+    out.push_str(&"\\".repeat(slashes * 2));
+    out.push('"');
+    out
+}
+
 // --- action construction ---------------------------------------------
 
 fn build_action(
@@ -993,6 +1105,7 @@ fn build_action(
             prompt: false,
             provision: false,
             remove: false,
+            elevated: None,
         });
     }
 
@@ -1019,6 +1132,7 @@ fn build_action(
             prompt: false,
             provision: false,
             remove: true,
+            elevated: None,
         });
     }
 
@@ -1041,6 +1155,7 @@ fn build_action(
             prompt: false,
             provision: true,
             remove: false,
+            elevated: None,
         });
     }
 
@@ -1062,6 +1177,7 @@ fn build_action(
             prompt: true,
             provision: false,
             remove: false,
+            elevated: None,
         });
     }
 
@@ -1085,18 +1201,19 @@ fn build_action(
         (String::new(), Vec::new(), "terminal".to_string())
     };
 
-    let (final_prog, final_args, final_cwd) = if ra.terminal {
+    let (final_prog, final_args, final_cwd, elevated) = if ra.terminal {
         let argv: Vec<String> = if program.is_empty() {
             Vec::new()
         } else {
             std::iter::once(program.clone()).chain(args).collect()
         };
-        terminalize(&argv, cwd, resolver)
+        let (p, a, c) = terminalize(&argv, cwd, resolver);
+        (p, a, c, elevate(&argv, cwd, resolver))
     } else {
         if program.is_empty() {
             return None;
         }
-        (program, args, Some(cwd.to_string()))
+        (program, args, Some(cwd.to_string()), None)
     };
 
     Some(Action {
@@ -1115,6 +1232,7 @@ fn build_action(
         prompt: false,
         provision: false,
         remove: false,
+        elevated,
     })
 }
 
@@ -1139,6 +1257,7 @@ fn provider_actions(
     let term_in = |id: String, label: String, argv: Vec<String>, at: &str| -> Action {
         let hint = argv.join(" ");
         let (p, a, c) = terminalize(&argv, at, resolver);
+        let elevated = elevate(&argv, at, resolver);
         Action {
             id,
             label,
@@ -1155,6 +1274,7 @@ fn provider_actions(
             prompt: false,
             provision: false,
             remove: false,
+            elevated,
         }
     };
     let term = |id: String, label: String, argv: Vec<String>| term_in(id, label, argv, cwd);
@@ -2155,6 +2275,70 @@ mod tests {
             &pin("C:/x/kitty.exe", Some("kitty --directory {{dir}} -- {{cmd}}")),
         );
         assert_eq!(a, vec!["--directory", "C:\\my repo", "--", "my tool", "go"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn elevate_opens_a_root_shell_in_a_plain_terminal() {
+        let Some(su) = ["sudo", "doas"].into_iter().find(|s| which(s).is_some()) else {
+            return; // nothing to elevate with on this machine
+        };
+        let programs = std::collections::BTreeMap::new();
+        let pin = |p: &'static str| Resolver::new(&programs).with_terminal(Some(p), None);
+
+        let e = elevate(&[], "/repo", &pin("/usr/bin/konsole")).unwrap();
+        assert_eq!(e.program, "/usr/bin/konsole");
+        assert_eq!(e.args, ["--workdir", "/repo", "-e", su, "-s"]);
+        let e = elevate(&[], "/repo", &pin("/usr/bin/gnome-terminal")).unwrap();
+        assert_eq!(e.args, ["--working-directory=/repo", "--", su, "-s"]);
+
+        // A project's own command doesn't run as root, and an emulator whose
+        // way of taking a command isn't known gets no elevated launch.
+        assert!(elevate(&["npm".into(), "test".into()], "/repo", &pin("/usr/bin/konsole")).is_none());
+        assert!(elevate(&[], "/repo", &pin("/opt/mystery-term")).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn win_quote_round_trips_through_the_windows_split() {
+        for arg in [
+            "plain",
+            "",
+            "C:\\my repo",
+            "C:\\trailing\\",
+            "C:\\my dir\\",
+            "say \"hi\"",
+            "a\\\"b",
+            "& 'C:\\a b\\tool.exe' 'run'",
+        ] {
+            assert_eq!(win_split_args(&win_quote(arg)), [arg], "{arg:?}");
+        }
+        assert_eq!(win_quote("plain"), "plain");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn elevate_keeps_the_folder_on_the_command_line() {
+        let programs = std::collections::BTreeMap::new();
+        let argv = vec!["cargo".to_string(), "test".to_string()];
+        let cwd = "C:\\my repo";
+        let pin = |p: &'static str| Resolver::new(&programs).with_terminal(Some(p), None);
+
+        // Windows Terminal takes the folder itself: run it straight.
+        let e = elevate(&argv, cwd, &pin("C:/x/wt.exe")).unwrap();
+        assert_eq!(e.program, "C:/x/wt.exe");
+        let split = win_split_args(&e.params);
+        assert_eq!(&split[..2], &["-d", cwd]);
+        assert_eq!(split.last().unwrap(), "& 'cargo' 'test'");
+
+        // A terminal that only gets a working directory: `cmd` goes there first.
+        let e = elevate(&argv, cwd, &pin("C:/x/kitty.exe")).unwrap();
+        assert_eq!(e.program, "cmd.exe");
+        assert_eq!(e.params, "/s /c \"pushd \"C:\\my repo\" && C:/x/kitty.exe cargo test\"");
+
+        // The plain terminal elevates too.
+        let e = elevate(&[], cwd, &pin("C:/x/wt.exe")).unwrap();
+        assert_eq!(win_split_args(&e.params), ["-d", cwd]);
     }
 
     #[test]

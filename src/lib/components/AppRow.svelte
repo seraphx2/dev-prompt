@@ -10,13 +10,18 @@
     active,
     onactivate,
     onhover,
+    elevating = false,
+    adminWord = "administrator",
   }: {
     app: AppEntry;
     /** Character indices in `app.name` the query matched. */
     positions: number[];
     active: boolean;
-    onactivate: () => void;
+    onactivate: (e: MouseEvent) => void;
     onhover: () => void;
+    /** Shift is held on this row and it can run as administrator: say so. */
+    elevating?: boolean;
+    adminWord?: string;
   } = $props();
 
   // Iconless terminal apps (htop, btop…) get the terminal glyph; everything
@@ -52,6 +57,14 @@
   <div class="min-w-0 flex-1">
     <div class="truncate text-[13px] leading-tight text-white/90">
       <Highlight text={app.name} indices={positions} />
+      {#if elevating}
+        {" "}<span class="text-sky-300">as {adminWord}</span><svg
+          class="ml-1 inline h-3.5 w-3.5 align-[-2px]"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          aria-hidden="true">{@html icons.shield.raw}</svg
+        >
+      {/if}
     </div>
     <div
       class="overflow-hidden whitespace-nowrap font-mono text-[11px] leading-tight text-white/50"

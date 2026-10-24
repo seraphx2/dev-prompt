@@ -1682,6 +1682,23 @@ pub fn launch(entry: &AppEntry) -> AppResult<()> {
     }
 }
 
+/// [`launch`] as administrator — the UAC prompt, then the app. Only a Windows
+/// desktop app has that; a Store app (`Aumid`) can't be started elevated, and
+/// a Linux one isn't meant to run as root.
+pub fn launch_elevated(entry: &AppEntry) -> AppResult<()> {
+    #[cfg(windows)]
+    if entry.kind == AppKind::Exe {
+        let cwd = std::path::Path::new(&entry.exec)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let params: Vec<String> = entry.args.iter().map(|a| crate::rules::win_quote(a)).collect();
+        return crate::launch::run_as_admin(&entry.exec, &params.join(" "), &cwd);
+    }
+    let _ = entry;
+    Err(crate::error::AppError::msg("this app can't run as administrator"))
+}
+
 // Windows-only: every case drives the discovery scoring (`keep_entry`,
 // `prune_scanned`, `dedupe*`, `into_scored`, `looks_like_main_binary`) with
 // `C:\`-style paths and `.exe` semantics. The code under test never runs off

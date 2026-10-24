@@ -45,6 +45,69 @@ pub fn launch(action: &Action, repo: &Repo) -> AppResult<()> {
     spawn_detached(&action.program, &args, &cwd, true)
 }
 
+/// [`launch`], as administrator (Windows: the UAC prompt) or root (Linux: the
+/// terminal asks for the password). Only for an action with an `elevated`
+/// launch — see `rules::elevate`.
+pub fn launch_elevated(action: &Action, repo: &Repo) -> AppResult<()> {
+    let Some(e) = &action.elevated else {
+        return Err(AppError::msg("this action can't run elevated"));
+    };
+    let cwd = action
+        .cwd
+        .as_deref()
+        .map(|c| substitute(c, repo))
+        .unwrap_or_else(|| repo.path.clone());
+    #[cfg(windows)]
+    {
+        run_as_admin(&e.program, &substitute(&e.params, repo), &cwd)
+    }
+    #[cfg(not(windows))]
+    {
+        let args: Vec<String> = e.args.iter().map(|a| substitute(a, repo)).collect();
+        spawn_detached(&e.program, &args, &cwd, false)
+    }
+}
+
+/// Start `program` through the "runas" verb: Windows shows its UAC prompt,
+/// and a "No" there is the user's answer, not a failure. `params` is the raw
+/// command line. The working directory is passed too, but Windows doesn't
+/// reliably honour it for an elevated process — callers carry the folder in
+/// the command line as well.
+#[cfg(windows)]
+pub fn run_as_admin(program: &str, params: &str, cwd: &str) -> AppResult<()> {
+    use windows::core::{w, HSTRING, PCWSTR};
+    use windows::Win32::Foundation::ERROR_CANCELLED;
+    use windows::Win32::System::Com::{
+        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+    };
+    use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW};
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let (file, params, dir) = (HSTRING::from(program), HSTRING::from(params), HSTRING::from(cwd));
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOASYNC,
+        lpVerb: w!("runas"),
+        lpFile: PCWSTR(file.as_ptr()),
+        lpParameters: PCWSTR(params.as_ptr()),
+        lpDirectory: if cwd.is_empty() { PCWSTR::null() } else { PCWSTR(dir.as_ptr()) },
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+    // ShellExecuteEx may hand off to shell extensions, which want COM on the
+    // calling thread (a blocking-pool thread here, so nothing else owns it).
+    let com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) };
+    let ran = unsafe { ShellExecuteExW(&mut info) };
+    if com.is_ok() {
+        unsafe { CoUninitialize() };
+    }
+    match ran {
+        Ok(()) => Ok(()),
+        Err(e) if e.code() == ERROR_CANCELLED.to_hresult() => Ok(()),
+        Err(e) => Err(AppError::msg(format!("failed to launch {program} as administrator: {e}"))),
+    }
+}
+
 /// Spawn an arbitrary program fully detached (no console, outlives the overlay).
 /// Used by the app launcher, whose `program` is already a fully-resolved path —
 /// so it spawns directly. An empty `cwd` leaves the working directory inherited

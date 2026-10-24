@@ -132,8 +132,6 @@ icons, frecency, `apps.{enabled,extra_dirs,exclude}`, Settings controls. Left:
   top ~4 app hits under a dim `— Apps —` divider without leaving repo scope.
   Needs the keyboard-nav model to walk a mixed list and Enter to branch (repo →
   action menu, app → launch).
-- **App action menu** — Tab on an app row → Open / Open file location / Run as
-  administrator / Copy path. Currently Tab is a no-op in the `>` scope.
 - **Native enumeration** — replace the embedded PowerShell script with direct
   registry reads + `IShellLink` if the ~4 s cold rescan ever matters.
 

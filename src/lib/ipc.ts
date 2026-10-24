@@ -73,9 +73,10 @@ export function refreshRepoContext(path: string): Promise<void> {
   return invoke<void>("refresh_repo_context", { path });
 }
 
-/** Spawn the action's process detached from the overlay. */
-export function runAction(actionId: string, path: string): Promise<void> {
-  return invoke<void>("run_action", { actionId, path });
+/** Spawn the action's process detached from the overlay — `elevated`: as
+ *  administrator / root, for an action with `elevated` set. */
+export function runAction(actionId: string, path: string, elevated = false): Promise<void> {
+  return invoke<void>("run_action", { actionId, path, elevated });
 }
 
 export function hideOverlay(): Promise<void> {
@@ -300,13 +301,15 @@ export function rescanApps(): Promise<AppListPayload> {
   return invoke<AppListPayload>("rescan_apps");
 }
 
-/** Launch an installed app (bumps its frecency count). */
-export function runApp(e: AppEntry): Promise<void> {
+/** Launch an installed app (bumps its frecency count) — `elevated`: Run as
+ *  administrator, for a Windows desktop app (`kind: "exe"`). */
+export function runApp(e: AppEntry, elevated = false): Promise<void> {
   return invoke<void>("run_app", {
     exec: e.exec,
     kind: e.kind,
     args: e.args ?? null,
     terminal: e.terminal ?? null,
+    elevated,
   });
 }
 

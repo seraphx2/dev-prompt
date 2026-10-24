@@ -159,6 +159,8 @@ export interface Action {
   provision?: boolean;
   /** Opens the "Move to Recycle Bin / Trash" confirmation instead of running. */
   remove?: boolean;
+  /** It can also run as administrator (Windows) / root (Linux): Shift. */
+  elevated?: boolean;
 }
 
 /** A row in the action menu — a runnable action, or a drill-in to a

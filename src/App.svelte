@@ -295,13 +295,14 @@
     mode = "new-repo";
   }
 
-  function runQuickAction(action: Action) {
+  /** `elevated`: Shift was held — as administrator / root, if the action can be. */
+  function runQuickAction(action: Action, elevated = false) {
     if (action.provision) {
       openSetup();
     } else if (action.prompt) {
       if (activeRepo) openShell(activeRepo, action);
     } else if (activeRepo) {
-      execute(action, activeRepo.repo.path);
+      execute(action, activeRepo.repo.path, elevated && !!action.elevated);
     }
   }
 
@@ -471,7 +472,7 @@
     actionSel = 0;
   });
 
-  function activateMenuItem(i: number) {
+  function activateMenuItem(i: number, elevated = false) {
     const it = menuItems[i];
     if (!it || it.kind === "loading") return;
     if (it.kind === "submenu") {
@@ -487,7 +488,7 @@
     } else if (it.action.prompt) {
       if (activeRepo) openShell(activeRepo, it.action);
     } else if (activeRepo) {
-      execute(it.action, activeRepo.repo.path);
+      execute(it.action, activeRepo.repo.path, elevated && !!it.action.elevated);
     }
   }
 
@@ -647,11 +648,35 @@
   }
 
   // Footer key hints, per screen. `[key, description]`.
-  const hints = $derived<[string, string][]>(
+  /** Shift is down: an elevatable selection runs as administrator / root,
+   *  and its label says so. Cleared on any blur, so a Shift released while
+   *  another window had focus can't stick. */
+  let shiftHeld = $state(false);
+  const adminWord = document.documentElement.dataset.os === "windows" ? "administrator" : "root";
+  /** Run as administrator applies to a Windows desktop app, not a Store app. */
+  const appElevatable = (app: AppEntry) => app.kind === "exe";
+  /** What Shift would promote right now, if anything — drives the footer hint. */
+  const canElevate = $derived(
+    mode === "action-menu"
+      ? (() => {
+          const it = menuItems[actionSel];
+          return it?.kind === "action" && !!it.action.elevated;
+        })()
+      : mode === "repo-list" && appScope
+        ? !!filteredApps[selected] && appElevatable(filteredApps[selected].app)
+        : false,
+  );
+  const shiftHint = $derived<[string, string, boolean][]>(
+    canElevate ? [["Shift", `as ${adminWord === "root" ? "root" : "admin"}`, shiftHeld]] : [],
+  );
+
+  const hints = $derived<[string, string, boolean?][]>(
     mode === "repo-list" && appScope
       ? [
           ["Up/Down", "move"],
           ["Enter", "launch"],
+          ...shiftHint,
+          ["Tab", "more"],
           ["Esc", "close"],
         ]
       : mode === "repo-list" && shellScope
@@ -693,6 +718,7 @@
           : [
               ["Up/Down", "move"],
               ["Enter", "run"],
+              ...shiftHint,
               ...(removeAction ? [["Ctrl+Del", binWord.toLowerCase()] as [string, string]] : []),
               ["Esc", "back"],
             ],
@@ -1034,14 +1060,14 @@
 
   let running = false;
 
-  async function execute(action: Action, repoPath: string) {
+  async function execute(action: Action, repoPath: string, elevated = false) {
     if (running) return; // guard against a double-click spawning twice
     running = true;
     try {
       if (action.clientSide) {
         if (action.id === "copy-path") await copyPath(repoPath);
       } else {
-        await runAction(action.id, repoPath);
+        await runAction(action.id, repoPath, elevated);
       }
       await dismissAfterLaunch();
       // Pinned open: reset the menu so the next action in this repo is one keypress.
@@ -1056,11 +1082,11 @@
     }
   }
 
-  async function runAppAndHide(app: AppEntry) {
+  async function runAppAndHide(app: AppEntry, elevated = false) {
     if (running) return;
     running = true;
     try {
-      await runApp(app);
+      await runApp(app, elevated && appElevatable(app));
       await dismissAfterLaunch();
     } catch (e) {
       appStatus = `Launch failed: ${e}`;
@@ -1085,11 +1111,19 @@
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       selected = Math.max(selected - 1, 0);
+    } else if (e.key === "Tab" && appScope && !e.shiftKey) {
+      // The right-click menu from the keyboard, under the selected app.
+      e.preventDefault();
+      const hit = filteredApps[selected];
+      const row = document.querySelector(`[data-idx="${selected}"]`)?.getBoundingClientRect();
+      if (hit && row) {
+        openAppMenu(new MouseEvent("contextmenu", { clientX: row.left + 40, clientY: row.bottom }), hit.app);
+      }
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (appScope) {
         const hit = filteredApps[selected];
-        if (hit) runAppAndHide(hit.app);
+        if (hit) runAppAndHide(hit.app, e.shiftKey);
       } else if (shellScope) {
         const hit = filteredShells[selected];
         if (hit) resumeShell(hit.session);
@@ -1139,13 +1173,15 @@
       if (activeRepo) openBranches(activeRepo, false);
       return;
     }
-    if (e.ctrlKey && !e.altKey && !e.shiftKey) {
+    // A quick action's key; with Shift too, as administrator / root where the
+    // action can be (Ctrl+Shift+T), and as itself where it can't.
+    if (e.ctrlKey && !e.altKey) {
       const hit = quickActions.find(
         (q) => q.key.toLowerCase() === `ctrl+${e.key.toLowerCase()}`,
       );
       if (hit) {
         e.preventDefault();
-        runQuickAction(hit.action);
+        runQuickAction(hit.action, e.shiftKey);
         return;
       }
     }
@@ -1157,7 +1193,7 @@
       actionSel = Math.max(actionSel - 1, 0);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      activateMenuItem(actionSel);
+      activateMenuItem(actionSel, e.shiftKey);
     } else if (e.key === "Tab") {
       // Tab goes "forward" — into a sub-project, if one is selected.
       e.preventDefault();
@@ -1329,6 +1365,14 @@
       if (setup) out.push({ kind: "separator" }, item(setup));
       const quick = acts.filter((a) => a.hotkey);
       if (quick.length) out.push({ kind: "separator" }, ...quick.map(item));
+      for (const a of quick.filter((a) => a.elevated)) {
+        out.push({
+          kind: "item",
+          label: `${a.label} as ${adminWord}`,
+          icon: "shield",
+          run: () => void execute(a, entry.repo.path, true),
+        });
+      }
       const used = acts
         .filter((a) => !a.hotkey && !a.provision && !a.remove && a.usageScore > 0)
         .sort((a, b) => b.usageScore - a.usageScore)
@@ -1350,6 +1394,9 @@
       { kind: "header", label: app.name },
       { kind: "item", label: "Launch", icon: "run", run: () => void runAppAndHide(app) },
     ];
+    if (appElevatable(app)) {
+      items.push({ kind: "item", label: `Run as ${adminWord}`, icon: "shield", run: () => void runAppAndHide(app, true) });
+    }
     // Only a real executable has a folder and a path worth copying.
     if (app.kind === "exe") {
       items.push(
@@ -1406,6 +1453,9 @@
         run: () => activateMenuItem(i),
       },
     ];
+    if (a.elevated) {
+      items.push({ kind: "item", label: `Run as ${adminWord}`, icon: "shield", run: () => activateMenuItem(i, true) });
+    }
     // `hint` is the resolved command line, except for the form-opening and
     // frontend-only actions, and a bare terminal (whose hint is just a label).
     if (a.hint && !a.clientSide && !a.prompt && !a.provision && !a.remove && a.hint !== "terminal") {
@@ -1424,6 +1474,7 @@
   // returning from the action menu). Character keys fall through to the focused
   // search input untouched.
   function onWindowKeydown(e: KeyboardEvent) {
+    shiftHeld = e.shiftKey;
     // Zoom works on every screen, the built-in shell included (it lets these
     // keys through — see shellKeys.ts).
     const z = zoomKey(e);
@@ -1615,6 +1666,8 @@
 
 <svelte:window
   onkeydown={onWindowKeydown}
+  onkeyup={(e) => (shiftHeld = e.shiftKey)}
+  onblur={() => (shiftHeld = false)}
   oncontextmenu={onWindowContextMenu}
   onmousedown={onWindowMouse}
   onmouseup={(e) => {
@@ -1668,11 +1721,13 @@
       <AppList
         entries={filteredApps}
         {selected}
+        shift={shiftHeld}
+        {adminWord}
         scanning={appsScanning}
         onselect={(i) => (selected = i)}
-        onactivate={(i) => {
+        onactivate={(i, e) => {
           selected = i;
-          if (filteredApps[i]) runAppAndHide(filteredApps[i].app);
+          if (filteredApps[i]) runAppAndHide(filteredApps[i].app, e?.shiftKey);
         }}
         oncontext={(i, e) => {
           selected = i;
@@ -1727,8 +1782,10 @@
       bind:filter={actionQuery}
       selected={actionSel}
       onselect={(i) => (actionSel = i)}
-      onrun={(i) => activateMenuItem(i)}
-      onquickaction={runQuickAction}
+      onrun={(i, e) => activateMenuItem(i, e?.shiftKey)}
+      onquickaction={(a, e) => runQuickAction(a, e?.shiftKey)}
+      shift={shiftHeld}
+      {adminWord}
       onback={menuBack}
       oncontext={(i, e) => openActionRowMenu(e, i)}
     />
@@ -1901,8 +1958,8 @@
       {/if}
     </span>
     <span class="flex shrink-0 items-center gap-3.5">
-      {#each hints as [key, label] (label)}
-        <span class="inline-flex items-center gap-1"><kbd>{key}</kbd>{label}</span>
+      {#each hints as [key, label, lit] (label)}
+        <span class="inline-flex items-center gap-1 {lit ? 'text-sky-300' : ''}"><kbd>{key}</kbd>{label}</span>
       {/each}
       {#if upd.info && mode !== "settings"}
         <button

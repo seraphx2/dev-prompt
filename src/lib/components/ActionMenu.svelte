@@ -26,6 +26,8 @@
     onbranches,
     onremove,
     binWord = "Recycle",
+    shift = false,
+    adminWord = "administrator",
   }: {
     repoName: string;
     /** Sub-project name when drilled into one, else null. */
@@ -37,8 +39,9 @@
     filter: string;
     selected: number;
     onselect: (i: number) => void;
-    onrun: (i: number) => void;
-    onquickaction: (action: Action) => void;
+    /** `e` carries Shift: as administrator / root, where the action can be. */
+    onrun: (i: number, e?: MouseEvent) => void;
+    onquickaction: (action: Action, e?: MouseEvent) => void;
     onback: () => void;
     /** Row right-clicked -> its context menu. */
     oncontext?: (i: number, e: MouseEvent) => void;
@@ -51,6 +54,11 @@
     onremove?: () => void;
     /** "Recycle" (Windows) or "Trash" (Linux), for the header button. */
     binWord?: string;
+    /** Shift is held: the selected row and the quick actions that can run
+     *  elevated say so. */
+    shift?: boolean;
+    /** "administrator" (Windows) or "root" (Linux). */
+    adminWord?: string;
   } = $props();
 
   const head = $derived(headLabel(status));
@@ -176,10 +184,11 @@
         type="button"
         class="flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5
                text-[13px] text-white/70 transition-colors hover:bg-white/6 hover:text-white/90"
-        onclick={() => onquickaction(qa.action)}
+        onclick={(e) => onquickaction(qa.action, e)}
       >
         <kbd>{qa.key}</kbd>
         <span class="truncate">{qa.action.label}</span>
+        {#if shift && qa.action.elevated}{@render shield()}{/if}
       </button>
     {/each}
   </div>
@@ -204,7 +213,7 @@
           : i === selected
             ? 'bg-white/10'
             : 'hover:bg-white/4'}"
-        onclick={() => onrun(i)}
+        onclick={(e) => onrun(i, e)}
         oncontextmenu={(e) => oncontext?.(i, e)}
         onpointermove={() => {
           // Not `pointerenter` — see ResultRow: rows reshuffling under a
@@ -275,6 +284,9 @@
             class="flex-1 truncate text-[13px] {item.action.remove ? 'text-red-300' : 'text-white/90'}"
           >
             <Highlight text={item.action.label} indices={item.positions} />
+            {#if shift && i === selected && item.action.elevated}
+              {" "}<span class="text-sky-300">as {adminWord}</span>{@render shield()}
+            {/if}
           </span>
           <span
             class="shrink-0 overflow-hidden whitespace-nowrap font-mono text-[11px] text-white/50"
@@ -285,6 +297,12 @@
     {/each}
   {/if}
 </div>
+
+{#snippet shield()}
+  <svg class="ml-1 inline h-3.5 w-3.5 shrink-0 align-[-2px]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    {@html icons.shield.raw}
+  </svg>
+{/snippet}
 
 <style>
   /* Key hints: bright key-cap, dim descriptive label — matches the footer. */

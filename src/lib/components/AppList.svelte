@@ -9,15 +9,21 @@
     onselect,
     onactivate,
     oncontext,
+    shift = false,
+    adminWord = "administrator",
   }: {
     entries: { app: AppEntry; positions: number[] }[];
     selected: number;
     /** True while a background enumeration is running and the list is empty. */
     scanning?: boolean;
     onselect: (i: number) => void;
-    onactivate: (i: number) => void;
+    /** `e` carries Shift: Run as administrator, where the app can be. */
+    onactivate: (i: number, e?: MouseEvent) => void;
     /** Row right-clicked -> its context menu. */
     oncontext?: (i: number, e: MouseEvent) => void;
+    /** Shift is held: the selected row says it will run as administrator. */
+    shift?: boolean;
+    adminWord?: string;
   } = $props();
 
   let container: HTMLDivElement | undefined = $state();
@@ -54,7 +60,9 @@
           app={e.app}
           positions={e.positions}
           active={i === selected}
-          onactivate={() => onactivate(i)}
+          elevating={shift && i === selected && e.app.kind === "exe"}
+          {adminWord}
+          onactivate={(ev) => onactivate(i, ev)}
           onhover={() => {
             if (i !== selected) skipScroll = true;
             onselect(i);

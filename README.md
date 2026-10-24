@@ -289,8 +289,10 @@ why, and how to add it anyway.
 | -------- | ---------------------------------------------------- |
 | type     | filter actions (reaches into sub-projects)           |
 | `Enter`  | run the selected action, or drill into a sub-project |
+| `Shift+Enter` | run it as administrator (Windows) / root (Linux), where it can be |
 | `Tab`    | drill into the selected sub-project                  |
 | `Ctrl+T` | open in your terminal app                            |
+| `Ctrl+Shift+T` | the same, as administrator / root               |
 | `Ctrl+E` | show in your file manager                            |
 | `Ctrl+C` | copy the path                                        |
 | `Ctrl+R` | open a shell in the overlay (see below)              |
@@ -299,6 +301,17 @@ why, and how to add it anyway.
 | `Esc`    | step back one level (sub-project → menu → repo list) |
 
 The four quick actions also sit as buttons along the top of the menu.
+
+**Shift runs it as administrator.** On Windows, anything that opens a
+terminal (the terminal itself, a script, a build) runs elevated with Shift:
+Windows asks with its usual prompt, and the terminal opens in the repo. On
+Linux, Shift opens the terminal with a root shell (`sudo -s`, or `doas -s`);
+a project's own commands don't run as root there, since that leaves files in
+the repo only root can change. Hold Shift to see it: the footer shows the
+hint when the selected action can be elevated, and the action's name says
+"as administrator". Right-click offers the same. In the `>` app list,
+`Shift+Enter` is Run as administrator for desktop apps, and `Tab` opens the
+same menu as a right-click.
 
 <img src="docs/img/8_dev-prompt_attention.png" width="760" alt="The ! list: only the repos that need attention — a rebase stopped on a conflict, uncommitted and unpushed work, a branch behind its upstream, stashes">
 
