@@ -51,6 +51,10 @@ const BRAND = {
   go: "go",
   python: "python",
   node: "nodedotjs",
+  // Task runners (the make / just / task providers).
+  make: "make",
+  just: "just",
+  task: "task",
   npm: "npm",
   pnpm: "pnpm",
   yarn: "yarn",

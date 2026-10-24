@@ -30,6 +30,10 @@ const BY_FILE: [string[], string, string][] = [
   [["mix.exs"], "elixir", "Elixir"],
   [["pubspec.yaml"], "dart", "Dart / Flutter"],
   [["flake.nix", "shell.nix"], "nix", "Nix"],
+  // Task runners: a repo can have both `Makefile` and `makefile` — one icon.
+  [["Makefile", "makefile", "GNUmakefile"], "make", "Make"],
+  [["justfile", "Justfile", ".justfile"], "just", "just"],
+  [["Taskfile.yml", "taskfile.yml", "Taskfile.yaml", "taskfile.yaml", "Taskfile.dist.yml", "taskfile.dist.yml", "Taskfile.dist.yaml", "taskfile.dist.yaml"], "task", "Task"],
   [[".project", "mule-artifact.json"], "eclipse", "Eclipse"],
   [["code-workspace"], "vscode", "VS Code workspace"],
   // A second version control in the same folder — jj colocated with Git.
@@ -44,7 +48,8 @@ export function ecosystems(sentinels: string[]): { icons: Ecosystem[]; others: s
   for (const file of sentinels) {
     const hit = BY_FILE.find(([files]) => files.some((f) => f.toLowerCase() === file.toLowerCase()));
     if (!hit) {
-      others.push(file);
+      // One chip per name, whatever its case (`Notes.md` and `notes.md`).
+      if (!others.some((o) => o.toLowerCase() === file.toLowerCase())) others.push(file);
       continue;
     }
     const [, icon, name] = hit;
