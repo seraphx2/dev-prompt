@@ -476,6 +476,9 @@ Issues and PRs welcome. Adding support for an editor or build tool is usually
 just data in `default_config.yaml` — no Rust. See
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+If dev-prompt saves you time, you can support it through
+[GitHub Sponsors](https://github.com/sponsors/seraphx2).
+
 ## Project layout
 
 ```

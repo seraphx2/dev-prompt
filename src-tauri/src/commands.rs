@@ -1734,6 +1734,12 @@ pub fn open_releases_page(window: tauri::WebviewWindow) -> AppResult<()> {
     )
 }
 
+/// Open the GitHub Sponsors page in the user's browser (Settings ▸ About).
+#[tauri::command]
+pub fn open_sponsors_page(window: tauri::WebviewWindow) -> AppResult<()> {
+    open_with_os_handler(&window, std::ffi::OsStr::new("https://github.com/sponsors/seraphx2"))
+}
+
 /// Folder holding the running executable, shared by `open_install_dir` and
 /// `system_paths` so they can't report inconsistent install paths.
 fn install_dir() -> AppResult<std::path::PathBuf> {

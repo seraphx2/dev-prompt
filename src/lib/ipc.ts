@@ -348,6 +348,11 @@ export function openReleasesPage(): Promise<void> {
   return invoke<void>("open_releases_page");
 }
 
+/** Open the GitHub Sponsors page in the default browser. */
+export function openSponsorsPage(): Promise<void> {
+  return invoke<void>("open_sponsors_page");
+}
+
 /** Open the folder holding the running executable. */
 export function openInstallDir(): Promise<void> {
   return invoke<void>("open_install_dir");

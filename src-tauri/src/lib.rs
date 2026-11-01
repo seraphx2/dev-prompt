@@ -548,6 +548,7 @@ pub fn run() {
             commands::show_folder,
             commands::open_rules_file,
             commands::open_releases_page,
+            commands::open_sponsors_page,
             commands::open_install_dir,
             commands::open_config_dir,
             commands::open_cache_dir,

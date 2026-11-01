@@ -5,6 +5,7 @@
     openConfigDir,
     openInstallDir,
     openReleasesPage,
+    openSponsorsPage,
     systemPaths,
   } from "../../ipc";
   import type { SystemPaths } from "../../types";
@@ -67,9 +68,18 @@
 </script>
 
 <div class="space-y-2">
-  <p class="text-[13px] text-white/80">
-    dev-prompt {#if upd.current}<span class="font-mono text-sky-300">v{upd.current}</span>{/if}
-  </p>
+  <div class="flex items-baseline justify-between gap-3">
+    <p class="text-[13px] text-white/80">
+      dev-prompt {#if upd.current}<span class="font-mono text-sky-300">v{upd.current}</span>{/if}
+    </p>
+    <button
+      type="button"
+      onclick={() => openSponsorsPage().catch((e) => note(`Could not open the Sponsors page: ${e}`, true))}
+      class="shrink-0 text-[11px] text-sky-300/70 hover:text-sky-300 hover:underline"
+    >
+      Sponsor dev-prompt ↗
+    </button>
+  </div>
 
   {#if upd.info}
     <div class="flex items-center gap-3 rounded-sm border border-sky-400/40 bg-sky-500/8 px-3 py-2">
